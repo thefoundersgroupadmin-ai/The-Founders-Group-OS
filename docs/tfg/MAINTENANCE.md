@@ -66,7 +66,7 @@ with separate databases. Never put two companies in one database.
 | Symptom | Fix |
 |---|---|
 | Brain shows offline | Ollama is not running or the model is missing: `ollama serve`, `ollama pull nomic-embed-text`. |
-| Agents view says "runtime unavailable" | Workspaces were created after the backend started: `make dev-local-restart`. |
+| Running an agent says "runtime unavailable" | Workspaces were created after the backend started: `make dev-local-restart`. |
 | "This OS isn't set up for this account" | Run `make tfg OWNER=<that account's email>` (or `make client`). |
 | Funnel says "not live yet" | No lead source connected. Add Typeform, Calendar, Fathom or Stripe keys. |
 | A connector stays in `error` | Its key expired or lacks a permission. The Connections card says which. |

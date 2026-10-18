@@ -7,7 +7,10 @@
 // Idempotent: a re-run reports zero changes (apart from the day's date shift)
 // and ingests zero pages.
 //
-//	founderos-seed [--database-url postgres://...] [--report-dir .] [--skip-brain]
+//	founderos-seed [--database-url postgres://...] [--report-dir .] [--skip-brain] [--profile demo|tfg]
+//
+// --profile tfg (default $FOUNDEROS_SEED_PROFILE, else demo) loads The Founders
+// Group's starting data instead of the demo operator (seed/tfg, seed/tfgbrain).
 package main
 
 import (
@@ -30,6 +33,11 @@ func main() {
 	dbURL := flag.String("database-url", os.Getenv("DATABASE_URL"), "target Postgres URL (default $DATABASE_URL, else desktop/backend-go/.env)")
 	reportDir := flag.String("report-dir", os.TempDir(), "where to write the JSON + markdown load report")
 	skipBrain := flag.Bool("skip-brain", false, "load Postgres only; do not import the knowledge pages into the Optimal Engine")
+	defProfile := os.Getenv("FOUNDEROS_SEED_PROFILE")
+	if defProfile == "" {
+		defProfile = "demo"
+	}
+	profile := flag.String("profile", defProfile, "data set to load: demo (upstream demo operator) or tfg (The Founders Group)")
 	flag.Parse()
 	if *dbURL == "" {
 		*dbURL = backendEnv("DATABASE_URL")
@@ -41,7 +49,7 @@ func main() {
 	src, err := os.MkdirTemp("", "founderos-seed-")
 	must(err)
 	defer os.RemoveAll(src)
-	must(seed.Materialize(src, time.Now()))
+	must(seed.MaterializeProfile(src, time.Now(), *profile))
 
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
 	defer cancel()
@@ -53,7 +61,7 @@ func main() {
 		From:          src,
 		WorkspaceMap:  map[string]string{"personal-brand": "personal"},
 		EncryptionKey: os.Getenv("TOKEN_ENCRYPTION_KEY"),
-		DatabaseLabel: "founderos demo seed",
+		DatabaseLabel: "founderos " + *profile + " seed",
 	})
 	if rep != nil {
 		if jp, _, werr := rep.Write(*reportDir, "founderos-seed-report"); werr == nil {
@@ -74,7 +82,7 @@ func main() {
 		fmt.Println("brain: skipped, no Optimal Engine URL (set OPTIMAL_ENGINE_URL)")
 		return
 	}
-	brep, err := seed.SeedBrain(topo, engines)
+	brep, err := seed.SeedBrainProfile(topo, engines, *profile)
 	if brep != nil {
 		fmt.Printf("brain: %d pages, ingested %d, already in the engine %d, too short %d, errors %d\n",
 			brep.Planned, brep.Ingested, brep.Landed, brep.Skipped, len(brep.Errors))

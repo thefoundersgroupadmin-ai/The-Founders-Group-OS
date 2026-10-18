@@ -2,9 +2,11 @@ package seed
 
 import (
 	"embed"
+	"fmt"
 	"io/fs"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/rhl/businessos-backend/internal/founderos/brainimport"
 	"github.com/rhl/businessos-backend/internal/founderos/topology"
@@ -17,33 +19,66 @@ import (
 // Engine ("the Brain"), so tools/gbrain.md ships as tools/optimal-engine.md
 // (with the engine's own one-line description).
 //
-//go:embed brain
+//go:embed brain tfgbrain
 var brainFS embed.FS
+
+// tfgDropped are demo pages about the demo operator's people; the tfg
+// profile replaces them with tfgbrain/.
+func tfgDropped(rel string) bool {
+	rel = filepath.ToSlash(rel)
+	if strings.HasPrefix(rel, "people/") {
+		return true
+	}
+	for _, p := range []string{"sops/sop-dana.md", "sops/sop-marco.md", "sops/sop-mia.md", "sops/sop-nadia.md", "sops/sop-sasha.md"} {
+		if rel == p {
+			return true
+		}
+	}
+	return false
+}
 
 // BrainDocs is how many knowledge pages the demo ships.
 const BrainDocs = 114
 
 // MaterializeBrain writes the knowledge pages into dir as a brain-store
 // (agents/, sops/, tools/, people/, org/) and returns how many it wrote.
-func MaterializeBrain(dir string) (int, error) {
+func MaterializeBrain(dir string) (int, error) { return MaterializeBrainProfile(dir, "demo") }
+
+// MaterializeBrainProfile is MaterializeBrain for a seed profile: "tfg" drops
+// the demo people pages and adds The Founders Group's pages (tfgbrain/).
+func MaterializeBrainProfile(dir, profile string) (int, error) {
 	n := 0
-	err := fs.WalkDir(brainFS, "brain", func(p string, d fs.DirEntry, err error) error {
-		if err != nil || d.IsDir() {
-			return err
+	copyTree := func(root string, skip func(string) bool) error {
+		return fs.WalkDir(brainFS, root, func(p string, d fs.DirEntry, err error) error {
+			if err != nil || d.IsDir() {
+				return err
+			}
+			rel, _ := filepath.Rel(root, filepath.FromSlash(p))
+			if skip != nil && skip(rel) {
+				return nil
+			}
+			raw, err := brainFS.ReadFile(p)
+			if err != nil {
+				return err
+			}
+			out := filepath.Join(dir, rel)
+			if err := os.MkdirAll(filepath.Dir(out), 0o755); err != nil {
+				return err
+			}
+			n++
+			return os.WriteFile(out, raw, 0o644)
+		})
+	}
+	switch profile {
+	case "demo":
+		return n, copyTree("brain", nil)
+	case "tfg":
+		if err := copyTree("brain", tfgDropped); err != nil {
+			return n, err
 		}
-		raw, err := brainFS.ReadFile(p)
-		if err != nil {
-			return err
-		}
-		rel, _ := filepath.Rel("brain", filepath.FromSlash(p))
-		out := filepath.Join(dir, rel)
-		if err := os.MkdirAll(filepath.Dir(out), 0o755); err != nil {
-			return err
-		}
-		n++
-		return os.WriteFile(out, raw, 0o644)
-	})
-	return n, err
+		return n, copyTree("tfgbrain", nil)
+	}
+	return 0, fmt.Errorf("seed: unknown profile %q", profile)
 }
 
 // BrainReport is what one SeedBrain run did.
@@ -61,13 +96,18 @@ type BrainReport struct {
 // so the wikilinks become graph edges, and sends only the pages the engine
 // does not already hold: a re-run ingests nothing.
 func SeedBrain(topo *topology.Topology, engines map[string]brainimport.Endpoint) (*BrainReport, error) {
+	return SeedBrainProfile(topo, engines, "demo")
+}
+
+// SeedBrainProfile is SeedBrain for a seed profile (see MaterializeBrainProfile).
+func SeedBrainProfile(topo *topology.Topology, engines map[string]brainimport.Endpoint, profile string) (*BrainReport, error) {
 	dir, err := os.MkdirTemp("", "founderos-brain-")
 	if err != nil {
 		return nil, err
 	}
 	defer os.RemoveAll(dir)
 	store := filepath.Join(dir, "store")
-	if _, err := MaterializeBrain(store); err != nil {
+	if _, err := MaterializeBrainProfile(store, profile); err != nil {
 		return nil, err
 	}
 	items, skipped, err := brainimport.Plan(store, topo)

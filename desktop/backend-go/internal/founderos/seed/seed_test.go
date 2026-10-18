@@ -127,3 +127,42 @@ func TestDemoFixturesNeverMentionGBrain(t *testing.T) {
 		t.Fatalf("demo data still mentions %q", m)
 	}
 }
+
+func TestTFGProfileReplacesTheDemoOperatorWithTheTFGTeam(t *testing.T) {
+	dir := t.TempDir()
+	if err := MaterializeProfile(dir, day("2026-10-18"), "tfg"); err != nil {
+		t.Fatal(err)
+	}
+	db := open(t, filepath.Join(dir, "founderos-os.db"))
+	if n := scalar[int](t, db, `SELECT COUNT(*) FROM people`); n != 3 {
+		t.Fatalf("people = %d, want Nader, Ilya, Karim", n)
+	}
+	for _, q := range []string{
+		`SELECT COUNT(*) FROM funnel_contacts`, `SELECT COUNT(*) FROM agent_runs`,
+		`SELECT COUNT(*) FROM social_snapshots`, `SELECT COUNT(*) FROM trading_positions`,
+		`SELECT COUNT(*) FROM tools WHERE status = 'connected'`,
+	} {
+		if n := scalar[int](t, db, q); n != 0 {
+			t.Errorf("%s = %d: TFG starts with no invented records", q, n)
+		}
+	}
+	if n := scalar[int](t, db, `SELECT COUNT(*) FROM agents WHERE id LIKE 'tfg-%' AND status = 'active'`); n != 3 {
+		t.Fatalf("tfg agents = %d", n)
+	}
+	if n := scalar[int](t, db, `SELECT COUNT(*) FROM agent_crons WHERE agent_id LIKE 'tfg-%' AND enabled = 1`); n != 3 {
+		t.Fatalf("tfg crons = %d", n)
+	}
+	for _, f := range []string{"bank", "ledger", "paykit"} {
+		side := open(t, filepath.Join(dir, f+".db"))
+		var table string
+		if err := side.QueryRow(`SELECT name FROM sqlite_master WHERE type='table' LIMIT 1`).Scan(&table); err != nil {
+			t.Fatal(err)
+		}
+		if n := scalar[int](t, side, `SELECT COUNT(*) FROM "`+table+`"`); n != 0 {
+			t.Errorf("%s.%s has %d demo rows", f, table, n)
+		}
+	}
+	if err := MaterializeProfile(t.TempDir(), day("2026-10-18"), "nope"); err == nil {
+		t.Fatal("unknown profile should fail")
+	}
+}

@@ -11,6 +11,7 @@ import (
 	"github.com/rhl/businessos-backend/internal/founderos/agents/roster/comms"
 	"github.com/rhl/businessos-backend/internal/founderos/agents/roster/sales"
 	"github.com/rhl/businessos-backend/internal/founderos/agents/roster/tech"
+	"github.com/rhl/businessos-backend/internal/founderos/agents/roster/tfg"
 	"github.com/rhl/businessos-backend/internal/founderos/memory"
 	"github.com/rhl/businessos-backend/internal/founderos/topology"
 )
@@ -21,6 +22,7 @@ var rosterGroups = []func(roster.Deps) []agents.Agent{
 	comms.Agents,
 	tech.Agents,
 	sales.Agents,
+	tfg.Agents, // The Founders Group's AI SDR layer
 }
 
 // AllAgents is the bridge's agent roster: one implementation per the operator

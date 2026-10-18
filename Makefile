@@ -254,6 +254,20 @@ urls: ## Print service URLs
 
 # ── FounderOS demo: workspaces + dummy data ─────────────────────────────────
 .PHONY: demo
+.PHONY: tfg tfg-brand tfg-check
+tfg: ## The Founders Group: brand files, workspaces and TFG starting data (OWNER=<email you registered with>)
+	@test -n "$(OWNER)" || { echo "usage: make tfg OWNER=<the email you registered with at /register>"; exit 2; }
+	@python3 scripts/tfg-brand.py --check
+	@cd desktop/backend-go && go run ./cmd/founderos-bootstrap -owner-email "$(OWNER)" && go run ./cmd/founderos-seed --profile tfg
+
+tfg-brand: ## Regenerate brand files after editing config/tfg/brand.yaml (BRAND=<path> for a client)
+	@python3 scripts/tfg-brand.py --brand "$(or $(BRAND),config/tfg/brand.yaml)"
+
+tfg-check: ## TFG gates: brand files current, Go + frontend tests, svelte-check
+	@python3 scripts/tfg-brand.py --check
+	@cd desktop/backend-go && go test ./internal/founderos/... ./cmd/...
+	@cd frontend && npx vitest run src/lib/founderos "src/routes/(founderos)" && npx svelte-check --threshold error
+
 demo: ## Create the FounderOS workspaces and load the demo data (OWNER=<email you registered with>)
 	@test -n "$(OWNER)" || { echo "usage: make demo OWNER=<the email you registered with at /register>"; exit 2; }
 	@cd desktop/backend-go && go run ./cmd/founderos-bootstrap -owner-email "$(OWNER)" && go run ./cmd/founderos-seed

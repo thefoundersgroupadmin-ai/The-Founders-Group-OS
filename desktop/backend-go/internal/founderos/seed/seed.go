@@ -13,8 +13,13 @@ import (
 	_ "modernc.org/sqlite"
 )
 
-//go:embed demo/*.sql
+//go:embed demo/*.sql tfg/*.sql
 var demoFS embed.FS
+
+// Profiles are the data sets a seed can load: "demo" is upstream's demo
+// operator; "tfg" is The Founders Group (seed/tfg/*.sql applied on top of the
+// demo schema: demo records removed, TFG team, agents, SOPs and roadmap in).
+var Profiles = []string{"demo", "tfg"}
 
 // DumpedOn is the day the fixtures were captured from v1's seed.
 const DumpedOn = "2026-10-09"
@@ -38,6 +43,17 @@ var relative = []struct {
 // Materialize writes <name>.db for every demo database into dir, with the
 // relative dates shifted to now.
 func Materialize(dir string, now time.Time) error {
+	return MaterializeProfile(dir, now, "demo")
+}
+
+// MaterializeProfile is Materialize for a profile: for "tfg", each database's
+// seed/tfg/<name>.sql overlay runs after the demo dump.
+func MaterializeProfile(dir string, now time.Time, profile string) error {
+	switch profile {
+	case "demo", "tfg":
+	default:
+		return fmt.Errorf("seed: unknown profile %q (want one of %v)", profile, Profiles)
+	}
 	dumped, err := time.Parse("2006-01-02", DumpedOn)
 	if err != nil {
 		return err
@@ -47,6 +63,13 @@ func Materialize(dir string, now time.Time) error {
 		dump, err := demoFS.ReadFile("demo/" + name + ".sql")
 		if err != nil {
 			return err
+		}
+		if profile == "tfg" {
+			overlay, err := demoFS.ReadFile("tfg/" + name + ".sql")
+			if err != nil {
+				return fmt.Errorf("%s: tfg overlay: %w", name, err)
+			}
+			dump = append(append(dump, '\n'), overlay...)
 		}
 		if err := materialize(filepath.Join(dir, name+".db"), string(dump), days); err != nil {
 			return fmt.Errorf("%s: %w", name, err)

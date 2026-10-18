@@ -24,6 +24,8 @@ var founderosOSAgents = []string{
 	"vantage-paykit", "stripe-sales", "processor-confirmation", "flexpay-financing", "sales-calls-data",
 	"data-agent", "markdown-auditor", "vector-auditor", "payments-pulse", "crm-pulse", "client-roster",
 	"client-onboarding", "client-success", "stack-monitor",
+	// The Founders Group's agents (seed/tfg/founderos-os.sql rows).
+	"tfg-pipeline-sdr", "tfg-crm-hygiene", "tfg-impact-reporter",
 }
 
 func TestRosterMapsOneToOneOntoFounderosOSAgents(t *testing.T) {
@@ -69,8 +71,14 @@ func TestRosterMetasAreTheSeededAgentRows(t *testing.T) {
 	re := regexp.MustCompile(`INSERT INTO agents VALUES\(` + strings.Repeat(lit+`,`, 2) + lit)
 	unq := func(s string) string { return strings.ReplaceAll(s, "''", "'") }
 	seeded := map[string]agents.Meta{}
-	for _, m := range re.FindAllStringSubmatch(string(raw), -1) {
-		seeded[m[1]] = agents.Meta{ID: unq(m[1]), DepartmentID: unq(m[2]), Name: unq(m[3])}
+	tfgRows, err := os.ReadFile("../seed/tfg/founderos-os.sql")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, src := range []string{string(raw), string(tfgRows)} {
+		for _, m := range re.FindAllStringSubmatch(src, -1) {
+			seeded[m[1]] = agents.Meta{ID: unq(m[1]), DepartmentID: unq(m[2]), Name: unq(m[3])}
+		}
 	}
 	if len(seeded) != len(founderosOSAgents) {
 		t.Fatalf("seed has %d agent rows, real.ts registers %d", len(seeded), len(founderosOSAgents))

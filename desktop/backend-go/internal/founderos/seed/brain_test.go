@@ -164,3 +164,27 @@ func TestSeedBrainImportsOnceIntoHQ(t *testing.T) {
 		t.Fatalf("re-run sent %d more pages", eng.ingests-first.Ingested)
 	}
 }
+
+func TestTFGBrainSwapsTheDemoPeopleForTheTFGTeam(t *testing.T) {
+	dir := t.TempDir()
+	n, err := MaterializeBrainProfile(dir, "tfg")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, p := range []string{"people/person-nader.md", "people/person-ilya.md", "people/person-karim.md", "agents/tfg-pipeline-sdr.md", "org/tfg-transparency.md"} {
+		if _, err := os.Stat(filepath.Join(dir, p)); err != nil {
+			t.Errorf("missing %s", p)
+		}
+	}
+	for _, p := range []string{"people/person-marco.md", "sops/sop-mia.md"} {
+		if _, err := os.Stat(filepath.Join(dir, p)); err == nil {
+			t.Errorf("demo page %s should be dropped", p)
+		}
+	}
+	if n <= BrainDocs-10 {
+		t.Fatalf("tfg brain has %d pages", n)
+	}
+	if _, err := MaterializeBrainProfile(t.TempDir(), "nope"); err == nil {
+		t.Fatal("unknown profile")
+	}
+}

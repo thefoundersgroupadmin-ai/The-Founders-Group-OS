@@ -13,13 +13,15 @@ import (
 	_ "modernc.org/sqlite"
 )
 
-//go:embed demo/*.sql tfg/*.sql
+//go:embed demo/*.sql tfg/*.sql client/*.sql
 var demoFS embed.FS
 
 // Profiles are the data sets a seed can load: "demo" is upstream's demo
 // operator; "tfg" is The Founders Group (seed/tfg/*.sql applied on top of the
 // demo schema: demo records removed, TFG team, agents, SOPs and roadmap in).
-var Profiles = []string{"demo", "tfg"}
+// "client" is a TFG client install: the tfg overlay, then seed/client/*.sql
+// (TFG's own team, SOPs and roadmap removed).
+var Profiles = []string{"demo", "tfg", "client"}
 
 // DumpedOn is the day the fixtures were captured from v1's seed.
 const DumpedOn = "2026-10-09"
@@ -50,7 +52,7 @@ func Materialize(dir string, now time.Time) error {
 // seed/tfg/<name>.sql overlay runs after the demo dump.
 func MaterializeProfile(dir string, now time.Time, profile string) error {
 	switch profile {
-	case "demo", "tfg":
+	case "demo", "tfg", "client":
 	default:
 		return fmt.Errorf("seed: unknown profile %q (want one of %v)", profile, Profiles)
 	}
@@ -64,16 +66,27 @@ func MaterializeProfile(dir string, now time.Time, profile string) error {
 		if err != nil {
 			return err
 		}
-		if profile == "tfg" {
-			overlay, err := demoFS.ReadFile("tfg/" + name + ".sql")
+		for _, layer := range overlays(profile) {
+			overlay, err := demoFS.ReadFile(layer + "/" + name + ".sql")
 			if err != nil {
-				return fmt.Errorf("%s: tfg overlay: %w", name, err)
+				return fmt.Errorf("%s: %s overlay: %w", name, layer, err)
 			}
 			dump = append(append(dump, '\n'), overlay...)
 		}
 		if err := materialize(filepath.Join(dir, name+".db"), string(dump), days); err != nil {
 			return fmt.Errorf("%s: %w", name, err)
 		}
+	}
+	return nil
+}
+
+// overlays are the SQL layers a profile applies on top of the demo dump.
+func overlays(profile string) []string {
+	switch profile {
+	case "tfg":
+		return []string{"tfg"}
+	case "client":
+		return []string{"tfg", "client"}
 	}
 	return nil
 }

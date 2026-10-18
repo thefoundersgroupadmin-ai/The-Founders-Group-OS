@@ -174,7 +174,7 @@ describe('/os/funnel page', () => {
 		render(FunnelPage);
 		expect(await screen.findByTestId('funnel-loading')).toBeTruthy();
 		resolve(body());
-		expect(await screen.findByText('demo data')).toBeTruthy();
+		expect(await screen.findByText('not live yet')).toBeTruthy();
 		expect(screen.getByRole('heading', { level: 1, name: 'Funnel' })).toBeTruthy();
 		expect(screen.getByText('// client journeys · leads → conversations → sales')).toBeTruthy();
 		expect(screen.getByText('Funnel Volume')).toBeTruthy();

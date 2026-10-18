@@ -166,3 +166,23 @@ func TestTFGProfileReplacesTheDemoOperatorWithTheTFGTeam(t *testing.T) {
 		t.Fatal("unknown profile should fail")
 	}
 }
+
+func TestClientProfileKeepsTheAgentsButNotTFGsTeam(t *testing.T) {
+	dir := t.TempDir()
+	if err := MaterializeProfile(dir, day("2026-10-18"), "client"); err != nil {
+		t.Fatal(err)
+	}
+	db := open(t, filepath.Join(dir, "founderos-os.db"))
+	if n := scalar[int](t, db, `SELECT COUNT(*) FROM people`); n != 0 {
+		t.Fatalf("people = %d, a client starts with none", n)
+	}
+	if n := scalar[int](t, db, `SELECT COUNT(*) FROM agents WHERE id LIKE 'tfg-%' AND status = 'active'`); n != 3 {
+		t.Fatalf("tfg agents = %d", n)
+	}
+	if n := scalar[int](t, db, `SELECT COUNT(*) FROM funnel_contacts`); n != 0 {
+		t.Fatalf("funnel = %d", n)
+	}
+	if n, err := MaterializeBrainProfile(t.TempDir(), "client"); err != nil || n == 0 {
+		t.Fatalf("client brain = %d, %v", n, err)
+	}
+}

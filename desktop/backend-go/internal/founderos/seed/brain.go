@@ -77,6 +77,16 @@ func MaterializeBrainProfile(dir, profile string) (int, error) {
 			return n, err
 		}
 		return n, copyTree("tfgbrain", nil)
+	case "client":
+		if err := copyTree("brain", tfgDropped); err != nil {
+			return n, err
+		}
+		// TFG's rules and agents, not TFG's people or sales offers.
+		return n, copyTree("tfgbrain", func(rel string) bool {
+			rel = filepath.ToSlash(rel)
+			return strings.HasPrefix(rel, "people/") || rel == "org/tfg-offers.md" ||
+				rel == "sops/sop-nader.md" || rel == "sops/sop-ilya.md" || rel == "sops/sop-karim.md"
+		})
 	}
 	return 0, fmt.Errorf("seed: unknown profile %q", profile)
 }

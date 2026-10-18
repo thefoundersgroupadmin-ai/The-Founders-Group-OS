@@ -37,7 +37,7 @@ func main() {
 	if defProfile == "" {
 		defProfile = "demo"
 	}
-	profile := flag.String("profile", defProfile, "data set to load: demo (upstream demo operator) or tfg (The Founders Group)")
+	profile := flag.String("profile", defProfile, "data set to load: demo (upstream demo operator), tfg (The Founders Group) or client (a TFG client install)")
 	flag.Parse()
 	if *dbURL == "" {
 		*dbURL = backendEnv("DATABASE_URL")

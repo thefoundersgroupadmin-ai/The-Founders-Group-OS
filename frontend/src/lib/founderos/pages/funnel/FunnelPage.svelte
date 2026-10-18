@@ -215,7 +215,7 @@
 						{#if data.isLive}
 							<Badge tone="ok">live · {data.liveLabel}</Badge>
 						{:else}
-							<Badge tone="warn" ghost>demo data</Badge>
+							<span title="Read from the database. Connect Typeform, Calendar, Fathom and Stripe on Connections to go live."><Badge tone="warn" ghost>not live yet</Badge></span>
 						{/if}
 						<span class="bn-muted rounded-full border px-4 py-2 text-[13px] tabular-nums" style="border-color: var(--bn-border)">{data.summary.converted}/{data.summary.clients} converted · {usd(data.summary.revenueUsd)}</span>
 					</div>

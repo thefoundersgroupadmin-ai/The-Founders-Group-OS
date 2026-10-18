@@ -24,7 +24,7 @@ ventures:
     label: New Business
     kind: New logos
     color: "#d4a72c"
-    detail: Every new-business lead from first touch to signed.
+    detail: "Every new-business lead from first touch to signed."
     # CLIENT: words in their intake form or call titles that mean "new business".
     lead_match: "(?i)(demo|discovery|intro|new)"
     focus:
@@ -43,7 +43,7 @@ ventures:
     label: Existing Accounts
     kind: Renewals and expansion
     color: "#4c8dff"
-    detail: Customers already signed: renewals, upsells, referrals.
+    detail: "Customers already signed: renewals, upsells, referrals."
     focus:
       - "No renewal reaches its date without a conversation"
       - "Every happy customer asked for a referral"

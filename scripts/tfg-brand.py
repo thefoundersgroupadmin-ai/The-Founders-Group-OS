@@ -158,9 +158,13 @@ def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--brand", default="config/tfg/brand.yaml")
     ap.add_argument("--check", action="store_true")
+    ap.add_argument("--validate", action="store_true", help="only check the brand file itself")
     a = ap.parse_args()
     path = (ROOT / a.brand).resolve()
     b = load(path)
+    if a.validate:
+        print(f"brand file is valid: {b['company']}")
+        return
     src = str(path.relative_to(ROOT))
     outputs = {GO_OUT: gofmt(go_source(b, src)), TS_OUT: ts_source(b, src), TOPOLOGY: topology_source(b)}
     stale = [p for p, body in outputs.items() if not p.exists() or p.read_text() != body]

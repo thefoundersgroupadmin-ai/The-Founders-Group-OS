@@ -39,8 +39,8 @@ fi
 # Short name: initials of the company, max 4 letters (edit later if needed).
 short="$(echo "$company" | tr -cs '[:alnum:]' ' ' | awk '{for(i=1;i<=NF&&i<=4;i++) printf toupper(substr($i,1,1))}')"
 
-git switch -c "$branch"
-python3 - "$file" "$company" "$short" "$operator" "$domain" <<'PY'
+tmp="$(mktemp -d)"; trap 'rm -rf "$tmp"' EXIT
+python3 - "$tmp/brand.yaml" "$company" "$short" "$operator" "$domain" <<'PY'
 import sys, pathlib
 out, company, short, operator, domain = sys.argv[1:]
 t = pathlib.Path("config/tfg/clients/_template.yaml").read_text()
@@ -50,9 +50,12 @@ lines = t.splitlines(keepends=True)
 # drop the template's "do not edit" header
 while lines and lines[0].startswith("#"):
     lines.pop(0)
-header = f"# Brand file for {company} (a TFG client install). Edit, then: make tfg-brand BRAND={out}\n"
+header = f"# Brand file for {company} (a TFG client install). Edit, then run make tfg-brand with BRAND set to this file.\n"
 pathlib.Path(out).write_text(header + "".join(lines))
 PY
+python3 scripts/tfg-brand.py --brand "$tmp/brand.yaml" --validate   # fail before touching git
+git switch -c "$branch"
+cp "$tmp/brand.yaml" "$file"
 python3 scripts/tfg-brand.py --brand "$file"
 git add -A
 git -c user.name="${GIT_AUTHOR_NAME:-TFG}" -c user.email="${GIT_AUTHOR_EMAIL:-thefoundersgroupadmin@gmail.com}" \

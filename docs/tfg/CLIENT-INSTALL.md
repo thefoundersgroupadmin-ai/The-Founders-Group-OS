@@ -58,7 +58,7 @@ The client enters their own passwords and keys. TFG never needs to see them.
 
 ## 5. AI SDRs on, then simulate (days 4-10)
 
-1. Run each agent by hand from the Agents view and check the output with the
+1. Run each agent by hand from its card on the Org Chart view and check the output with the
    client: Pipeline SDR, CRM Hygiene, Impact Reporter.
 2. Push one test lead from form to signed proposal and watch every view update.
 3. Fix gaps, write them up in the Brain, delete the test lead.

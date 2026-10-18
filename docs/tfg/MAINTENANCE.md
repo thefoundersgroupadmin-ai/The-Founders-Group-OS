@@ -5,8 +5,10 @@
 - **Home**: the status line under the greeting should show only green and grey
   items (agents live, idle). Anything red or amber (Optimal Engine offline, a
   connector down, a failed run): open **Doctor**.
-- **Agents**: every scheduled run from the last 24h is listed with its summary.
-  A red run means that agent failed. Its summary says why.
+- **Home → Operating volume**: runs OK and failed today. A failed run: open
+  that agent's card on **Org Chart** (each card has a run button and its last
+  result). The **Agents** view is the optional Paperclip board; it shows
+  "board unreachable" unless you run Paperclip.
 
 ## Weekly (Karim, Monday, 15 minutes)
 

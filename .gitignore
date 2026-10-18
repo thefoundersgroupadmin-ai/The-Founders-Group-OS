@@ -192,3 +192,6 @@ desktop/resources/engine/
 .env.dev
 frontend/.vite/
 optimal-engine/CLAUDE.md
+
+# Graphify code map (rebuilt locally with `make graph`; ~80 MB, never committed)
+graphify-out/

@@ -49,6 +49,17 @@ open http://localhost:5273/os
 
 `make dev-local-status` shows what is running; `make dev-local-stop` stops it.
 
+### Optional: Graphify, so Claude spends fewer tokens on this code
+
+```bash
+brew install pipx && pipx install graphifyy
+make graph                            # builds graphify-out/ (about 2 minutes)
+```
+
+Claude Code sessions in this folder then look symbols up in the map
+(`graphify explain "PipelineSDR"`) instead of reading whole files. See
+`CLAUDE.md`, "Graphify". Re-run `make graph` after big changes.
+
 ## Safety switches (both off by default)
 
 | Switch | What it allows | When to turn on |

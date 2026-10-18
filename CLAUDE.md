@@ -60,3 +60,16 @@ cd desktop/backend-go && go test ./internal/founderos/... ./cmd/...
 - Don't stop another session's dev stack; use your own ports via `.env.dev`.
 - The dev launcher ignores `OPTIMAL_ENGINE_*` from your shell profile; point it at
   other engine data only with `FOUNDEROS_ENGINE_ROOT`.
+
+## Graphify (code map for cheaper Claude sessions)
+
+`make graph` builds `graphify-out/graph.json` locally (code only, no LLM, about
+2 minutes, gitignored). When it exists:
+
+- For a named symbol, file or agent, run `graphify explain "<Name>"` or
+  `graphify path "<A>" "<B>"` before grepping or reading files: it returns the
+  file, line and direct connections in a few hundred tokens.
+- `graphify query "<question>"` is broad and noisy on this repo (52k nodes);
+  use it only to find a starting point, then read the located lines.
+- Never read `graphify-out/GRAPH_REPORT.md` or `graph.json` whole (hundreds of KB).
+- After changing code, `graphify update .` (AST only, free).

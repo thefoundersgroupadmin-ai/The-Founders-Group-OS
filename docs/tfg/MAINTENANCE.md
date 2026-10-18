@@ -2,8 +2,9 @@
 
 ## Daily (2 minutes, whoever opens it first)
 
-- **Home**: the status line should read `Optimal Engine up · 0 connectors down`.
-  Anything red: open **Doctor**.
+- **Home**: the status line under the greeting should show only green and grey
+  items (agents live, idle). Anything red or amber (Optimal Engine offline, a
+  connector down, a failed run): open **Doctor**.
 - **Agents**: every scheduled run from the last 24h is listed with its summary.
   A red run means that agent failed. Its summary says why.
 
@@ -35,8 +36,8 @@
 pg_dump -h 127.0.0.1 -p 25432 -U postgres businessos_dev | gzip > ~/tfg-os-$(date +%F).sql.gz
 ```
 
-The Brain's own data lives under `.run/` (Optimal Engine store). Back up the
-whole `.run/` folder weekly while the stack is stopped. Keep 4 weeks.
+The Brain's own data lives in `.run/optimal-engine-data/`. Back it up weekly
+with the stack stopped (`make dev-local-stop`), then start it again. Keep 4 weeks.
 
 ## Where things live
 

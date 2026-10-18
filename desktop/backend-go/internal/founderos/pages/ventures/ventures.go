@@ -1,6 +1,8 @@
-// Package ventures is FounderOS v1 lib/ventures.ts: the two businesses, their
+// Package ventures is FounderOS v1 lib/ventures.ts: the two offers, their
 // focus lists (the operator's to edit), and which agents work each life area.
 package ventures
+
+import "github.com/rhl/businessos-backend/internal/founderos/brand"
 
 type Venture struct {
 	ID         string              `json:"id"`
@@ -13,48 +15,24 @@ type Venture struct {
 	AreaAgents map[string][]string `json:"areaAgents"`
 }
 
-var (
-	sharedOps       = []string{"conductor", "stack-monitor"}
-	sharedKnowledge = []string{"data-agent", "markdown-auditor", "vector-auditor"}
-)
+// All is the install's two offers, from the brand file (config/tfg/brand.yaml
+// via scripts/tfg-brand.py). The agents per life area are the operator's to
+// edit there.
+var All = fromBrand()
 
-var All = []Venture{
-	{
-		ID: "vantage", Label: "Vantage", Kind: "AI agency", Color: "#00ffaa",
-		Detail:   "Client AI builds and delivery — the agency arm.",
-		BrainTag: "vantage",
-		Focus: []string{
-			"Active client builds shipped on schedule",
-			"Pipeline: leads in from Typeform, calls booked and held, proposals out",
-			"Delivery quality — every handoff documented in the brain (Optimal Engine)",
-		},
-		AreaAgents: map[string][]string{
-			"marketing":     {"social-agent", "postly-publisher", "reelkit-editor", "renderly-creative"},
-			"sales":         {"vantage-sales", "vantage-paykit", "sales-agent", "sales-calls-data"},
-			"communication": {"comms-agent", "gmail-worker", "slack-worker", "crm-pulse"},
-			"finances":      {"payments-pulse", "stripe-sales", "processor-confirmation"},
-			"knowledge":     sharedKnowledge,
-			"operations":    sharedOps,
-		},
-	},
-	{
-		ID: "launchpad-cohort", Label: "Launchpad Cohort", Kind: "Mentorship program", Color: "#d9263f",
-		Detail:   "The mentorship — students, curriculum, community.",
-		BrainTag: "launchpad-cohort",
-		Focus: []string{
-			"Student results — track wins, unblock stuck students fast",
-			"Content + newsletter cadence for enrollment",
-			"Community pulse on WhatsApp; T1 response times hold",
-		},
-		AreaAgents: map[string][]string{
-			"marketing":     {"social-agent", "adsmith-creative", "postly-publisher", "dmflow-mcp", "reelkit-editor"},
-			"sales":         {"launchpad-cohort-sales", "paykit-sales", "sales-agent", "sales-calls-data"},
-			"communication": {"whatsapp-worker", "gmail-worker", "comms-agent", "crm-pulse"},
-			"finances":      {"payments-pulse", "stripe-sales", "flexpay-financing", "processor-confirmation"},
-			"knowledge":     sharedKnowledge,
-			"operations":    sharedOps,
-		},
-	},
+func fromBrand() []Venture {
+	out := make([]Venture, 0, len(brand.Ventures))
+	for _, b := range brand.Ventures {
+		areas := make(map[string][]string, len(b.AreaAgents))
+		for k, v := range b.AreaAgents {
+			areas[k] = append([]string(nil), v...)
+		}
+		out = append(out, Venture{
+			ID: b.ID, Label: b.Label, Kind: b.Kind, Color: b.Color, Detail: b.Detail,
+			BrainTag: b.ID, Focus: append([]string(nil), b.Focus...), AreaAgents: areas,
+		})
+	}
+	return out
 }
 
 func Get(id string) *Venture {

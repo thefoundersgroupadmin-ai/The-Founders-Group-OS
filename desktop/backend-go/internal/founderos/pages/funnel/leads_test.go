@@ -86,7 +86,7 @@ func TestOnePersonTwiceIsOneJourney(t *testing.T) {
 }
 
 func TestVentureFor(t *testing.T) {
-	if VentureFor("Vantage discovery") != "vantage" || VentureFor("Launchpad Cohort application") != "launchpad-cohort" {
+	if VentureFor("Sales system build discovery") != "vantage" || VentureFor("Fractional sales director intro") != "launchpad-cohort" {
 		t.Fatal("venture heuristic")
 	}
 }
@@ -122,7 +122,7 @@ func TestMergeCallTouches(t *testing.T) {
 	}
 
 	orphan := MergeCallTouches(nil, nil, []fathomcalls.Call{call(func(c *fathomcalls.Call) {
-		c.Title = "Vantage x Acme discovery"
+		c.Title = "TFG x Acme sales system build discovery"
 		c.Invitees = []fathomcalls.Invitee{{Name: sp("Pat Lee"), Email: sp("pat@acme.com"), External: true}}
 	})}, now)
 	if len(orphan) != 1 || orphan[0].ID != "fathom-901" || orphan[0].Name != "Pat Lee" || orphan[0].Venture != "vantage" || orphan[0].Status != "nurtured" || orphan[0].Touches[0].Source != "fathom" {

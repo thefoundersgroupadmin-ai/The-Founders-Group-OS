@@ -1,5 +1,6 @@
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/svelte';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { VENTURE_COLOR, VENTURE_LABEL } from '$lib/founderos/brand.gen';
 import type { ChannelAnalyticsBody, FunnelBody, FunnelNode, FunnelVolume, Journey, VslSnapshot } from './types';
 
 vi.mock('$lib/founderos/api', () => {
@@ -275,7 +276,7 @@ describe('/os/funnel page', () => {
 		route({ '/pages/funnel/analytics': analytics(), '/pages/funnel': body() });
 		render(FunnelPage);
 		await screen.findByText('Funnel Volume');
-		await fireEvent.click(screen.getByRole('button', { name: /^Vantage$/ }));
+		await fireEvent.click(screen.getByRole('button', { name: VENTURE_LABEL.vantage }));
 		await waitFor(() => expect(fetchMock).toHaveBeenCalledWith('/pages/funnel?venture=vantage'));
 		await fireEvent.click(screen.getByRole('button', { name: /Engaged 1/ }));
 		await waitFor(() => expect(fetchMock).toHaveBeenCalledWith('/pages/funnel?venture=vantage&stage=engaged'));
@@ -502,18 +503,19 @@ describe('production look (round 2): rounded controls, venture hues, the sliding
 	const ready = (over: Partial<FunnelBody> = {}) =>
 		route({ '/pages/funnel/analytics': analytics(), '/pages/funnel/lead-message': { message: null, unavailable: false }, '/pages/funnel': body(over) });
 
-	it('venture dots wear the brand hues (Vantage #00ffaa, Launchpad Cohort #d9263f) as round dots', async () => {
+	it('venture dots wear the brand file hues as round dots', async () => {
 		ready();
 		render(FunnelPage);
 		await screen.findByText('Funnel Volume');
 		const rows = screen.getAllByTestId('journey-row');
 		const dot = (row: HTMLElement) => row.querySelector('[data-testid="venture-dot"]') as HTMLElement;
-		expect(dot(rows[0]).style.background).toBe('rgb(0, 255, 170)'); // #00ffaa
-		expect(dot(rows[1]).style.background).toBe('rgb(217, 38, 63)'); // #d9263f
+		const rgb = (hex: string) => `rgb(${[1, 3, 5].map((i) => parseInt(hex.slice(i, i + 2), 16)).join(', ')})`;
+		expect(dot(rows[0]).style.background).toBe(rgb(VENTURE_COLOR.vantage));
+		expect(dot(rows[1]).style.background).toBe(rgb(VENTURE_COLOR['launchpad-cohort']));
 		expect(dot(rows[0]).classList.contains('rounded-full')).toBe(true);
-		const tab = screen.getByRole('button', { name: 'Launchpad Cohort' });
+		const tab = screen.getByRole('button', { name: VENTURE_LABEL['launchpad-cohort'] });
 		const tabDot = tab.querySelector('span') as HTMLElement;
-		expect(tabDot.style.background).toBe('rgb(217, 38, 63)');
+		expect(tabDot.style.background).toBe(rgb(VENTURE_COLOR['launchpad-cohort']));
 		expect(tabDot.classList.contains('rounded-full')).toBe(true);
 	});
 
@@ -536,7 +538,7 @@ describe('production look (round 2): rounded controls, venture hues, the sliding
 		ready();
 		render(FunnelPage);
 		await screen.findByText('Funnel Volume');
-		for (const name of ['All clients', 'Vantage', 'Archive (1)']) {
+		for (const name of ['All clients', VENTURE_LABEL.vantage, 'Archive (1)']) {
 			const b = screen.getByRole('button', { name });
 			expect(b.classList.contains('bn-pressable')).toBe(true);
 			expect(b.getAttribute('data-lens')).toBe('c');

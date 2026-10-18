@@ -1,0 +1,68 @@
+# The Founders Group: the single source of truth for this install's branding.
+#
+# Edit this file, then run:   python3 scripts/tfg-brand.py
+# That regenerates the Go + TypeScript brand files and the workspace names in
+# config/founderos/engine-topology.yaml. Never hand-edit the generated files.
+#
+# For a CLIENT install, copy config/tfg/clients/_template.yaml to
+# config/tfg/clients/<client>.yaml, fill it in, and run
+#   python3 scripts/tfg-brand.py --brand config/tfg/clients/<client>.yaml
+#
+# Internal slugs ("vantage", "launchpad-cohort") are stable database keys
+# inherited from upstream FounderOS. They are never shown to users; only the
+# labels below are. Keeping them stable means upstream updates still merge.
+
+company: The Founders Group
+short: TFG
+operator: Nader            # who the console greets
+domain: thefoundersgroup.net
+
+workspaces:
+  founderos: {name: TFG HQ, holds: "TFG HQ: the command centre across both offers; team, tools, agents, SOPs"}
+  vantage: {name: Sales System Build, holds: "The 3-month done-for-you sales system build: clients, calls, proposals, delivery"}
+  launchpad-cohort: {name: Fractional Sales + AI SDR, holds: "Fractional sales director retainer plus AI SDR implants: clients, delivery, results"}
+  personal: {name: Nader, holds: "Nader's personal notes, content drafts and chat transcripts"}
+
+ventures:
+  vantage:
+    label: Sales System Build
+    kind: Done-for-you build (3 months)
+    color: "#d4a72c"
+    detail: Build, integrate and train the client's whole sales system in 3 months.
+    # A lead whose form answers or call title match this goes to this offer;
+    # everything else goes to the other one.
+    lead_match: "(?i)(sales system|system build|crm build|build)"
+    focus:
+      - "10-day build + client-experience simulation passes before any outreach"
+      - "Pipeline: leads in, discovery calls booked and held, proposals out"
+      - "Every client build documented in the Brain so delivery is repeatable"
+    area_agents:
+      sales: [tfg-pipeline-sdr, tfg-crm-hygiene, sales-agent, sales-calls-data]
+      communication: [comms-agent, gmail-worker, slack-worker, whatsapp-worker]
+      finances: [payments-pulse, stripe-sales, processor-confirmation]
+      marketing: [social-agent, newsletter-agent]
+      clients: [client-roster, client-onboarding, client-success]
+      operations: [conductor, stack-monitor, tfg-impact-reporter]
+      knowledge: [data-agent, markdown-auditor, vector-auditor]
+  launchpad-cohort:
+    label: Fractional Sales + AI SDR
+    kind: Retainer
+    color: "#4c8dff"
+    detail: Fractional sales director plus AI SDRs that take non-selling work off the client's team.
+    focus:
+      - "Prove the productivity gain: hours handed to AI SDRs, every week, per client"
+      - "Seniority and proof: case results captured in the Brain after every win"
+      - "Client response times hold; nothing sits unanswered past a day"
+    area_agents:
+      sales: [tfg-pipeline-sdr, tfg-crm-hygiene, sales-agent, sales-calls-data]
+      communication: [comms-agent, gmail-worker, slack-worker, whatsapp-worker]
+      finances: [payments-pulse, stripe-sales, processor-confirmation]
+      marketing: [social-agent, newsletter-agent]
+      clients: [client-roster, client-onboarding, client-success]
+      operations: [conductor, stack-monitor, tfg-impact-reporter]
+      knowledge: [data-agent, markdown-auditor, vector-auditor]
+
+# How the Impact Reporter turns agent runs into "hours handed back".
+# Shown on every report, so the client can see and challenge the formula.
+impact:
+  minutes_per_successful_run: 6

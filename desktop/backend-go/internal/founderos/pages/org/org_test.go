@@ -4,6 +4,7 @@ import (
 	"reflect"
 	"testing"
 
+	"github.com/rhl/businessos-backend/internal/founderos/brand"
 	"github.com/rhl/businessos-backend/internal/founderos/connectors/paperclip"
 	"github.com/rhl/businessos-backend/internal/founderos/pages/osdata"
 )
@@ -122,8 +123,10 @@ func TestVenturesAreTheTwoIncomeSources(t *testing.T) {
 	if len(Ventures) != 2 || Ventures[0].ID != "vantage" || Ventures[1].ID != "launchpad-cohort" {
 		t.Fatalf("%+v", Ventures)
 	}
-	if Ventures[0].Color != "#00ffaa" || Ventures[1].Color != "#d9263f" {
-		t.Fatal("brand colors")
+	for i, b := range brand.Ventures {
+		if Ventures[i].Label != b.Label || Ventures[i].Color != b.Color {
+			t.Fatalf("venture %d = %+v, want the brand file's %+v", i, Ventures[i], b)
+		}
 	}
 	areas := map[string]bool{}
 	colors := map[string]bool{}
@@ -147,7 +150,7 @@ func TestVenturesAreTheTwoIncomeSources(t *testing.T) {
 		}
 	}
 	set := VentureAgentSet("vantage")
-	if !set["conductor"] || !set["vantage-sales"] || set["whatsapp-worker"] {
+	if !set["conductor"] || !set["tfg-pipeline-sdr"] || set["dmflow-mcp"] {
 		t.Fatalf("vantage set: %v", set)
 	}
 	if len(VentureAgentSet("nope")) != 0 {

@@ -4,6 +4,7 @@
  * from the module catalog so the page and the sidebar cannot drift.
  */
 import { getEnabledModuleIds, getModuleCatalog } from '$lib/config/workspaceModules';
+import { VENTURE_LABEL } from '$lib/founderos/brand.gen';
 
 const DESC: Record<string, string> = {
 	'/os/chats': 'Every agent conversation in one hub: threads with the Conductor and each crew, with their replies.',
@@ -12,7 +13,7 @@ const DESC: Record<string, string> = {
 	'/os/reference': 'The reference model: the pillars, systems and domains this operating system is built around.',
 	'/os': 'Operator console: pulse row, connections, agent list, what needs you, and operating volume.',
 	'/os/comms': 'Unified feed of email, Slack, DMs and messages, plus Plaud and Fathom call recordings.',
-	'/os/funnel': 'Client journey for Vantage and Launchpad Cohort: leads, bookings, calls held, payments.',
+	'/os/funnel': `Client journey for ${VENTURE_LABEL.vantage} and ${VENTURE_LABEL['launchpad-cohort']}: leads, bookings, calls held, payments.`,
 	'/os/workflows': 'The automations and scheduled runs that move work between agents and tools.',
 	'/os/social': 'Zernio growth dashboard: followers, posts and reach across every account.',
 	'/os/content': 'Content pipeline, scripts, VSLs and creative in flight.',

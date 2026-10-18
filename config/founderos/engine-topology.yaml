@@ -15,10 +15,10 @@ engines:
     note: The bundled Optimal Engine started by scripts/dev-local.sh (:4200 by default).
 
 workspaces:
-  - {slug: founderos, name: HQ, home: local, class: business, holds: "HQ: the command center across every venture; tools, agents, skills, general SOPs"}
-  - {slug: vantage, name: Vantage, home: local, class: business, holds: "Vantage agency: clients, calls, proposals, delivery"}
-  - {slug: launchpad-cohort, name: Launchpad Cohort, home: local, class: business, holds: "Launchpad Cohort mentorship: students, curriculum, community"}
-  - {slug: personal, name: Personal, home: local, class: personal, holds: "personal notes, content drafts and chat transcripts"}
+  - {slug: founderos, name: TFG HQ, home: local, class: business, holds: "TFG HQ: the command centre across both offers; team, tools, agents, SOPs"}
+  - {slug: vantage, name: Sales System Build, home: local, class: business, holds: "The 3-month done-for-you sales system build: clients, calls, proposals, delivery"}
+  - {slug: launchpad-cohort, name: Fractional Sales + AI SDR, home: local, class: business, holds: "Fractional sales director retainer plus AI SDR implants: clients, delivery, results"}
+  - {slug: personal, name: Nader, home: local, class: personal, holds: "Nader's personal notes, content drafts and chat transcripts"}
 
 # Brain-store import routing, by top-level folder. Root pages and any folder
 # not listed go to the default.

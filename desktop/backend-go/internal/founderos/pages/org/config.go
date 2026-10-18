@@ -1,5 +1,7 @@
 package org
 
+import "github.com/rhl/businessos-backend/internal/founderos/brand"
+
 // LifeArea is the slice of lib/life-map.ts LIFE_AREAS the org board uses:
 // the tint every crew wears and the legend.
 type LifeArea struct {
@@ -18,7 +20,7 @@ var LifeAreas = []LifeArea{
 		[]string{"social-agent", "postly-publisher", "adsmith-creative", "reelkit-editor", "renderly-creative", "dmflow-mcp", "social-pulse"},
 		[]string{"dept-marketing-growth"}},
 	{"sales", "Sales", "#ef4444", "Deals, pipeline, and revenue relationships.",
-		[]string{"sales-agent", "crm-pulse", "launchpad-cohort-sales", "vantage-sales", "paykit-sales", "vantage-paykit", "stripe-sales", "processor-confirmation", "flexpay-financing", "sales-calls-data"},
+		[]string{"tfg-pipeline-sdr", "tfg-crm-hygiene", "sales-agent", "crm-pulse", "launchpad-cohort-sales", "vantage-sales", "paykit-sales", "vantage-paykit", "stripe-sales", "processor-confirmation", "flexpay-financing", "sales-calls-data"},
 		[]string{"dept-sales"}},
 	{"finances", "Finances", "#22c55e", "Money in, money out, every processor.",
 		[]string{"payments-pulse"}, []string{"dept-finance"}},
@@ -29,7 +31,7 @@ var LifeAreas = []LifeArea{
 	{"knowledge", "Knowledge", "#a855f7", "Optimal Engine: markdown, vectors, and recall.",
 		[]string{"data-agent", "markdown-auditor", "vector-auditor", "notion-sync", "brain-librarian"}, []string{"dept-tech"}},
 	{"operations", "Operations", "#fafafa", "The machine that runs the machine.",
-		[]string{"conductor", "stack-monitor"}, []string{"dept-tech"}},
+		[]string{"conductor", "stack-monitor", "tfg-impact-reporter"}, []string{"dept-tech"}},
 }
 
 func LifeAreaForDepartment(departmentID string) *LifeArea {
@@ -59,46 +61,23 @@ type Venture struct {
 	AgentIDs []string `json:"agentIds"`
 }
 
-var sharedOps = []string{"conductor", "stack-monitor"}
-var sharedKnowledge = []string{"data-agent", "markdown-auditor", "vector-auditor"}
+// Ventures are the install's two offers, from the brand file
+// (config/tfg/brand.yaml via scripts/tfg-brand.py).
+var Ventures = venturesFromBrand()
 
-// Ventures: Vantage (the agency) and Launchpad Cohort (the mentorship).
-// Personal Brand was retired from the lens 2026-08-11.
-var Ventures = []Venture{
-	{
-		ID: "vantage", Label: "Vantage", Kind: "AI agency", Color: "#00ffaa",
-		Detail: "Client AI builds and delivery — the agency arm.", BrainTag: "vantage",
-		Focus: []string{
-			"Active client builds shipped on schedule",
-			"Pipeline: leads in from Typeform, calls booked and held, proposals out",
-			"Delivery quality — every handoff documented in the brain",
-		},
-		AreaAgents: map[string][]string{
-			"marketing":     {"social-agent", "postly-publisher", "reelkit-editor", "renderly-creative"},
-			"sales":         {"vantage-sales", "vantage-paykit", "sales-agent", "sales-calls-data"},
-			"communication": {"comms-agent", "gmail-worker", "slack-worker", "crm-pulse"},
-			"finances":      {"payments-pulse", "stripe-sales", "processor-confirmation"},
-			"knowledge":     sharedKnowledge,
-			"operations":    sharedOps,
-		},
-	},
-	{
-		ID: "launchpad-cohort", Label: "Launchpad Cohort", Kind: "Mentorship program", Color: "#d9263f",
-		Detail: "The mentorship — students, curriculum, community.", BrainTag: "launchpad-cohort",
-		Focus: []string{
-			"Student results — track wins, unblock stuck students fast",
-			"Content + newsletter cadence for enrollment",
-			"Community pulse on WhatsApp; T1 response times hold",
-		},
-		AreaAgents: map[string][]string{
-			"marketing":     {"social-agent", "adsmith-creative", "postly-publisher", "dmflow-mcp", "reelkit-editor"},
-			"sales":         {"launchpad-cohort-sales", "paykit-sales", "sales-agent", "sales-calls-data"},
-			"communication": {"whatsapp-worker", "gmail-worker", "comms-agent", "crm-pulse"},
-			"finances":      {"payments-pulse", "stripe-sales", "flexpay-financing", "processor-confirmation"},
-			"knowledge":     sharedKnowledge,
-			"operations":    sharedOps,
-		},
-	},
+func venturesFromBrand() []Venture {
+	out := make([]Venture, 0, len(brand.Ventures))
+	for _, b := range brand.Ventures {
+		areas := make(map[string][]string, len(b.AreaAgents))
+		for k, v := range b.AreaAgents {
+			areas[k] = append([]string(nil), v...)
+		}
+		out = append(out, Venture{
+			ID: b.ID, Label: b.Label, Kind: b.Kind, Color: b.Color, Detail: b.Detail,
+			BrainTag: b.ID, Focus: append([]string(nil), b.Focus...), AreaAgents: areas,
+		})
+	}
+	return out
 }
 
 // VentureAgentSet is every agent serving a venture, across its areas.

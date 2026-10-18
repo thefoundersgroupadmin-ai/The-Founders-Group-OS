@@ -6,6 +6,7 @@
      Activity, Needs you today), the Push Now / Save Now rails and the
      Journeys list. The archive tab lists what decayed. -->
 <script lang="ts">
+	import { VENTURE_LABEL as BRAND_VENTURE_LABEL, VENTURE_COLOR as BRAND_VENTURE_COLOR } from '$lib/founderos/brand.gen';
 	import { safeHref } from '$lib/founderos/safe-href';
 	import { onMount } from 'svelte';
 	import { replaceState } from '$app/navigation';
@@ -62,16 +63,16 @@
 
 	const VENTURE_TABS: { id: FunnelVenture | null; label: string }[] = [
 		{ id: null, label: 'All clients' },
-		{ id: 'vantage', label: 'Vantage' },
-		{ id: 'launchpad-cohort', label: 'Launchpad Cohort' }
+		{ id: 'vantage', label: BRAND_VENTURE_LABEL.vantage },
+		{ id: 'launchpad-cohort', label: BRAND_VENTURE_LABEL['launchpad-cohort'] }
 	];
-	// prod lib/ventures.ts brand hues (Vantage logo green, LC site crimson)
-	const VENTURE_COLOR: Record<FunnelVenture, string> = { vantage: '#00ffaa', 'launchpad-cohort': '#d9263f' };
+	// brand hues and labels: config/tfg/brand.yaml via scripts/tfg-brand.py
+	const VENTURE_COLOR: Record<FunnelVenture, string> = { ...BRAND_VENTURE_COLOR };
 	/** prod's rounded-ctl pressable control (venture tabs, Archive). */
 	const CTL = 'fn-ctl bn-pressable rounded-[var(--bn-r-ctl)]';
 	/** prod PILL_BASE: round status pills. */
 	const TAG = 'fn-tag rounded-full';
-	const VENTURE_LABEL: Record<FunnelVenture, string> = { vantage: 'Vantage', 'launchpad-cohort': 'Launchpad Cohort' };
+	const VENTURE_LABEL: Record<FunnelVenture, string> = { ...BRAND_VENTURE_LABEL };
 	const REL: Record<string, string> = { hot: 'var(--fn-hot)', warm: 'var(--fn-warm)', cold: 'var(--fn-cold)' };
 
 	const summary = $derived(data?.summary);
@@ -244,7 +245,7 @@
 							class={CTL}
 							data-on={(view.venture ?? null) === tab.id ? '' : undefined}
 							aria-pressed={(view.venture ?? null) === tab.id}
-							title={tab.id && data.isLive ? 'Live split = name heuristic: Vantage when the form or call names it' : undefined}
+							title={tab.id && data.isLive ? `Live split = the brand file's lead rule: ${BRAND_VENTURE_LABEL.vantage} when the form or call matches it` : undefined}
 							onclick={() => go({ venture: tab.id, lead: null })}
 						>
 							{#if tab.id}<span class="mr-1 inline-block h-1.5 w-1.5 rounded-full align-middle" style="background: {VENTURE_COLOR[tab.id]}"></span>{/if}{tab.label}

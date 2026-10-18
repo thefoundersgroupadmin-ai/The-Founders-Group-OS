@@ -2,6 +2,7 @@
      WHERE they came from, HOW to reach them, the status strip, the touch trail,
      and the last message fetched live when the card pins. -->
 <script lang="ts">
+	import { VENTURE_LABEL } from '$lib/founderos/brand.gen';
 	import { founderosFetch } from '$lib/founderos/api';
 	import { safeHref } from '$lib/founderos/safe-href';
 	import type { FunnelNode, LeadMessageBody, CommsItem } from './types';
@@ -69,7 +70,7 @@
 				</div>
 			{/if}
 			<div class="bn-dim mt-0.5 truncate font-mono text-[9.5px] uppercase tracking-wide">
-				{node.venture === 'vantage' ? 'Vantage' : 'Launchpad Cohort'} · {stageLabels[node.status] ?? node.status}{dealDiffers ? ` · deal: ${node.name}` : ''}
+				{VENTURE_LABEL[node.venture as keyof typeof VENTURE_LABEL] ?? node.venture} · {stageLabels[node.status] ?? node.status}{dealDiffers ? ` · deal: ${node.name}` : ''}
 			</div>
 		</div>
 		<button onclick={onclose} class="bn-pressable bn-dim shrink-0 font-mono text-[12px] hover:text-[var(--bn-text)]" aria-label="Close">×</button>

@@ -2,12 +2,12 @@ package funnel
 
 import (
 	"fmt"
-	"regexp"
 	"sort"
 	"strconv"
 	"strings"
 	"time"
 
+	"github.com/rhl/businessos-backend/internal/founderos/brand"
 	"github.com/rhl/businessos-backend/internal/founderos/connectors/fathomcalls"
 	"github.com/rhl/businessos-backend/internal/founderos/connectors/gcal"
 	"github.com/rhl/businessos-backend/internal/founderos/connectors/typeform"
@@ -17,15 +17,10 @@ import (
 // journey, a calendar booking moves it to Call booked, a Fathom recording to
 // Call transcribed. Joins are by email; venture is a name heuristic.
 
-var vantageRe = regexp.MustCompile(`(?i)vantage`)
-
-// VentureFor: Vantage when the form or call names it, else Launchpad Cohort.
-func VentureFor(text string) string {
-	if vantageRe.MatchString(text) {
-		return "vantage"
-	}
-	return "launchpad-cohort"
-}
+// VentureFor routes a lead to an offer from its form or call text, by the
+// brand file's lead_match (config/tfg/brand.yaml): the "vantage" offer when
+// it matches, else "launchpad-cohort".
+func VentureFor(text string) string { return brand.LeadVenture(text) }
 
 func day(iso string) string {
 	if len(iso) > 10 {

@@ -128,7 +128,7 @@ func TestFunnelComposesLiveLanesAndShapesThePage(t *testing.T) {
 	l := down()
 	now := time.Now().UTC()
 	l.Typeform = func(context.Context, time.Time) ([]typeform.Lead, error) {
-		return []typeform.Lead{{ResponseID: "r1", FormTitle: "Vantage discovery", Name: "Dana Reyes", Email: "dana@reyes.co", SubmittedAt: now.Add(-48 * time.Hour).Format(time.RFC3339), Hidden: map[string]string{}}}, nil
+		return []typeform.Lead{{ResponseID: "r1", FormTitle: "Sales system build discovery", Name: "Dana Reyes", Email: "dana@reyes.co", SubmittedAt: now.Add(-48 * time.Hour).Format(time.RFC3339), Hidden: map[string]string{}}}, nil
 	}
 	l.Stripe = func(context.Context, time.Time) ([]stripe.Win, error) {
 		e := "buyer@x.com"

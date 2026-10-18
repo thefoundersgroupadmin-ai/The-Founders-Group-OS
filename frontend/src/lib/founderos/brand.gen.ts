@@ -3,6 +3,10 @@
 export const COMPANY = "The Founders Group";
 export const COMPANY_SHORT = "TFG";
 export const OPERATOR = "Nader";
+export const PRODUCT_NAME = "TFG OS";
+export const PRODUCT_TAGLINE = "Sales Command Centre";
+export const HIDDEN_VIEWS: readonly string[] = ["/os/trading", "/os/brand-deals", "/os/adpilot"];
+export const SHOW_COHORT_INVITE = false;
 export const VENTURE_LABEL = {"vantage": "Sales System Build", "launchpad-cohort": "Fractional Sales + AI SDR"} as const;
 export const VENTURE_COLOR = {"vantage": "#d4a72c", "launchpad-cohort": "#4c8dff"} as const;
 export const WORKSPACE_NAMES = {"founderos": "TFG HQ", "vantage": "Sales System Build", "launchpad-cohort": "Fractional Sales + AI SDR", "personal": "Nader"} as const;

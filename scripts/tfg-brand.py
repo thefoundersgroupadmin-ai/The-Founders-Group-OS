@@ -34,7 +34,7 @@ HEX = re.compile(r"^#[0-9a-fA-F]{6}$")
 def load(path: pathlib.Path) -> dict:
     b = yaml.safe_load(path.read_text())
     errs = []
-    for k in ["company", "short", "operator", "workspaces", "ventures", "impact"]:
+    for k in ["company", "short", "operator", "product_name", "product_tagline", "workspaces", "ventures", "impact"]:
         if k not in b:
             errs.append(f"missing top-level key: {k}")
     for ws in WORKSPACES:
@@ -59,6 +59,11 @@ def load(path: pathlib.Path) -> dict:
             re.compile(lm.replace("(?i)", ""))
         except re.error as e:
             errs.append(f"ventures.vantage.lead_match is not a valid regex: {e}")
+    for h in b.get("hide_views") or []:
+        if not str(h).startswith("/os/") or h == "/os":
+            errs.append(f"hide_views: {h!r} must be an /os/<view> path (Home cannot be hidden)")
+    if not isinstance(b.get("cohort_invite", False), bool):
+        errs.append("cohort_invite must be true or false")
     mpr = (b.get("impact") or {}).get("minutes_per_successful_run")
     if not isinstance(mpr, int) or mpr <= 0:
         errs.append("impact.minutes_per_successful_run must be a positive whole number")
@@ -126,6 +131,10 @@ def ts_source(b: dict, src: str) -> str:
         f"export const COMPANY = {json.dumps(b['company'])};",
         f"export const COMPANY_SHORT = {json.dumps(b['short'])};",
         f"export const OPERATOR = {json.dumps(b['operator'])};",
+        f"export const PRODUCT_NAME = {json.dumps(b['product_name'])};",
+        f"export const PRODUCT_TAGLINE = {json.dumps(b['product_tagline'])};",
+        f"export const HIDDEN_VIEWS: readonly string[] = {json.dumps(list(b.get('hide_views') or []))};",
+        f"export const SHOW_COHORT_INVITE = {'true' if b.get('cohort_invite', False) else 'false'};",
         f"export const VENTURE_LABEL = {json.dumps(labels, ensure_ascii=False)} as const;",
         f"export const VENTURE_COLOR = {json.dumps(colors)} as const;",
         f"export const WORKSPACE_NAMES = {json.dumps(names, ensure_ascii=False)} as const;",

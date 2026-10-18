@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest';
 import { FounderosApiError } from '$lib/founderos/api';
 import { needsSetup } from './chrome';
 import SetupNotice from './SetupNotice.svelte';
+import { COMPANY_SHORT } from '$lib/founderos/brand.gen';
 
 describe('needsSetup', () => {
 	it('is the owner gate saying this account has no Founder OS yet', () => {
@@ -18,7 +19,7 @@ describe('needsSetup', () => {
 describe('SetupNotice', () => {
 	it('names the one command that sets Founder OS up for this account', () => {
 		render(SetupNotice, { email: 'sam@vantage.example' });
-		expect(screen.getByRole('heading').textContent).toMatch(/set up founder os/i);
-		expect(screen.getByText('make demo OWNER=sam@vantage.example')).toBeTruthy();
+		expect(screen.getByRole('heading').textContent).toBe(`Set up ${COMPANY_SHORT} OS`);
+		expect(screen.getByText('make tfg OWNER=sam@vantage.example')).toBeTruthy();
 	});
 });

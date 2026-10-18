@@ -41,6 +41,7 @@ import {
 	Waypoints,
 	Workflow
 } from '$lib/founderos/icons';
+import { HIDDEN_VIEWS } from '$lib/founderos/brand.gen';
 
 // lucide-svelte ships legacy class-style typings; the runtime value is a Svelte component.
 type Icon = Component<Record<string, unknown>>;
@@ -92,13 +93,19 @@ export const NAV_SYSTEM: NavItem[] = [
 
 export const NAV_LIBRARY: NavItem[] = [{ href: '/os/personas', label: 'Personas', icon: icon(Layers) }];
 
+/** Views the brand file hides (config/tfg/brand.yaml hide_views). The routes
+ *  stay; they just leave the sidebar, the palette and the digit shortcuts. */
+export function visibleItems(items: NavItem[], hidden: readonly string[] = HIDDEN_VIEWS): NavItem[] {
+	return items.filter((n) => !hidden.includes(n.href));
+}
+
 export const NAV_GROUPS: NavGroup[] = [
-	{ title: 'Operate', sub: 'Operate', items: NAV_OPERATE },
-	{ title: 'Agents', sub: 'Agents', items: NAV_AGENTS },
-	{ title: 'Intelligence', sub: 'Intelligence', items: NAV_INTELLIGENCE },
-	{ title: 'System', sub: 'System', items: NAV_SYSTEM },
-	{ title: 'Variants', sub: 'Library', items: NAV_LIBRARY }
-];
+	{ title: 'Operate', sub: 'Operate', items: visibleItems(NAV_OPERATE) },
+	{ title: 'Agents', sub: 'Agents', items: visibleItems(NAV_AGENTS) },
+	{ title: 'Intelligence', sub: 'Intelligence', items: visibleItems(NAV_INTELLIGENCE) },
+	{ title: 'System', sub: 'System', items: visibleItems(NAV_SYSTEM) },
+	{ title: 'Variants', sub: 'Library', items: visibleItems(NAV_LIBRARY) }
+].filter((g) => g.items.length > 0);
 
 export const NAV_ITEMS: NavItem[] = NAV_GROUPS.flatMap((g) => g.items);
 

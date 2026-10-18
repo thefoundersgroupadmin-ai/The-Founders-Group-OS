@@ -78,7 +78,7 @@ func TestOwnerOnlyTellsANewAccountHowToSetUp(t *testing.T) {
 	if err := json.Unmarshal(w.Body.Bytes(), &body); err != nil {
 		t.Fatal(err)
 	}
-	if !body.Setup || !strings.Contains(body.Error, "make demo") || strings.Contains(body.Error, "v1") {
+	if !body.Setup || !strings.Contains(body.Error, "make tfg") || strings.Contains(body.Error, "v1") {
 		t.Fatalf("body = %s", w.Body.String())
 	}
 }

@@ -6,6 +6,7 @@
 import { fireEvent, render, screen, waitFor } from '@testing-library/svelte';
 import { tick } from 'svelte';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { PRODUCT_NAME, PRODUCT_TAGLINE } from '$lib/founderos/brand.gen';
 
 vi.mock('../api', async (orig) => ({
 	...(await orig<typeof import('../api')>()),
@@ -30,13 +31,14 @@ beforeEach(() => {
 });
 
 describe('Sidebar look', () => {
-	it('the swirl emblem and the v3 · Operator Mode line, never a boxed letter', () => {
+	it('the swirl emblem and the brand file\'s name and tagline, never a boxed letter', () => {
 		const { container } = render(Sidebar, { pathname: '/os' });
 		const mark = container.querySelector('aside img[alt="Founder OS"]')!;
 		expect(mark.getAttribute('src')).toMatch(/os-emblem\.png/);
 		expect(mark.getAttribute('width')).toBe('34');
 		expect(container.querySelector('.bn-mark')).toBeNull();
-		expect(screen.getByText('v3 · Operator Mode')).toBeTruthy();
+		expect(screen.getByText(PRODUCT_TAGLINE)).toBeTruthy();
+		expect(screen.getByText(PRODUCT_NAME)).toBeTruthy();
 		expect(screen.queryByText(/bridge · Operator Mode/i)).toBeNull();
 	});
 	it('collapsed, the emblem alone carries the identity at 30px', async () => {

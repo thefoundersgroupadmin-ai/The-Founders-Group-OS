@@ -3,6 +3,7 @@
      (drag the right edge to resize, double-click resets), the icon rail, and
      hidden (drag past the edge; the far-left strip peeks it back, ⌘\ docks). -->
 <script lang="ts">
+	import { PRODUCT_NAME, PRODUCT_TAGLINE } from '$lib/founderos/brand.gen';
 	import { onMount, type Snippet } from 'svelte';
 	import { PanelLeft } from '$lib/founderos/icons';
 	import '../kit/kit.css';
@@ -195,8 +196,8 @@
 			<div class="flex items-center gap-[11px]">
 				<OsMark size={34} class="shrink-0" />
 				<div>
-					<div class="bn-text text-[13px] font-bold tracking-[0.14em]">FOUNDER OS</div>
-					<div class="bn-dim mt-[3px] whitespace-nowrap font-mono text-[9px] uppercase tracking-[0.16em]">v3 · Operator Mode</div>
+					<div class="bn-text text-[13px] font-bold uppercase tracking-[0.14em]">{PRODUCT_NAME}</div>
+					<div class="bn-dim mt-[3px] whitespace-nowrap font-mono text-[9px] uppercase tracking-[0.16em]">{PRODUCT_TAGLINE}</div>
 				</div>
 			</div>
 		{/if}

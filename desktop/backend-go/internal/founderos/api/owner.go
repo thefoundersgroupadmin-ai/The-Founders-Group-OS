@@ -42,7 +42,7 @@ func OwnerOnly(d *Deps) gin.HandlerFunc {
 		// nobody is yet. setup tells the /os layout to show its setup panel.
 		c.AbortWithStatusJSON(http.StatusForbidden, gin.H{
 			"setup": true,
-			"error": "Founder OS isn't set up for this account yet. Run: make demo OWNER=" + user.Email,
+			"error": "This OS isn't set up for this account yet. Run: make tfg OWNER=" + user.Email,
 		})
 	}
 }

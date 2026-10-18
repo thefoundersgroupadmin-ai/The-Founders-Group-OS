@@ -16,6 +16,7 @@
 	import Toaster from '$lib/founderos/chrome/Toaster.svelte';
 	import CohortBanner from '$lib/founderos/chrome/CohortBanner.svelte';
 	import CohortModal from '$lib/founderos/chrome/CohortModal.svelte';
+	import { SHOW_COHORT_INVITE } from '$lib/founderos/brand.gen';
 	import SetupNotice from '$lib/founderos/chrome/SetupNotice.svelte';
 	import { needsSetup } from '$lib/founderos/chrome/chrome';
 	import osIcon from '$lib/founderos/chrome/os-icon.png';
@@ -97,15 +98,15 @@
 						<div class="bn-view">{@render children()}</div>
 					{/key}
 				{/if}
-				<!-- Cohort invite: the last thing on every view, by construction -->
-				<CohortBanner />
+				<!-- Upstream cohort invite: off unless the brand file turns it on -->
+				{#if SHOW_COHORT_INVITE}<CohortBanner />{/if}
 			</div>
 		</main>
 	</div>
 	<CommandPalette navigate={(href) => goto(href)} />
 	<ConductorPanel pathname={page.url.pathname} />
 	<Toaster />
-	<CohortModal pathname={page.url.pathname} />
+	{#if SHOW_COHORT_INVITE}<CohortModal pathname={page.url.pathname} />{/if}
 </div>
 
 <style>

@@ -16,6 +16,13 @@ company: The Founders Group
 short: TFG
 operator: Nader            # who the console greets
 domain: thefoundersgroup.net
+product_name: TFG OS                 # sidebar wordmark
+product_tagline: Sales Command Centre
+# Upstream views this install does not use: hidden from the sidebar and the
+# command palette (the routes still exist, so nothing breaks).
+hide_views: [/os/trading, /os/brand-deals, /os/adpilot]
+# Upstream FounderOS shows a pop-up and footer advertising its cohort.
+cohort_invite: false
 
 workspaces:
   founderos: {name: TFG HQ, holds: "TFG HQ: the command centre across both offers; team, tools, agents, SOPs"}

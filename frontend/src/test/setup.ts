@@ -245,3 +245,11 @@ global.console = {
   warn: vi.fn(),
   error: vi.fn()
 };
+
+// TFG fork: the upstream nav/chrome suites pin FounderOS's full sidebar, so
+// they run with no hidden views. The brand file's real hide list is tested in
+// src/lib/founderos/nav.brand.test.ts.
+vi.mock('$lib/founderos/brand.gen', async (importOriginal) => ({
+	...(await importOriginal<typeof import('$lib/founderos/brand.gen')>()),
+	HIDDEN_VIEWS: []
+}));

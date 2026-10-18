@@ -578,7 +578,8 @@ describe('production look (round 2): rounded controls, venture hues, the sliding
 		const dot = archive.querySelector('[data-testid="venture-dot"]') as HTMLElement;
 		expect(dot.classList.contains('rounded-full')).toBe(true);
 		expect(dot.classList.contains('opacity-60')).toBe(true);
-		expect(dot.style.background).toBe('rgb(0, 255, 170)');
+		const rgb = (hex: string) => `rgb(${[1, 3, 5].map((i) => parseInt(hex.slice(i, i + 2), 16)).join(', ')})`;
+		expect(dot.style.background).toBe(rgb(VENTURE_COLOR.vantage));
 		expect(within(archive).getByText('Engaged').classList.contains('rounded-full')).toBe(true);
 	});
 

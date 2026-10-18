@@ -1,3 +1,6 @@
+> **This is TFG OS, The Founders Group's fork.** Start with [docs/tfg/README.md](docs/tfg/README.md).
+> Everything below is the upstream Founder OS README, kept for reference and credit.
+
 # Founder OS
 
 **A personal operating system for a single person company: a command center

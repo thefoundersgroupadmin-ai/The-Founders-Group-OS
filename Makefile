@@ -267,8 +267,8 @@ client: ## A TFG client install: workspaces + client starting data (OWNER=<clien
 tfg-brand: ## Regenerate brand files after editing config/tfg/brand.yaml (BRAND=<path> for a client)
 	@python3 scripts/tfg-brand.py --brand "$(or $(BRAND),config/tfg/brand.yaml)"
 
-tfg-check: ## TFG gates: brand files current, Go + frontend tests, svelte-check
-	@python3 scripts/tfg-brand.py --check
+tfg-check: ## TFG gates: brand files current, Go + frontend tests, svelte-check (BRAND=<path> on a client branch)
+	@python3 scripts/tfg-brand.py --check --brand "$(or $(BRAND),config/tfg/brand.yaml)"
 	@cd desktop/backend-go && go test ./internal/founderos/... ./cmd/...
 	@cd frontend && npx vitest run src/lib/founderos "src/routes/(founderos)" && npx svelte-check --threshold error
 

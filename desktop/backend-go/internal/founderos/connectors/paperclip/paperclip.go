@@ -21,7 +21,9 @@ import (
 	"io"
 	"log/slog"
 	"math"
+	"net"
 	"net/http"
+	"net/url"
 	"sort"
 	"strings"
 	"sync"
@@ -61,13 +63,37 @@ func New(res connectors.Resolver) *Connector {
 type creds struct{ url, key, company string }
 
 func (c *Connector) creds() (creds, bool) {
-	u := c.res.Resolve("PAPERCLIP_API_URL")
-	k := c.res.Resolve("PAPERCLIP_BOARD_KEY")
-	co := c.res.Resolve("PAPERCLIP_COMPANY_ID")
-	if u == "" || k == "" || co == "" {
+	u := strings.TrimSuffix(strings.TrimSpace(c.res.Resolve("PAPERCLIP_API_URL")), "/")
+	k := strings.TrimSpace(c.res.Resolve("PAPERCLIP_BOARD_KEY"))
+	co := strings.TrimSpace(c.res.Resolve("PAPERCLIP_COMPANY_ID"))
+	if u == "" || co == "" {
 		return creds{}, false
 	}
-	return creds{url: strings.TrimSuffix(u, "/"), key: k, company: co}, true
+
+	// Paperclip's local_trusted mode deliberately allows unauthenticated board
+	// requests only on loopback. Support that mode explicitly for a same-Mac
+	// install, but never silently downgrade a remote board to no-auth access.
+	if k == "" {
+		mode := strings.ToLower(strings.TrimSpace(c.res.Resolve("PAPERCLIP_AUTH_MODE")))
+		if mode != "local_trusted" {
+			return creds{}, false
+		}
+		parsed, err := url.Parse(u)
+		if err != nil || parsed.Scheme != "http" || parsed.Hostname() == "" ||
+			parsed.User != nil || (parsed.Path != "" && parsed.Path != "/") ||
+			parsed.RawQuery != "" || parsed.Fragment != "" {
+			return creds{}, false
+		}
+		host := strings.ToLower(parsed.Hostname())
+		if host != "localhost" {
+			ip := net.ParseIP(host)
+			if ip == nil || !ip.IsLoopback() {
+				return creds{}, false
+			}
+		}
+	}
+
+	return creds{url: u, key: k, company: co}, true
 }
 
 func (c *Connector) pinnedCockpit() string {
@@ -104,7 +130,9 @@ func (c *Connector) fetch(ctx context.Context, method, url string, key string, b
 		cancel()
 		return nil, err
 	}
-	req.Header.Set("Authorization", "Bearer "+key)
+	if key != "" {
+		req.Header.Set("Authorization", "Bearer "+key)
+	}
 	if body != nil {
 		req.Header.Set("Content-Type", "application/json")
 	}

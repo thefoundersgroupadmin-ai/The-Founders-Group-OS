@@ -418,6 +418,24 @@ func TestCockpitThreadReadDoesNotCreateMissingIssue(t *testing.T) {
 	}
 }
 
+func TestLocalTrustedChatRemainsGuardedWithoutOptIn(t *testing.T) {
+	t.Setenv("FOUNDEROS_WRITES", "0")
+	b := &board{agents: rawAgents}
+	srv := httptest.NewServer(b.handler(t))
+	t.Cleanup(srv.Close)
+	c := New(resolver(t,
+		"PAPERCLIP_API_URL="+srv.URL,
+		"PAPERCLIP_COMPANY_ID=c1",
+		"PAPERCLIP_AUTH_MODE=local_trusted",
+	))
+	if _, err := c.PostCockpitMessage(context.Background(), "hello"); !errors.Is(err, guard.ErrWritesDisabled) {
+		t.Fatalf("chat post err = %v; want writes guard by default", err)
+	}
+	if b.hitCount("POST") != 0 {
+		t.Fatalf("default safety guard allowed a write: %v", b.hits)
+	}
+}
+
 func TestLocalTrustedChatOptInAllowsOnlyCockpitIssueAndComment(t *testing.T) {
 	t.Setenv("FOUNDEROS_WRITES", "0")
 	b := &board{agents: rawAgents}

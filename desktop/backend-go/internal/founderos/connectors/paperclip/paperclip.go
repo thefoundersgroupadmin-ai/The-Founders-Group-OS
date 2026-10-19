@@ -72,30 +72,73 @@ func (c *Connector) creds() (creds, bool) {
 		return creds{}, false
 	}
 
-	// Paperclip's local_trusted mode deliberately allows unauthenticated board
-	// requests only on loopback. Support that mode explicitly for a same-Mac
-	// install, but never silently downgrade a remote board to no-auth access.
+	// Paperclip local_trusted mode is deliberately keyless and loopback-only.
+	// Do not silently downgrade a remote board to unauthenticated access.
 	if k == "" {
 		mode := strings.ToLower(strings.TrimSpace(c.res.Resolve("PAPERCLIP_AUTH_MODE")))
-		if mode != "local_trusted" {
+		if mode != "local_trusted" || !localTrustedLoopbackURL(u) {
 			return creds{}, false
-		}
-		parsed, err := url.Parse(u)
-		if err != nil || parsed.Scheme != "http" || parsed.Hostname() == "" ||
-			parsed.User != nil || (parsed.Path != "" && parsed.Path != "/") ||
-			parsed.RawQuery != "" || parsed.Fragment != "" {
-			return creds{}, false
-		}
-		host := strings.ToLower(parsed.Hostname())
-		if host != "localhost" {
-			ip := net.ParseIP(host)
-			if ip == nil || !ip.IsLoopback() {
-				return creds{}, false
-			}
 		}
 	}
 
+
 	return creds{url: u, key: k, company: co}, true
+}
+
+// localTrustedLoopbackURL validates a same-machine Paperclip URL for keyless local_trusted use.
+func localTrustedLoopbackURL(raw string) bool {
+	parsed, err := url.Parse(raw)
+	if err != nil || parsed.Scheme != "http" || parsed.Hostname() == "" ||
+		parsed.User != nil || (parsed.Path != "" && parsed.Path != "/") ||
+		parsed.RawQuery != "" || parsed.Fragment != "" {
+		return false
+	}
+	host := strings.ToLower(parsed.Hostname())
+	if host == "localhost" {
+		return true
+	}
+	ip := net.ParseIP(host)
+	return ip != nil && ip.IsLoopback()
+}
+
+// localChatWriteAllowed is a narrow opt-in for the operator's Conductor chat.
+// It only permits creating the standing cockpit issue and posting to that
+// issue on a keyless, local_trusted loopback Paperclip instance. It does not
+// enable other board writes or scheduled jobs.
+func (c *Connector) localChatWriteAllowed(cr creds, action, method, path string, body any) bool {
+	if guard.WritesEnabled() ||
+		strings.TrimSpace(c.res.Resolve("PAPERCLIP_LOCAL_CHAT_WRITES")) != "1" ||
+		cr.key != "" ||
+		strings.ToLower(strings.TrimSpace(c.res.Resolve("PAPERCLIP_AUTH_MODE"))) != "local_trusted" ||
+		!localTrustedLoopbackURL(cr.url) {
+		return false
+	}
+	switch action {
+	case "paperclip.cockpit.chat.issue.create":
+		payload, ok := body.(map[string]any)
+		return ok && method == http.MethodPost &&
+			path == "/api/companies/"+cr.company+"/issues" &&
+			payload["title"] == CockpitTitle &&
+			payload["status"] == CockpitSafeStatus &&
+			payload["description"] == CockpitDescription
+	case "paperclip.cockpit.chat.comment.create":
+		if method != http.MethodPost || !strings.HasPrefix(path, "/api/issues/") || !strings.HasSuffix(path, "/comments") {
+			return false
+		}
+		id := strings.TrimSuffix(strings.TrimPrefix(path, "/api/issues/"), "/comments")
+		if id == "" || strings.Contains(id, "/") {
+			return false
+		}
+		c.mu.Lock()
+		known := c.cockpitID
+		c.mu.Unlock()
+		if pin := c.pinnedCockpit(); pin != "" {
+			known = pin
+		}
+		return id == known
+	default:
+		return false
+	}
 }
 
 func (c *Connector) pinnedCockpit() string {
@@ -225,7 +268,7 @@ func (c *Connector) send(ctx context.Context, action, method, path string, body 
 		return nil, errNoCreds
 	}
 	var out any
-	err := guard.Outbound(action, func() error {
+	request := func() error {
 		res, err := c.fetch(ctx, method, cr.url+path, cr.key, body, writeTimeout)
 		if err != nil {
 			return err
@@ -237,9 +280,16 @@ func (c *Connector) send(ctx context.Context, action, method, path string, body 
 		}
 		out, _ = decode(res)
 		return nil
-	})
-	return out, err
+	}
+	if c.localChatWriteAllowed(cr, action, method, path, body) {
+		return out, request()
+	}
+	if err := guard.Outbound(action, request); err != nil {
+		return nil, err
+	}
+	return out, nil
 }
+
 
 // ---- reads ------------------------------------------------------------------
 
@@ -355,7 +405,7 @@ func (c *Connector) findCockpitByScan(ctx context.Context) (string, error) {
 // EnsureCockpitIssue returns the standing cockpit issue id: the pinned one,
 // else the open one found by scan, else a new one assigned to the Conductor.
 // Creating it is a write and is guarded.
-func (c *Connector) EnsureCockpitIssue(ctx context.Context) (string, error) {
+func (c *Connector) existingCockpitIssue(ctx context.Context) (string, error) {
 	c.mu.Lock()
 	cached := c.cockpitID
 	c.mu.Unlock()
@@ -371,16 +421,30 @@ func (c *Connector) EnsureCockpitIssue(ctx context.Context) (string, error) {
 	if pin := c.pinnedCockpit(); pin != "" {
 		return remember(pin), nil
 	}
-	cr, has := c.creds()
-	if !has {
-		return "", errNoCreds
-	}
 	found, err := c.findCockpitByScan(ctx)
 	if err != nil {
 		return "", err
 	}
-	if found != "" {
-		return remember(found), nil
+	if found == "" {
+		return "", nil
+	}
+	return remember(found), nil
+}
+
+// EnsureCockpitIssue returns the standing cockpit issue id, creating it only
+// when a guarded write path explicitly needs one.
+func (c *Connector) EnsureCockpitIssue(ctx context.Context) (string, error) {
+	return c.ensureCockpitIssue(ctx, false)
+}
+
+func (c *Connector) ensureCockpitIssue(ctx context.Context, localChat bool) (string, error) {
+	found, err := c.existingCockpitIssue(ctx)
+	if err != nil || found != "" {
+		return found, err
+	}
+	cr, has := c.creds()
+	if !has {
+		return "", errNoCreds
 	}
 	conductor := ""
 	if agents, err := c.Agents(ctx); err == nil {
@@ -391,7 +455,11 @@ func (c *Connector) EnsureCockpitIssue(ctx context.Context) (string, error) {
 			}
 		}
 	}
-	body, err := c.send(ctx, "paperclip.issue.create", http.MethodPost, "/api/companies/"+cr.company+"/issues", cockpitCreateBody(conductor))
+	action := "paperclip.issue.create"
+	if localChat {
+		action = "paperclip.cockpit.chat.issue.create"
+	}
+	body, err := c.send(ctx, action, http.MethodPost, "/api/companies/"+cr.company+"/issues", cockpitCreateBody(conductor))
 	if err != nil {
 		return "", fmt.Errorf("cockpit issue create failed: %w", err)
 	}
@@ -403,18 +471,27 @@ func (c *Connector) EnsureCockpitIssue(ctx context.Context) (string, error) {
 	if !isStr {
 		return "", errors.New("cockpit issue create returned no id")
 	}
+	c.mu.Lock()
+	c.cockpitID = id
+	c.mu.Unlock()
 	slog.Warn("[paperclip] created fallback FounderOS v1 Cockpit issue", "id", id)
-	return remember(id), nil
+	return id, nil
 }
+
 
 // CockpitThread is the cockpit thread, oldest to newest; limit <= 0 means 50.
 func (c *Connector) CockpitThread(ctx context.Context, limit int) ([]Comment, error) {
 	if limit <= 0 {
 		limit = 50
 	}
-	id, err := c.EnsureCockpitIssue(ctx)
+	// Reading the chat must be read-only: an empty board should not try to
+	// create its cockpit issue until the operator actually sends a message.
+	id, err := c.existingCockpitIssue(ctx)
 	if err != nil {
 		return nil, err
+	}
+	if id == "" {
+		return []Comment{}, nil
 	}
 	body, err := c.get(ctx, fmt.Sprintf("/api/issues/%s/comments?limit=%d", id, limit), issueTimeout)
 	if err != nil {
@@ -424,6 +501,7 @@ func (c *Connector) CockpitThread(ctx context.Context, limit int) ([]Comment, er
 	sort.SliceStable(out, func(i, j int) bool { return out[i].CreatedAt < out[j].CreatedAt })
 	return out, nil
 }
+
 
 // ---- status -----------------------------------------------------------------
 
@@ -496,11 +574,21 @@ func (c *Connector) InvokeHeartbeat(ctx context.Context, agentID string) (bool, 
 // PostCockpitMessage sends the operator's message into the cockpit thread (wakes
 // the Conductor).
 func (c *Connector) PostCockpitMessage(ctx context.Context, message string) (*Comment, error) {
-	id, err := c.EnsureCockpitIssue(ctx)
+	return c.postCockpitMessage(ctx, message, "paperclip.cockpit.chat.comment.create", true)
+}
+
+func (c *Connector) postCockpitMessage(ctx context.Context, message, action string, localChat bool) (*Comment, error) {
+	var id string
+	var err error
+	if localChat {
+		id, err = c.ensureCockpitIssue(ctx, true)
+	} else {
+		id, err = c.EnsureCockpitIssue(ctx)
+	}
 	if err != nil {
 		return nil, err
 	}
-	body, err := c.send(ctx, "paperclip.comment.create", http.MethodPost, "/api/issues/"+id+"/comments", map[string]any{"body": message})
+	body, err := c.send(ctx, action, http.MethodPost, "/api/issues/"+id+"/comments", map[string]any{"body": message})
 	if err != nil {
 		return nil, fmt.Errorf("comment failed: %w", err)
 	}
@@ -510,6 +598,7 @@ func (c *Connector) PostCockpitMessage(ctx context.Context, message string) (*Co
 	}
 	return first(MapComments([]any{body})), nil
 }
+
 
 // PostOnce puts a note on the cockpit thread unless a comment already carries
 // marker, so a five-minute tick cannot nag. It returns posted, already or
@@ -524,7 +613,7 @@ func (c *Connector) PostOnce(ctx context.Context, marker, message string) string
 			return "already"
 		}
 	}
-	if posted, err := c.PostCockpitMessage(ctx, message); err != nil || posted == nil {
+	if posted, err := c.postCockpitMessage(ctx, message, "paperclip.comment.create", false); err != nil || posted == nil {
 		return "failed"
 	}
 	return "posted"

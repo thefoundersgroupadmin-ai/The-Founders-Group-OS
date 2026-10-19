@@ -40,7 +40,7 @@ func resolver(t *testing.T, lines ...string) connectors.Resolver {
 	if err := os.WriteFile(p, []byte(strings.Join(lines, "\n")+"\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	for _, k := range []string{"PAPERCLIP_API_URL", "PAPERCLIP_BOARD_KEY", "PAPERCLIP_COMPANY_ID", "PAPERCLIP_COCKPIT_ISSUE_ID", "PAPERCLIP_AUTH_MODE"} {
+	for _, k := range []string{"PAPERCLIP_API_URL", "PAPERCLIP_BOARD_KEY", "PAPERCLIP_COMPANY_ID", "PAPERCLIP_COCKPIT_ISSUE_ID", "PAPERCLIP_AUTH_MODE", "PAPERCLIP_LOCAL_CHAT_WRITES"} {
 		t.Setenv(k, "")
 	}
 	return connectors.Resolver{EnvLocal: p}
@@ -397,11 +397,61 @@ func TestEnsureCockpitCreateIsGuardedWhenNoneExists(t *testing.T) {
 	t.Setenv("FOUNDEROS_WRITES", "0")
 	c, b, _ := newBoard(t)
 	b.issues = cockpitIssues(3)
-	if _, err := c.CockpitThread(context.Background(), 10); !errors.Is(err, guard.ErrWritesDisabled) {
+	if _, err := c.EnsureCockpitIssue(context.Background()); !errors.Is(err, guard.ErrWritesDisabled) {
 		t.Fatalf("err = %v", err)
 	}
 	if b.hitCount("POST") != 0 {
 		t.Fatalf("hits = %v", b.hits)
+	}
+}
+
+func TestCockpitThreadReadDoesNotCreateMissingIssue(t *testing.T) {
+	t.Setenv("FOUNDEROS_WRITES", "0")
+	c, b, _ := newBoard(t)
+	b.issues = cockpitIssues(3)
+	thread, err := c.CockpitThread(context.Background(), 10)
+	if err != nil || len(thread) != 0 {
+		t.Fatalf("thread = %+v, err = %v; want empty thread without error", thread, err)
+	}
+	if b.hitCount("POST") != 0 {
+		t.Fatalf("read unexpectedly wrote to board: %v", b.hits)
+	}
+}
+
+func TestLocalTrustedChatOptInAllowsOnlyCockpitIssueAndComment(t *testing.T) {
+	t.Setenv("FOUNDEROS_WRITES", "0")
+	b := &board{agents: rawAgents}
+	srv := httptest.NewServer(b.handler(t))
+	t.Cleanup(srv.Close)
+	c := New(resolver(t,
+		"PAPERCLIP_API_URL="+srv.URL,
+		"PAPERCLIP_COMPANY_ID=c1",
+		"PAPERCLIP_AUTH_MODE=local_trusted",
+		"PAPERCLIP_LOCAL_CHAT_WRITES=1",
+	))
+
+	msg, err := c.PostCockpitMessage(context.Background(), "hello")
+	if err != nil || msg == nil || msg.ID != "c9" {
+		t.Fatalf("local chat post = %+v, err = %v", msg, err)
+	}
+	if b.hitCount("POST /api/companies/c1/issues") != 1 || b.hitCount("POST /api/issues/new-1/comments") != 1 {
+		t.Fatalf("local chat writes = %v", b.hits)
+	}
+	if _, err := c.CreateIssue(context.Background(), "not chat", "must remain guarded"); !errors.Is(err, guard.ErrWritesDisabled) {
+		t.Fatalf("generic issue create err = %v; want writes guard", err)
+	}
+	if _, err := c.InvokeHeartbeat(context.Background(), "a1"); !errors.Is(err, guard.ErrWritesDisabled) {
+		t.Fatalf("heartbeat err = %v; want writes guard", err)
+	}
+	for _, hit := range b.hits {
+		if strings.HasPrefix(hit, "POST ") &&
+			hit != "POST /api/companies/c1/issues" &&
+			hit != "POST /api/issues/new-1/comments" {
+			t.Errorf("unexpected write reached local board: %s", hit)
+		}
+	}
+	if len(guard.Refused()) == 0 {
+		t.Error("blocked non-chat writes should still be recorded by the guard")
 	}
 }
 

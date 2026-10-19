@@ -195,7 +195,7 @@ test-backend: ## Run Go backend tests
 test-frontend: ## Run SvelteKit frontend tests
 	@echo ""
 	@printf '$(BOLD)Running frontend tests...$(RESET)\n'
-	@cd frontend && pnpm test
+	@cd frontend && pnpm exec vitest run --maxWorkers=2
 
 .PHONY: test-backend-verbose
 test-backend-verbose: ## Run Go tests with verbose output
@@ -274,7 +274,7 @@ graph: ## Build the Graphify code map Claude uses to answer code questions cheap
 tfg-check: ## TFG gates: brand files current, Go + frontend tests, svelte-check (BRAND=<path> on a client branch)
 	@python3 scripts/tfg-brand.py --check --brand "$(or $(BRAND),config/tfg/brand.yaml)"
 	@cd desktop/backend-go && go test ./internal/founderos/... ./cmd/...
-	@cd frontend && npx vitest run src/lib/founderos "src/routes/(founderos)" && npx svelte-check --threshold error
+	@cd frontend && pnpm exec vitest run src/lib/founderos "src/routes/(founderos)" --maxWorkers=2 && NODE_OPTIONS="$${NODE_OPTIONS:+$$NODE_OPTIONS }--max-old-space-size=4096" pnpm exec svelte-check --threshold error
 
 demo: ## Create the FounderOS workspaces and load the demo data (OWNER=<email you registered with>)
 	@test -n "$(OWNER)" || { echo "usage: make demo OWNER=<the email you registered with at /register>"; exit 2; }

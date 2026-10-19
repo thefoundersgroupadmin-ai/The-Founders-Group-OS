@@ -40,20 +40,21 @@ func resolver(t *testing.T, lines ...string) connectors.Resolver {
 	if err := os.WriteFile(p, []byte(strings.Join(lines, "\n")+"\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	for _, k := range []string{"PAPERCLIP_API_URL", "PAPERCLIP_BOARD_KEY", "PAPERCLIP_COMPANY_ID", "PAPERCLIP_COCKPIT_ISSUE_ID"} {
+	for _, k := range []string{"PAPERCLIP_API_URL", "PAPERCLIP_BOARD_KEY", "PAPERCLIP_COMPANY_ID", "PAPERCLIP_COCKPIT_ISSUE_ID", "PAPERCLIP_AUTH_MODE"} {
 		t.Setenv(k, "")
 	}
 	return connectors.Resolver{EnvLocal: p}
 }
 
 type board struct {
-	mu       sync.Mutex
-	hits     []string
-	bodies   map[string]string
-	agents   string
-	status   int
-	issues   []map[string]any
-	comments string
+	mu          sync.Mutex
+	hits        []string
+	bodies      map[string]string
+	agents      string
+	status      int
+	issues      []map[string]any
+	comments    string
+	authHeader  string
 }
 
 func (b *board) handler(t *testing.T) http.HandlerFunc {
@@ -61,8 +62,8 @@ func (b *board) handler(t *testing.T) http.HandlerFunc {
 		b.mu.Lock()
 		defer b.mu.Unlock()
 		b.hits = append(b.hits, r.Method+" "+r.URL.Path)
-		if got := r.Header.Get("Authorization"); got != "Bearer board-key" {
-			t.Errorf("auth header = %q", got)
+		if got := r.Header.Get("Authorization"); got != b.authHeader {
+			t.Errorf("auth header = %q, want %q", got, b.authHeader)
 		}
 		if r.Body != nil {
 			raw, _ := io.ReadAll(r.Body)
@@ -132,7 +133,7 @@ func (b *board) hitCount(prefix string) int {
 
 func newBoard(t *testing.T, extra ...string) (*Connector, *board, *httptest.Server) {
 	t.Helper()
-	b := &board{agents: rawAgents}
+	b := &board{agents: rawAgents, authHeader: "Bearer board-key"}
 	srv := httptest.NewServer(b.handler(t))
 	t.Cleanup(srv.Close)
 	lines := append([]string{"PAPERCLIP_API_URL=" + srv.URL + "/", "PAPERCLIP_BOARD_KEY=board-key", "PAPERCLIP_COMPANY_ID=c1"}, extra...)
@@ -149,6 +150,33 @@ func TestStatusNotConfiguredWithoutCreds(t *testing.T) {
 	s := New(resolver(t, "PAPERCLIP_API_URL=http://x")).Status(context.Background())
 	if s.State != connectors.StateNotConfigured || !strings.Contains(s.Detail, "PAPERCLIP_BOARD_KEY") {
 		t.Fatalf("status = %+v", s)
+	}
+}
+
+func TestStatusConnectsToLocalTrustedLoopbackWithoutBoardKey(t *testing.T) {
+	b := &board{agents: rawAgents}
+	srv := httptest.NewServer(b.handler(t))
+	t.Cleanup(srv.Close)
+	c := New(resolver(t,
+		"PAPERCLIP_API_URL="+srv.URL,
+		"PAPERCLIP_COMPANY_ID=c1",
+		"PAPERCLIP_AUTH_MODE=local_trusted",
+	))
+	s := c.Status(context.Background())
+	if s.State != connectors.StateConnected || s.Detail != "Board live · 3 agents · 1 running" {
+		t.Fatalf("local-trusted status = %+v", s)
+	}
+}
+
+func TestLocalTrustedWithoutKeyRefusesNonLoopbackURLs(t *testing.T) {
+	c := New(resolver(t,
+		"PAPERCLIP_API_URL=http://paperclip.example:3101",
+		"PAPERCLIP_COMPANY_ID=c1",
+		"PAPERCLIP_AUTH_MODE=local_trusted",
+	))
+	s := c.Status(context.Background())
+	if s.State != connectors.StateNotConfigured {
+		t.Fatalf("remote no-key status = %+v, want not configured", s)
 	}
 }
 

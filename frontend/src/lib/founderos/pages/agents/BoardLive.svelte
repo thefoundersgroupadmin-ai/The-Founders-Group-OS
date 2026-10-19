@@ -49,7 +49,11 @@
 
 	{#if !board.connected}
 		<p class="bn-dim px-4 py-3 font-mono text-[10.5px]" title={board.error ?? undefined}>
-			Paperclip is not answering on the tailnet. No fake data: this strip lights up the moment the board responds.
+			{#if board.error === 'board answered with no seats'}
+				Paperclip is reachable, but this company has no agent seats yet. Create the first agent in Paperclip; this panel will populate afterward.
+			{:else}
+				Paperclip is not answering on the tailnet. No fake data: this strip lights up the moment the board responds.
+			{/if}
 		</p>
 	{:else}
 		<div class="flex min-h-0 flex-1 flex-col gap-4 p-4">

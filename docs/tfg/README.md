@@ -69,6 +69,36 @@ Claude Code sessions in this folder then look symbols up in the map
 
 Put them in `desktop/backend-go/.env` and run `make dev-local-restart`.
 
+## Paperclip live board integration
+
+The **Real Agents** panel at `/os/agents` reads the separate Paperclip company
+board. It does not mirror the Go FounderOS bridge roster: an agent registered in
+one runtime does not automatically create an agent in the other.
+
+For Paperclip running on this same Mac in `local_trusted` mode, first verify
+its health endpoint and use its actual port (the default is often 3100; a local
+installation may use another port). Replace `your-company-id` with the ID from
+`GET /api/companies`, then add these settings to `~/.founderos/.env`:
+
+```dotenv
+PAPERCLIP_API_URL=http://127.0.0.1:3101
+PAPERCLIP_COMPANY_ID=your-company-id
+PAPERCLIP_AUTH_MODE=local_trusted
+```
+
+For this mode, leave `PAPERCLIP_BOARD_KEY` unset. The connector deliberately
+omits the Authorization header and permits keyless access only when the URL is
+plain HTTP on `localhost` or a loopback IP. Do **not** use this mode for a
+tailnet, LAN, or remote Paperclip server. For a remote board, use its HTTPS URL,
+a real board API key, and the company ID; leave `PAPERCLIP_AUTH_MODE` unset.
+
+A healthy Paperclip service may still return an empty agent list. The connector
+reports that as an error instead of inventing rows. Create/configure the real
+Paperclip agents in Paperclip itself (start with the CEO, then its reports),
+and ensure each has an adapter/model before enabling any heartbeat schedules.
+The Go roster and the Paperclip board are distinct systems and must be verified
+separately.
+
 ## Gates before you ship a change
 
 ```bash

@@ -171,6 +171,19 @@ describe('/agents page', () => {
 		expect(queryByText('Running now')).toBeNull();
 	});
 
+	it('explains a reachable but empty Paperclip company', async () => {
+		route({
+			'GET /pages/agents/view': () =>
+				view({
+					board: { ...board(), connected: false, error: 'board answered with no seats', agents: [], issues: [], runs: [] },
+					volume: volume({ chips: [{ tone: 'err', text: 'board unreachable' }], meters: [], headline: 0 })
+				})
+		});
+		const { findByText, queryByText } = render(AgentsPage);
+		expect(await findByText(/Paperclip is reachable, but this company has no agent seats yet/)).toBeTruthy();
+		expect(queryByText(/not answering on the tailnet/)).toBeNull();
+	});
+
 	it('an unreachable board reads like prod below the cockpit: zeros with the chip, a square red LED', async () => {
 		route({
 			'GET /pages/agents/view': () =>

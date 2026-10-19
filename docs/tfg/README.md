@@ -77,12 +77,12 @@ one runtime does not automatically create an agent in the other.
 
 For Paperclip running on this same Mac in `local_trusted` mode, first verify
 its health endpoint and use its actual port (the default is often 3100; a local
-installation may use another port). Add these settings to
-`~/.founderos/.env`:
+installation may use another port). Replace `your-company-id` with the ID from
+`GET /api/companies`, then add these settings to `~/.founderos/.env`:
 
 ```dotenv
 PAPERCLIP_API_URL=http://127.0.0.1:3101
-PAPERCLIP_COMPANY_ID=<company ID from GET /api/companies>
+PAPERCLIP_COMPANY_ID=your-company-id
 PAPERCLIP_AUTH_MODE=local_trusted
 ```
 

@@ -10,8 +10,8 @@
 // /api/agents/me BY DESIGN, so this connector never calls it.
 //
 // Differences from the TS, on purpose: every read returns an error instead
-// of swallowing it into an empty list (unknown reads unknown), and every
-// write is wrapped in guard.Outbound.
+// of swallowing it into an empty list (unknown reads unknown). Writes use the
+// global guard, except the narrowly opted-in local Conductor chat actions.
 package paperclip
 
 import (

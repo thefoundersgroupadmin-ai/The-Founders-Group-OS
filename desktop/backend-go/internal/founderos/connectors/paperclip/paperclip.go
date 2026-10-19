@@ -1,10 +1,12 @@
 // Package paperclip ports FounderOS v1's lib/connectors/paperclip.ts: the agent
 // harness board (Conductor → department leads → Hermes worker pool), served
-// on the mini at :3100 over the tailnet.
+// locally on loopback or remotely over a secured network.
 //
-// Creds: PAPERCLIP_API_URL + PAPERCLIP_BOARD_KEY (a USER-class board key, sent
-// as a Bearer token) + PAPERCLIP_COMPANY_ID; PAPERCLIP_COCKPIT_ISSUE_ID pins
-// the cockpit thread. The board key is refused by the agent-gated
+// Credentials: PAPERCLIP_API_URL + PAPERCLIP_COMPANY_ID, and a USER-class
+// PAPERCLIP_BOARD_KEY sent as Bearer auth for remote boards. A same-machine
+// Paperclip local_trusted instance may instead set PAPERCLIP_AUTH_MODE=local_trusted;
+// keyless access is accepted only for an HTTP loopback URL. PAPERCLIP_COCKPIT_ISSUE_ID
+// pins the cockpit thread. The board key is refused by the agent-gated
 // /api/agents/me BY DESIGN, so this connector never calls it.
 //
 // Differences from the TS, on purpose: every read returns an error instead
@@ -429,7 +431,12 @@ func (c *Connector) Status(ctx context.Context) connectors.Status {
 	s := connectors.Status{ID: Meta.ID, Name: Meta.Name, Kind: Meta.Kind}
 	if _, has := c.creds(); !has {
 		s.State = connectors.StateNotConfigured
-		s.Detail = connectors.SetKeys("PAPERCLIP_API_URL", "PAPERCLIP_BOARD_KEY", "PAPERCLIP_COMPANY_ID")
+		if strings.EqualFold(strings.TrimSpace(c.res.Resolve("PAPERCLIP_AUTH_MODE")), "local_trusted") &&
+			strings.TrimSpace(c.res.Resolve("PAPERCLIP_BOARD_KEY")) == "" {
+			s.Detail = "Set PAPERCLIP_API_URL and PAPERCLIP_COMPANY_ID; keyless local_trusted mode requires an HTTP localhost or loopback URL."
+		} else {
+			s.Detail = connectors.SetKeys("PAPERCLIP_API_URL", "PAPERCLIP_BOARD_KEY", "PAPERCLIP_COMPANY_ID")
+		}
 		return s
 	}
 	agents, err := c.Agents(ctx)

@@ -92,6 +92,16 @@ plain HTTP on `localhost` or a loopback IP. Do **not** use this mode for a
 tailnet, LAN, or remote Paperclip server. For a remote board, use its HTTPS URL,
 a real board API key, and the company ID; leave `PAPERCLIP_AUTH_MODE` unset.
 
+The OS's `FOUNDEROS_WRITES` guard is intentionally global. Keep it off during
+setup. To allow only the manually composed Conductor chat to create its
+`FounderOS v1 Cockpit` issue and post comments on that issue on this same-Mac
+keyless `local_trusted` board, optionally add
+`PAPERCLIP_LOCAL_CHAT_WRITES=1` to `~/.founderos/.env`. This narrow opt-in
+does not permit other Paperclip writes or enable schedules; all other writes
+remain guarded while `FOUNDEROS_WRITES=0`. A chat message can wake the assigned
+Conductor in Paperclip, so send only deliberate manual test prompts during setup.
+Do not set this option for a remote/tailnet board or a board using an API key.
+
 A healthy Paperclip service may still return an empty agent list. The connector
 reports that as an error instead of inventing rows. Create/configure the real
 Paperclip agents in Paperclip itself (start with the CEO, then its reports),

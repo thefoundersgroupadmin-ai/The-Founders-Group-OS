@@ -136,6 +136,16 @@ FROM ZWACHATSESSION s
 WHERE s.ZPARTNERNAME IS NOT NULL AND (s.ZARCHIVED IS NULL OR s.ZARCHIVED = 0)
 ORDER BY s.ZLASTMESSAGEDATE DESC LIMIT ?`
 
+// Native WhatsApp caches the chat preview and last-message reference. Use
+// those bounded summaries rather than scanning and sorting every chat history.
+// Older schemas retain the history-based fallback above.
+const cachedRecentChatsSQL = `SELECT s.ZPARTNERNAME, s.ZCONTACTJID, s.ZLASTMESSAGEDATE, s.ZUNREADCOUNT,
+  COALESCE(s.ZLASTMESSAGETEXT, m.ZTEXT), COALESCE(m.ZMESSAGEDATE, s.ZLASTMESSAGEDATE)
+FROM ZWACHATSESSION s
+LEFT JOIN ZWAMESSAGE m ON m.Z_PK = s.ZLASTMESSAGE
+WHERE s.ZPARTNERNAME IS NOT NULL AND (s.ZARCHIVED IS NULL OR s.ZARCHIVED = 0)
+ORDER BY s.ZLASTMESSAGEDATE DESC LIMIT ?`
+
 // RecentChats is the WhatsApp lane of the Comms feed, newest first. WhatsApp
 // cannot be sent to from here; replyTo carries the number so wa.me/<digits>
 // can open the exact thread (group JIDs have no dialable number and get none).
@@ -153,7 +163,15 @@ func RecentChats(ctx context.Context, dbPath string, limit int, now time.Time) (
 		if err := db.QueryRowContext(ctx, "SELECT COALESCE(MAX(ZLASTMESSAGEDATE),0) FROM ZWACHATSESSION").Scan(&maxRaw); err != nil {
 			return nil, err
 		}
-		rows, err := db.QueryContext(ctx, recentChatsSQL, limit)
+		query := recentChatsSQL
+		var cachedColumns int
+		if err := db.QueryRowContext(ctx, `SELECT count(*) FROM pragma_table_info('ZWACHATSESSION') WHERE name IN ('ZLASTMESSAGE', 'ZLASTMESSAGETEXT')`).Scan(&cachedColumns); err != nil {
+			return nil, err
+		}
+		if cachedColumns == 2 {
+			query = cachedRecentChatsSQL
+		}
+		rows, err := db.QueryContext(ctx, query, limit)
 		if err != nil {
 			return nil, err
 		}

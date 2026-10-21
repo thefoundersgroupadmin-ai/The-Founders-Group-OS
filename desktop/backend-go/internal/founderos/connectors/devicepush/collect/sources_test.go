@@ -341,3 +341,23 @@ func TestLocalStackStatus(t *testing.T) {
 }
 
 func ftoa(f float64) string { return strconv.FormatFloat(f, 'f', -1, 64) }
+
+// Current WhatsApp stores a preview and last-message reference on each chat.
+// Reading that bounded summary must work even when history has not synced yet.
+func TestRecentChatsUsesNativeCachedPreview(t *testing.T) {
+	db := fixtureDB(t, filepath.Join(t.TempDir(), "native.sqlite"),
+		`CREATE TABLE ZWACHATSESSION (Z_PK INTEGER PRIMARY KEY, ZPARTNERNAME TEXT, ZCONTACTJID TEXT, ZLASTMESSAGEDATE REAL, ZUNREADCOUNT INTEGER, ZARCHIVED INTEGER, ZLASTMESSAGE INTEGER, ZLASTMESSAGETEXT TEXT)`,
+		`CREATE TABLE ZWAMESSAGE (Z_PK INTEGER PRIMARY KEY, ZCHATSESSION INTEGER, ZTEXT TEXT, ZMESSAGEDATE REAL)`,
+		`INSERT INTO ZWACHATSESSION VALUES (1, 'Ana', '447700900000@s.whatsapp.net', `+ftoa(cd(now.Add(-time.Minute)))+`, 2, 0, NULL, 'Cached recent preview')`,
+	)
+	chats, err := RecentChats(context.Background(), db, 1, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(chats) != 1 || chats[0].Preview != "Cached recent preview" {
+		t.Fatalf("native chat preview unavailable: %+v", chats)
+	}
+	if chats[0].TS != isoMillis(now.Add(-time.Minute)) {
+		t.Fatalf("timestamp = %s", chats[0].TS)
+	}
+}

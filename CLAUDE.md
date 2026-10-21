@@ -69,7 +69,11 @@ cd desktop/backend-go && go test ./internal/founderos/... ./cmd/...
 - For a named symbol, file or agent, run `graphify explain "<Name>"` or
   `graphify path "<A>" "<B>"` before grepping or reading files: it returns the
   file, line and direct connections in a few hundred tokens.
-- `graphify query "<question>"` is broad and noisy on this repo (52k nodes);
+- `graphify query "<question>"` is broad and noisy on this repo (57k nodes);
   use it only to find a starting point, then read the located lines.
 - Never read `graphify-out/GRAPH_REPORT.md` or `graph.json` whole (hundreds of KB).
-- After changing code, `graphify update .` (AST only, free).
+- A PreToolUse hook (`.claude/settings.json`) reminds you to run `graphify query`
+  before grepping. `explain`/`path` satisfy it and cost far less (measured:
+  path ~30 tokens, explain ~260, query ~1,650, grep ~2,800), so prefer them.
+- Git hooks rebuild the graph in the background after commit, checkout, merge
+  and rebase. Run `graphify update .` yourself only for uncommitted edits.

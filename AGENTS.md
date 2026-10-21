@@ -629,3 +629,16 @@ Never delete another agent's worktree or branch unless Roberto explicitly asks.
 Inspect `git status --short` before editing.
 Stage only the files that belong to your task.
 Check the staged diff before committing.
+
+## Graphify Code Map
+
+`graphify-out/graph.json` is a local, gitignored code map (rebuilt in the
+background by git hooks; `make graph` for a full build). Use it to save tokens:
+
+- For a named symbol, file or agent, run `graphify explain "<Name>"` or
+  `graphify path "<A>" "<B>"` before grepping or reading files. Each returns the
+  file, line and direct connections in a few hundred tokens.
+- `graphify query "<question>"` is broad and noisy here; use it only to find a
+  starting point, then read only the located lines.
+- Never read `graphify-out/GRAPH_REPORT.md` or `graph.json` whole.
+- For uncommitted edits, run `graphify update .` (AST only, no API cost).

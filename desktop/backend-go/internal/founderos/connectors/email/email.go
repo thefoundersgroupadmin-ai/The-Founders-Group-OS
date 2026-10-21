@@ -20,6 +20,7 @@ import (
 	"mime"
 	"mime/quotedprintable"
 	"net"
+	"net/mail"
 	"strconv"
 	"strings"
 	"sync"
@@ -54,7 +55,15 @@ const (
 // is not the same as an empty inbox.
 var ErrNotConfigured = errors.New("email: no inboxes configured")
 
-// InboxConfig is one configured slot. Pass never serializes.
+// ErrDeliveryUncertain means the message was being handed to the SMTP server
+// when the exchange failed: it may or may not have been delivered, so callers
+// must not resend it automatically.
+var ErrDeliveryUncertain = errors.New("email: delivery uncertain")
+
+// InboxConfig is one configured slot. Pass and SMTPPass never serialize.
+// From, SMTPUser and SMTPPass default to User/Pass; they differ when replies
+// are read from one mailbox but sent through a relay (e.g. Resend SMTP).
+// FromName is the optional display name on the From header.
 type InboxConfig struct {
 	ID       string `json:"id"`
 	Name     string `json:"name"`
@@ -62,8 +71,12 @@ type InboxConfig struct {
 	Port     int    `json:"port"`
 	User     string `json:"user"`
 	Pass     string `json:"-"`
+	From     string `json:"from"`
+	FromName string `json:"fromName"`
 	SMTPHost string `json:"smtpHost"`
 	SMTPPort int    `json:"smtpPort"`
+	SMTPUser string `json:"smtpUser"`
+	SMTPPass string `json:"-"`
 }
 
 // CommsItem mirrors FounderOS v1's CommsItem for source "email".
@@ -92,6 +105,10 @@ type Reply struct {
 	To        string
 	Subject   string
 	Text      string
+	// RecipientApproved is the mail guard's per-call MAIL_ALLOW_EXTERNAL: set
+	// only when a person approved this exact message and recipient (the
+	// /os/outbox approve), never as a default.
+	RecipientApproved bool
 }
 
 type Connector struct {
@@ -140,8 +157,12 @@ func (c *Connector) Inboxes() []InboxConfig {
 			Port:     intOr(key("PORT"), 993),
 			User:     user,
 			Pass:     pass,
+			From:     orDefault(key("FROM"), user),
+			FromName: strings.TrimSpace(key("FROM_NAME")),
 			SMTPHost: key("SMTP_HOST"),
 			SMTPPort: intOr(key("SMTP_PORT"), 465),
+			SMTPUser: orDefault(key("SMTP_USER"), user),
+			SMTPPass: orDefault(key("SMTP_PASS"), pass),
 		}
 		if n := key("NAME"); n != "" {
 			cfg.Name = n
@@ -155,6 +176,13 @@ func (c *Connector) Inboxes() []InboxConfig {
 		out = append(out, cfg)
 	}
 	return out
+}
+
+func orDefault(s, def string) string {
+	if s = strings.TrimSpace(s); s != "" {
+		return s
+	}
+	return def
 }
 
 func intOr(s string, def int) int {
@@ -485,7 +513,16 @@ func (c *Connector) SendReply(ctx context.Context, r Reply) error {
 			cfg = in
 		}
 	}
-	rcpts, err := CheckOutboundMail(OutboundMail{From: cfg.User, To: r.To}, c.env)
+	env := c.env
+	if r.RecipientApproved {
+		env = func(k string) string {
+			if k == "MAIL_ALLOW_EXTERNAL" {
+				return "1"
+			}
+			return c.env(k)
+		}
+	}
+	rcpts, err := CheckOutboundMail(OutboundMail{From: cfg.From, To: r.To}, env)
 	if err != nil {
 		return err
 	}
@@ -497,13 +534,34 @@ func (c *Connector) SendReply(ctx context.Context, r Reply) error {
 			return err
 		}
 		defer client.Close()
-		if err := client.Auth(sasl.NewPlainClient("", cfg.User, cfg.Pass)); err != nil {
+		if err := client.Auth(sasl.NewPlainClient("", cfg.SMTPUser, cfg.SMTPPass)); err != nil {
 			return err
 		}
-		if err := client.SendMail(cfg.User, rcpts, bytes.NewReader(buildMessage(cfg.User, rcpts, r.Subject, r.Text, c.now()))); err != nil {
+		// MAIL and RCPT refusals mean nothing was handed over. Once DATA is
+		// open the server may already hold the message, so a failure there is
+		// reported as uncertain, never as a plain (retryable) error.
+		if err := client.Mail(cfg.From, nil); err != nil {
 			return err
 		}
-		return client.Quit()
+		for _, rcpt := range rcpts {
+			if err := client.Rcpt(rcpt, nil); err != nil {
+				return err
+			}
+		}
+		w, err := client.Data()
+		if err != nil {
+			return err
+		}
+		if _, err := w.Write(buildMessage(cfg.From, cfg.FromName, rcpts, r.Subject, r.Text, c.now())); err != nil {
+			_ = w.Close()
+			return fmt.Errorf("%w: %v", ErrDeliveryUncertain, err)
+		}
+		if err := w.Close(); err != nil {
+			return fmt.Errorf("%w: %v", ErrDeliveryUncertain, err)
+		}
+		// The server accepted the message; a failed QUIT does not unsend it.
+		_ = client.Quit()
+		return nil
 	})
 	if err != nil {
 		return err
@@ -514,7 +572,7 @@ func (c *Connector) SendReply(ctx context.Context, r Reply) error {
 
 var headerSafe = strings.NewReplacer("\r", " ", "\n", " ")
 
-func buildMessage(from string, to []string, subject, text string, now time.Time) []byte {
+func buildMessage(from, fromName string, to []string, subject, text string, now time.Time) []byte {
 	if subject == "" {
 		subject = "(no subject)"
 	}
@@ -523,7 +581,12 @@ func buildMessage(from string, to []string, subject, text string, now time.Time)
 	_, _ = rand.Read(id)
 
 	var b bytes.Buffer
-	fmt.Fprintf(&b, "From: %s\r\n", headerSafe.Replace(from))
+	fromHeader := headerSafe.Replace(from)
+	if name := headerSafe.Replace(fromName); name != "" {
+		// net/mail quotes and RFC 2047-encodes the name, so it cannot break the header.
+		fromHeader = (&mail.Address{Name: name, Address: fromHeader}).String()
+	}
+	fmt.Fprintf(&b, "From: %s\r\n", fromHeader)
 	fmt.Fprintf(&b, "To: %s\r\n", headerSafe.Replace(strings.Join(to, ", ")))
 	fmt.Fprintf(&b, "Subject: %s\r\n", mime.QEncoding.Encode("utf-8", headerSafe.Replace(subject)))
 	fmt.Fprintf(&b, "Date: %s\r\n", now.Format(time.RFC1123Z))

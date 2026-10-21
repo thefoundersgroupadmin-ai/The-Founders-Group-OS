@@ -3,6 +3,7 @@ package email
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -109,7 +110,7 @@ func unseen(t *testing.T, u *imapmemserver.User) uint32 {
 func writeEnv(t *testing.T, kv map[string]string) connectors.Resolver {
 	t.Helper()
 	for slot := 1; slot <= MaxInboxes; slot++ {
-		for _, k := range []string{"HOST", "USER", "PASS", "NAME", "PORT", "SMTP_HOST", "SMTP_PORT"} {
+		for _, k := range []string{"HOST", "USER", "PASS", "NAME", "PORT", "FROM", "FROM_NAME", "SMTP_HOST", "SMTP_PORT", "SMTP_USER", "SMTP_PASS"} {
 			t.Setenv(fmt.Sprintf("INBOX_%d_%s", slot, k), "")
 		}
 	}
@@ -162,6 +163,9 @@ func TestInboxesParsesSlotsWithDefaults(t *testing.T) {
 	a, b := got[0], got[1]
 	if a.ID != "inbox-1" || a.Name != "One" || a.Port != 993 || a.SMTPHost != "smtp.gmail.com" || a.SMTPPort != 465 {
 		t.Errorf("slot 1 defaults wrong: %+v", a)
+	}
+	if a.From != "one@x.com" || a.SMTPUser != "one@x.com" || a.SMTPPass != "p1" {
+		t.Errorf("slot 1 send identity should default to the inbox login: %+v", a)
 	}
 	if b.ID != "inbox-3" || b.Name != "three@x.com" || b.Port != 143 || b.SMTPHost != "out.example.com" || b.SMTPPort != 587 {
 		t.Errorf("slot 3 overrides wrong: %+v", b)
@@ -390,6 +394,8 @@ type fakeSMTP struct {
 	user string
 	pass string
 	got  []sent
+	// failRcpt refuses every recipient; failData fails after reading DATA.
+	failRcpt, failData bool
 }
 
 type sent struct {
@@ -424,11 +430,17 @@ func (s *smtpSession) Mail(from string, _ *smtp.MailOptions) error {
 	return nil
 }
 func (s *smtpSession) Rcpt(to string, _ *smtp.RcptOptions) error {
+	if s.srv.failRcpt {
+		return errors.New("550 mailbox unavailable")
+	}
 	s.cur.to = append(s.cur.to, to)
 	return nil
 }
 func (s *smtpSession) Data(r io.Reader) error {
 	b, _ := io.ReadAll(r)
+	if s.srv.failData {
+		return errors.New("451 local error in processing")
+	}
 	s.cur.data = string(b)
 	s.srv.mu.Lock()
 	s.srv.got = append(s.srv.got, s.cur)
@@ -518,6 +530,83 @@ func TestSendReplyDeliversOverSMTPWhenWritesAreOn(t *testing.T) {
 	}
 }
 
+func TestSendReplyUsesSeparateRelayLoginAndFrom(t *testing.T) {
+	t.Setenv("FOUNDEROS_WRITES", "1")
+	srv, addr := startSMTP(t, "resend", "re_relay")
+	c := sendConnector(t, "alex@vantage.example", "imap-pass", addr, map[string]string{
+		"INBOX_1_SMTP_HOST": "smtp.resend.com", "INBOX_1_SMTP_USER": "resend", "INBOX_1_SMTP_PASS": "re_relay",
+		"INBOX_1_FROM": "hello@vantage.example",
+	})
+	if err := c.SendReply(context.Background(), Reply{To: "alex@personal.example", Subject: "s", Text: "t"}); err != nil {
+		t.Fatal(err)
+	}
+	m := srv.got[0]
+	if m.authUser != "resend" || m.from != "hello@vantage.example" {
+		t.Errorf("auth/from = %q/%q, want the relay login and the FROM address", m.authUser, m.from)
+	}
+	if !strings.Contains(m.data, "From: hello@vantage.example\r\n") {
+		t.Errorf("From header not the configured address:\n%s", m.data)
+	}
+}
+
+func TestSendReplyMailGuardChecksTheConfiguredFrom(t *testing.T) {
+	t.Setenv("FOUNDEROS_WRITES", "1")
+	c := sendConnector(t, "alex@vantage.example", "imap-pass", "", map[string]string{"INBOX_1_FROM": "os@founderos.local"})
+	err := c.SendReply(context.Background(), Reply{To: "alex@personal.example", Subject: "s", Text: "t"})
+	if err == nil || !strings.Contains(err.Error(), "os@founderos.local") {
+		t.Fatalf("a banned FROM behind an allowed inbox login was not refused: %v", err)
+	}
+}
+
+func TestSendReplyUsesTheConfiguredDisplayName(t *testing.T) {
+	t.Setenv("FOUNDEROS_WRITES", "1")
+	srv, addr := startSMTP(t, "resend", "re_relay")
+	c := sendConnector(t, "alex@vantage.example", "imap-pass", addr, map[string]string{
+		"INBOX_1_SMTP_USER": "resend", "INBOX_1_SMTP_PASS": "re_relay",
+		"INBOX_1_FROM": "nader@vantage.example", "INBOX_1_FROM_NAME": "Nader | The Founders Group",
+	})
+	if err := c.SendReply(context.Background(), Reply{To: "alex@personal.example", Subject: "s", Text: "t"}); err != nil {
+		t.Fatal(err)
+	}
+	m := srv.got[0]
+	if m.from != "nader@vantage.example" {
+		t.Errorf("envelope from = %q, want the bare address", m.from)
+	}
+	if !strings.Contains(m.data, "From: \"Nader | The Founders Group\" <nader@vantage.example>\r\n") {
+		t.Errorf("From header lacks the display name:\n%s", m.data)
+	}
+}
+
+func TestBuildMessageEncodesAHostileDisplayName(t *testing.T) {
+	got := string(buildMessage("nader@x.example", "Nader\r\nBcc: evil@x.com", []string{"a@b.example"}, "s", "t", time.Now()))
+	if strings.Contains(got, "\r\nBcc:") {
+		t.Errorf("a CRLF in the display name injected a header:\n%s", got)
+	}
+}
+
+func TestBuildMessageNeutralizesLineBreaksInFrom(t *testing.T) {
+	got := buildMessage("hello@vantage.example\r\nBcc: evil@x.com", "", []string{"alex@personal.example"}, "s", "t", time.Now())
+	if strings.Contains(string(got), "\r\nBcc:") {
+		t.Errorf("a CRLF in From injected a header:\n%s", got)
+	}
+}
+
+func TestInboxConfigNeverSerializesPasswords(t *testing.T) {
+	res := writeEnv(t, map[string]string{
+		"INBOX_1_HOST": "imap.gmail.com", "INBOX_1_USER": "one@x.com", "INBOX_1_PASS": "imap-secret",
+		"INBOX_1_SMTP_USER": "resend", "INBOX_1_SMTP_PASS": "relay-secret",
+	})
+	b, err := json.Marshal(New(res).Inboxes())
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, secret := range []string{"imap-secret", "relay-secret"} {
+		if strings.Contains(string(b), secret) {
+			t.Errorf("%s leaked into JSON: %s", secret, b)
+		}
+	}
+}
+
 func TestSendReplyPicksTheOriginatingInbox(t *testing.T) {
 	t.Setenv("FOUNDEROS_WRITES", "1")
 	srv, addr := startSMTP(t, "alex@launchpadcohort.example", "p2")
@@ -538,6 +627,44 @@ func TestSendReplyMailGuardRefusesExternalBeforeSMTP(t *testing.T) {
 	err := c.SendReply(context.Background(), Reply{To: "customer@client.example", Subject: "s", Text: "t"})
 	if err == nil || !strings.Contains(err.Error(), "blocked by mail-guard") {
 		t.Fatalf("err = %v", err)
+	}
+}
+
+func TestSendReplyApprovedRecipientPassesTheMailGuardForThatCallOnly(t *testing.T) {
+	t.Setenv("FOUNDEROS_WRITES", "1")
+	srv, addr := startSMTP(t, "alex@vantage.example", "p")
+	c := sendConnector(t, "alex@vantage.example", "p", addr, nil)
+	if err := c.SendReply(context.Background(), Reply{To: "customer@client.example", Subject: "s", Text: "t", RecipientApproved: true}); err != nil {
+		t.Fatalf("approved external send refused: %v", err)
+	}
+	if len(srv.got) != 1 || srv.got[0].to[0] != "customer@client.example" {
+		t.Fatalf("approved send not delivered: %+v", srv.got)
+	}
+	err := c.SendReply(context.Background(), Reply{To: "customer@client.example", Subject: "s", Text: "t"})
+	if err == nil || !strings.Contains(err.Error(), "blocked by mail-guard") {
+		t.Fatalf("the approval leaked into the next call: %v", err)
+	}
+}
+
+func TestSendReplyRefusalBeforeDataIsAPlainError(t *testing.T) {
+	t.Setenv("FOUNDEROS_WRITES", "1")
+	srv, addr := startSMTP(t, "alex@vantage.example", "p")
+	srv.failRcpt = true
+	c := sendConnector(t, "alex@vantage.example", "p", addr, nil)
+	err := c.SendReply(context.Background(), Reply{To: "alex@personal.example", Subject: "s", Text: "t"})
+	if err == nil || errors.Is(err, ErrDeliveryUncertain) {
+		t.Fatalf("a refused recipient must be a definite failure: %v", err)
+	}
+}
+
+func TestSendReplyFailureDuringDataIsUncertain(t *testing.T) {
+	t.Setenv("FOUNDEROS_WRITES", "1")
+	srv, addr := startSMTP(t, "alex@vantage.example", "p")
+	srv.failData = true
+	c := sendConnector(t, "alex@vantage.example", "p", addr, nil)
+	err := c.SendReply(context.Background(), Reply{To: "alex@personal.example", Subject: "s", Text: "t"})
+	if !errors.Is(err, ErrDeliveryUncertain) {
+		t.Fatalf("a failure after DATA must be uncertain, got %v", err)
 	}
 }
 

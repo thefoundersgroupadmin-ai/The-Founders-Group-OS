@@ -88,6 +88,7 @@ def entries(body):
 def main():
     dry = "--dry-run" in sys.argv
     pc = read_env("~/.founderos/.env")
+    sender = read_env("~/.founderos/planted.env").get("INBOX_1_FROM") or "the TFG OS inbox"
     db = read_env(REPO / "desktop/backend-go/.env")["DATABASE_URL"]
     company = pc["PAPERCLIP_COMPANY_ID"]
     state = Path.home() / ".founderos/state"
@@ -141,7 +142,7 @@ def main():
         if not issue:
             continue
         to, subject = r["to_address"], r["subject"]
-        line = {"sent": f"**Sent from TFG OS** (hello@thefoundersgroup.net) to {to}: \"{subject}\".",
+        line = {"sent": f"**Sent from TFG OS** ({sender}) to {to}: \"{subject}\".",
                 "rejected": f"**Not sent: the owner rejected** the email to {to}: \"{subject}\". Do not resend it as-is.",
                 "failed": f"**Send failed** for {to}: \"{subject}\": {r['error']}. The owner can retry from the TFG OS outbox.",
                 "uncertain": f"**Delivery uncertain** for {to}: \"{subject}\": {r['error']}. Do not resend; the owner will check.",

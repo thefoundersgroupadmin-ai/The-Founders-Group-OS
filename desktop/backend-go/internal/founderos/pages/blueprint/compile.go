@@ -45,7 +45,7 @@ var Surfaces = []Surface{
 	{"/os", "Home"}, {"/os/comms", "Comms"}, {"/os/funnel", "Funnel"}, {"/os/workflows", "Workflows"},
 	{"/os/social", "Social"}, {"/os/content", "Content"}, {"/os/brand-deals", "Brand Deals"},
 	{"/os/finances", "Finances"}, {"/os/trading", "Trading"}, {"/os/adpilot", "AdPilot"},
-	{"/os/agents", "Agents"}, {"/os/chats", "Chats"}, {"/os/tasks", "Tasks"}, {"/os/skills", "Skills"},
+	{"/os/agents", "Agents"}, {"/os/chats", "Chats"}, {"/os/tasks", "Tasks"}, {"/os/outbox", "Outbox"}, {"/os/skills", "Skills"},
 	{"/os/org", "Org Chart"}, {"/os/blueprint", "Blueprint"}, {"/os/brain", "Brain"}, {"/os/doctor", "Doctor"},
 	{"/os/integrations", "Connections"}, {"/os/usage", "Usage"}, {"/os/roadmap", "Roadmap"},
 	{"/os/analytics", "Analytics"}, {"/os/reference", "Reference Model"}, {"/os/personas", "Personas"},

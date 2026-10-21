@@ -33,6 +33,7 @@ import {
 	MessageSquare,
 	Network,
 	Plug,
+	Send,
 	Share2,
 	Sparkles,
 	Stethoscope,
@@ -72,6 +73,7 @@ export const NAV_AGENTS: NavItem[] = [
 	{ href: '/os/agents', label: 'Agents', icon: icon(Users) },
 	{ href: '/os/chats', label: 'Chats', icon: icon(MessagesSquare) },
 	{ href: '/os/tasks', label: 'Tasks', icon: icon(ListChecks) },
+	{ href: '/os/outbox', label: 'Outbox', icon: icon(Send) },
 	{ href: '/os/skills', label: 'Skills', icon: icon(Sparkles) },
 	{ href: '/os/org', label: 'Org Chart', icon: icon(Network) },
 	// The system drawn from its own registries.

@@ -2,7 +2,8 @@
      three 30px icon buttons (the theme menu, the ⌘K palette, the Conductor
      dock) and the OS emblem in the corner. -->
 <script lang="ts">
-	import { Bot, Search } from '$lib/founderos/icons';
+	import { Bell, Bot, Search } from '$lib/founderos/icons';
+	import { alertsOpen } from './alerts';
 	import '../kit/kit.css';
 	import OsMark from '../kit/OsMark.svelte';
 	import { breadcrumbFor, openPalette } from './chrome';
@@ -30,6 +31,17 @@
 			class="bn-pressable is-dark bn-ctl bn-muted grid h-[30px] w-[30px] place-items-center rounded-[6px] border"
 		>
 			<Search size={14} />
+		</button>
+		<!-- alerts and voice: phone pings, what is worth one, the OS reading aloud -->
+		<button
+			type="button"
+			onclick={() => alertsOpen.set(true)}
+			title="Alerts and voice"
+			aria-label="Open alerts and voice"
+			data-lens="c"
+			class="bn-pressable is-dark bn-ctl bn-muted grid h-[30px] w-[30px] place-items-center rounded-[6px] border"
+		>
+			<Bell size={14} />
 		</button>
 		<!-- the agent dock: the Conductor answers about whatever screen you're on -->
 		<button

@@ -23,6 +23,9 @@
 	import ConductorPanel from '$lib/founderos/chrome/ConductorPanel.svelte';
 	import Sidebar from '$lib/founderos/chrome/Sidebar.svelte';
 	import Topbar from '$lib/founderos/chrome/Topbar.svelte';
+	import AlertsPanel from '$lib/founderos/chrome/AlertsPanel.svelte';
+	import AlertsVoice from '$lib/founderos/chrome/AlertsVoice.svelte';
+	import { alertsOpen } from '$lib/founderos/chrome/alerts';
 	import { founderosFetch } from '$lib/founderos/api';
 	import { summarizeConnections, type ConnectionsBody } from '$lib/founderos/connections';
 	import { WorkspaceSwitcher } from '$lib/components/workspace';
@@ -106,6 +109,8 @@
 	<CommandPalette navigate={(href) => goto(href)} />
 	<ConductorPanel pathname={page.url.pathname} />
 	<Toaster />
+	<AlertsVoice />
+	{#if $alertsOpen}<AlertsPanel />{/if}
 	{#if SHOW_COHORT_INVITE}<CohortModal pathname={page.url.pathname} />{/if}
 </div>
 

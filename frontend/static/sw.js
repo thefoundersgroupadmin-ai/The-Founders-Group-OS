@@ -3,7 +3,7 @@
 
 // Bump this on every release so the service worker drops the old cached app and
 // users get the new bundle instead of a stale one (the "looks not deployed" bug).
-const CACHE_NAME = "businessos-v1.0.1-2";
+const CACHE_NAME = "businessos-v1.0.1-3";
 
 // Install event - cache essential assets
 self.addEventListener("install", (event) => {
@@ -22,7 +22,7 @@ self.addEventListener("push", (event) => {
   console.log("[ServiceWorker] Push received");
 
   let data = {
-    title: "BusinessOS",
+    title: "TFG OS",
     body: "You have a new notification",
     icon: "/icon-192.png",
     badge: "/badge-72.png",
@@ -107,6 +107,10 @@ self.addEventListener("notificationclick", (event) => {
               type: "NOTIFICATION_CLICK",
               data: event.notification.data,
             });
+            // TFG OS pushes carry the page to open: take the open window there.
+            if (url !== "/" && "navigate" in client) {
+              return client.focus().then(() => client.navigate(url)).catch(() => client.focus());
+            }
             return client.focus();
           }
         }

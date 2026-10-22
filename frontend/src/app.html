@@ -6,6 +6,12 @@
 		<link rel="icon" type="image/png" sizes="32x32" href="/favicon-32.png" />
 		<link rel="icon" type="image/png" sizes="16x16" href="/favicon-16.png" />
 		<link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png" />
+		<!-- Installable on a phone (iPhone push needs the home-screen app); credentials so Cloudflare Access lets it through -->
+		<link rel="manifest" href="/manifest.webmanifest" crossorigin="use-credentials" />
+		<meta name="apple-mobile-web-app-capable" content="yes" />
+		<meta name="apple-mobile-web-app-title" content="TFG OS" />
+		<meta name="apple-mobile-web-app-status-bar-style" content="black" />
+		<meta name="theme-color" content="#000000" />
 
 		<!-- Open Graph -->
 		<meta property="og:type" content="website" />

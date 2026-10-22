@@ -2,11 +2,14 @@
      multiline (Enter sends, Shift+Enter breaks), grows to the text the browser
      actually laid out, (+) attaches a text file whose contents ride into the
      message honestly labeled, the live model chip, mic dictation through the
-     browser's SpeechRecognition, and a wave button that reads the last reply
-     aloud. onSend(message, display): message is the full outbound body,
+     browser's SpeechRecognition, a wave button that reads the last reply
+     aloud (the OS's natural voice, else the browser's), and headphones for
+     hands-free talk: speak, it sends when you pause, reads the answer aloud and
+     listens again until you press it off. onSend(message, display): message is the full outbound body,
      display is what the caller shows as the user bubble. -->
 <script lang="ts">
-	import { AudioLines, Mic, Plus, Send, X } from '$lib/founderos/icons';
+	import { AudioLines, Headphones, Mic, Plus, Send, X } from '$lib/founderos/icons';
+	import { speak, stopSpeaking } from '$lib/founderos/voice';
 	import '../kit/kit.css';
 	import { COMPOSER_MAX_PX, composerHeight } from './conductor';
 
@@ -15,7 +18,7 @@
 		disabled = false,
 		model = null,
 		placeholder = 'Message the Conductor…',
-		lastReply = null,
+		lastReply = undefined,
 		onError
 	}: {
 		onSend: (message: string, display: string) => void | Promise<void>;
@@ -34,6 +37,12 @@
 	let fileInput: HTMLInputElement | undefined = $state();
 	let rec: { stop: () => void } | null = null;
 	let dictationBase = '';
+	// hands-free: listening → (pause) send → waiting for the reply → speaking → listening
+	let talking = $state(false);
+	let awaiting = $state(false);
+	let replyBefore: string | null | undefined = null;
+	let pauseTimer: ReturnType<typeof setTimeout> | null = null;
+	const PAUSE_MS = 1400;
 
 	// Reset to auto before measuring, or the box could only ever grow.
 	$effect(() => {
@@ -78,6 +87,10 @@
 			rec?.stop();
 			return;
 		}
+		listen(false);
+	}
+
+	function listen(handsFree: boolean) {
 		const w = window as unknown as { SpeechRecognition?: new () => Recognition; webkitSpeechRecognition?: new () => Recognition };
 		const SR = w.SpeechRecognition ?? w.webkitSpeechRecognition;
 		if (!SR) {
@@ -93,27 +106,70 @@
 			let heard = '';
 			for (const res of Array.from(e.results)) heard += res[0].transcript;
 			input = (dictationBase ? `${dictationBase} ` : '') + heard;
+			if (handsFree) {
+				if (pauseTimer) clearTimeout(pauseTimer);
+				pauseTimer = setTimeout(() => {
+					if (!talking || !input.trim()) return;
+					rec?.stop();
+					replyBefore = lastReply;
+					awaiting = true;
+					send();
+				}, PAUSE_MS);
+			}
 		};
-		r.onend = () => (listening = false);
+		r.onend = () => {
+			listening = false;
+			// browsers end recognition after a silence: keep the conversation open
+			if (handsFree && talking && !awaiting && !speaking) setTimeout(() => talking && !awaiting && !speaking && !listening && listen(true), 250);
+		};
 		r.onerror = () => (listening = false);
 		r.start();
 		rec = r;
 		listening = true;
 	}
 
+	async function say(text: string) {
+		speaking = true;
+		try {
+			await speak(text);
+		} finally {
+			speaking = false;
+		}
+	}
+
 	function toggleSpeak() {
 		if (speaking) {
-			speechSynthesis.cancel();
+			stopSpeaking();
 			speaking = false;
 			return;
 		}
-		if (!lastReply || !('speechSynthesis' in window)) return;
-		const u = new SpeechSynthesisUtterance(lastReply);
-		u.onend = () => (speaking = false);
-		u.onerror = () => (speaking = false);
-		speechSynthesis.speak(u);
-		speaking = true;
+		if (!lastReply) return;
+		void say(lastReply);
 	}
+
+	function toggleTalk() {
+		if (talking) {
+			talking = false;
+			awaiting = false;
+			if (pauseTimer) clearTimeout(pauseTimer);
+			rec?.stop();
+			stopSpeaking();
+			return;
+		}
+		talking = true;
+		listen(true);
+		if (!listening) talking = false; // no voice input in this browser (listen said so)
+	}
+
+	// The answer arrived: say it, then listen for the next thing.
+	$effect(() => {
+		const reply = lastReply;
+		if (!talking || !awaiting || disabled || !reply || reply === replyBefore) return;
+		awaiting = false;
+		void say(reply).then(() => {
+			if (talking) listen(true);
+		});
+	});
 </script>
 
 <div class="bn-pressable is-row bn-composer rounded-[10px] border px-3 pb-2 pt-2.5">
@@ -158,6 +214,18 @@
 		>
 			<Mic size={14} />
 		</button>
+		{#if lastReply !== undefined}
+			<button
+				type="button"
+				onclick={toggleTalk}
+				title={talking ? 'End hands-free talk' : 'Talk hands-free: speak, pause, hear the answer'}
+				aria-label={talking ? 'End hands-free talk' : 'Talk hands-free'}
+				aria-pressed={talking}
+				class="bn-pressable bn-ctl rounded-full p-1.5 {talking ? 'bn-accent' : 'is-dark bn-dim'}"
+			>
+				<Headphones size={14} />
+			</button>
+		{/if}
 		<button
 			type="button"
 			onclick={toggleSpeak}

@@ -9,6 +9,7 @@ import { VENTURE_LABEL } from '$lib/founderos/brand.gen';
 const DESC: Record<string, string> = {
 	'/os/chats': 'Every agent conversation in one hub: threads with the Conductor and each crew, with their replies.',
 	'/os/tasks': 'The task board: what each agent owns, what is blocked, and the scheduled jobs that feed it.',
+	'/os/approvals': 'Everything the agents are waiting on you for: review requests, questions and instructions, without leaving the OS.',
 	'/os/outbox': 'Agent-drafted email waiting for your approval; approve to send it from the OS.',
 	'/os/roadmap': 'Build phases and the quarter-by-quarter plan for wiring every system into the OS.',
 	'/os/reference': 'The reference model: the pillars, systems and domains this operating system is built around.',

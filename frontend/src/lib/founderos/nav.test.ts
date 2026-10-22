@@ -20,6 +20,7 @@ const EXPECTED: Array<[group: string, label: string, href: string]> = [
 	['Agents', 'Agents', '/os/agents'],
 	['Agents', 'Chats', '/os/chats'],
 	['Agents', 'Tasks', '/os/tasks'],
+	['Agents', 'Approvals', '/os/approvals'],
 	['Agents', 'Outbox', '/os/outbox'],
 	['Agents', 'Skills', '/os/skills'],
 	['Agents', 'Org Chart', '/os/org'],

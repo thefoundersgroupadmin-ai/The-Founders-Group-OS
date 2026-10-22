@@ -25,7 +25,7 @@ describe('Sidebar', () => {
 		const links = [...container.querySelectorAll('nav a')].map((a) => a.getAttribute('href'));
 		expect(links[0]).toBe('/os');
 		expect(links).toContain('/os/brain');
-		expect(links).toHaveLength(25 + 8);
+		expect(links).toHaveLength(26 + 8);
 		expect(screen.getByText('Brain')).toBeTruthy();
 		expect(screen.queryByText('G-Brain')).toBeNull();
 	});
@@ -200,8 +200,8 @@ describe('CommandPalette', () => {
 		await open();
 		expect(screen.getByRole('dialog')).toBeTruthy();
 		await fireEvent.click(screen.getByRole('tab', { name: 'Go to' }));
-		expect(screen.getAllByRole('option')).toHaveLength(25);
-		expect(screen.getByText('25 results')).toBeTruthy();
+		expect(screen.getAllByRole('option')).toHaveLength(26);
+		expect(screen.getByText('26 results')).toBeTruthy();
 	});
 
 	it('Ctrl+K works too, and ⌘K again closes it', async () => {

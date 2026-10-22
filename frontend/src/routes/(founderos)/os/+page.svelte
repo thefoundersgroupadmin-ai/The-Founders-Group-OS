@@ -8,6 +8,7 @@
      talk-to-the-OS beside Done today. -->
 <script lang="ts">
 	import { onMount } from 'svelte';
+	import ApprovalsNotice from '$lib/founderos/pages/approvals/ApprovalsNotice.svelte';
 	import { page } from '$app/state';
 	import { founderosFetch } from '$lib/founderos/api';
 	import { BigStat, CountUp, DotMatrix, InsightCard, Kbd, MeterStack, Slab, SlabCard, SlabTitle, StepLine, type StatChip } from '$lib/founderos/kit';
@@ -51,6 +52,8 @@
 	const laneTrouble = $derived(v ? v.sources.filter((s) => s.state === 'error' || s.state === 'stale') : []);
 	const errorLines = $derived(v ? Object.entries(v.errors) : []);
 </script>
+
+<ApprovalsNotice />
 
 <Slab>
 	<SlabTitle eyebrow="command center" title={`${hello}, ${who}`}>

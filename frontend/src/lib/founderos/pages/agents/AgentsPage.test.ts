@@ -134,7 +134,7 @@ describe('/agents page', () => {
 
 	it('the volume rows lead and the cockpit follows them (v1 app/agents/page.tsx)', async () => {
 		route();
-		const { findByText, getByText, findByRole } = render(AgentsPage);
+		const { findByText, getByText, queryByText, findByRole } = render(AgentsPage);
 		expect(await findByText('Real Agents')).toBeTruthy();
 		const tabs = await findByRole('tablist');
 		const runActivity = await findByText('Run Activity');
@@ -144,8 +144,10 @@ describe('/agents page', () => {
 		expect(getByText('Agent Volume')).toBeTruthy();
 		expect(getByText('Runs by Seat')).toBeTruthy();
 		expect(getByText('Task Lanes')).toBeTruthy();
-		expect(getByText('Open board').closest('a')!.getAttribute('href')).toBe('http://board.example:3100');
-		expect(getByText('Open board').closest('a')!.className).toContain('text-[13px]');
+		// Agent requests are handled in the OS (Approvals), never by linking out to the board UI.
+		expect(queryByText('Open board')).toBeNull();
+		expect(getByText('Approvals').closest('a')!.getAttribute('href')).toBe('/os/approvals');
+		expect(getByText('Approvals').closest('a')!.className).toContain('text-[13px]');
 	});
 
 	it('the board strip shows seats with models, the run feed and the lanes', async () => {

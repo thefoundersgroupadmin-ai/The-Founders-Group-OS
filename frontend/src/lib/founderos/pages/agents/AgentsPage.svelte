@@ -5,8 +5,8 @@
      Hermes. The board is polled every 4s while the tab is visible and never
      stacks requests. -->
 <script lang="ts">
+	import ApprovalsNotice from '$lib/founderos/pages/approvals/ApprovalsNotice.svelte';
 	import { onDestroy, onMount } from 'svelte';
-	import { ArrowUpRight } from '$lib/founderos/icons';
 	import { founderosFetch } from '$lib/founderos/api';
 	import Slab from '$lib/founderos/kit/Slab.svelte';
 	import SlabCard from '$lib/founderos/kit/SlabCard.svelte';
@@ -53,12 +53,13 @@
 	const conductorModel = $derived(view?.board.agents.find((a) => a.name === 'Conductor')?.model ?? null);
 </script>
 
+<ApprovalsNotice />
+
 <Slab>
 	<SlabTitle eyebrow="runtime" title="Real Agents" meta="live Paperclip board · polls every 4s · Conductor on the rail">
 		{#snippet right()}
-			{#if view?.boardUrl}
-				<a href={view.boardUrl} target="_blank" rel="noreferrer" class={PILL}>Open board <ArrowUpRight size={13} strokeWidth={1.7} /></a>
-			{/if}
+			<!-- Everything happens in the OS: agent requests are handled in Approvals, not the board UI. -->
+			<a href="/os/approvals" class={PILL}>Approvals</a>
 			<a href="/os/workflows" class={PILL}>Workflows</a>
 		{/snippet}
 	</SlabTitle>

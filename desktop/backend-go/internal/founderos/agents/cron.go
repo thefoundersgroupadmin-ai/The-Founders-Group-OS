@@ -75,10 +75,12 @@ func fieldMatches(field string, value int) bool {
 // CronZone is the wall clock crons are written in: the operator's
 // (America/Chicago), or FOUNDEROS_TZ. FounderOS v1 used process-local time, which
 // is the same on the Macs under launchd; pinning it keeps the 09:00 digest at
-// 09:00 under a UTC container too.
-var CronZone = cronZone()
+// 09:00 under a UTC container too. The server loads .env after package init, so
+// it sets this again from CronZoneFromEnv before starting the scheduler.
+var CronZone = CronZoneFromEnv()
 
-func cronZone() *time.Location {
+// CronZoneFromEnv is FOUNDEROS_TZ, or America/Chicago when unset or unknown.
+func CronZoneFromEnv() *time.Location {
 	name := os.Getenv("FOUNDEROS_TZ")
 	if name == "" {
 		name = "America/Chicago"

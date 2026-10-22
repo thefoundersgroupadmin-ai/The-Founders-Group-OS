@@ -81,3 +81,16 @@ func TestCronsFireOnChicagoTimeWhateverTheProcessZone(t *testing.T) {
 		t.Fatalf("zone = %s", CronZone)
 	}
 }
+
+// The server loads .env inside main, after package init, so the zone must be
+// re-read from the environment once it is loaded.
+func TestCronZoneFromEnvReadsFOUNDEROS_TZ(t *testing.T) {
+	t.Setenv("FOUNDEROS_TZ", "Europe/London")
+	if z := CronZoneFromEnv(); z.String() != "Europe/London" {
+		t.Fatalf("zone = %s", z)
+	}
+	t.Setenv("FOUNDEROS_TZ", "")
+	if z := CronZoneFromEnv(); z.String() != "America/Chicago" {
+		t.Fatalf("default zone = %s", z)
+	}
+}

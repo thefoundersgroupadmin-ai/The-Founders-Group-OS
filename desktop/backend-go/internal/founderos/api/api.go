@@ -92,6 +92,8 @@ func NewDeps(pool *pgxpool.Pool) *Deps {
 		defer cancel()
 		if err := pool.QueryRow(ctx, `SELECT id::text FROM workspaces WHERE slug = 'founderos'`).Scan(&ws); err == nil {
 			d.Agents = agents.New(agents.NewPgStore(pool, ws), AllAgents(d)...)
+			// .env is loaded by now, so FOUNDEROS_TZ is visible.
+			agents.CronZone = agents.CronZoneFromEnv()
 			// Fires nothing until FOUNDEROS_CRONS=1 (guard.RunCron).
 			d.Scheduler = agents.NewScheduler(d.Agents, agents.NewPgCronSource(pool, ws))
 			d.Scheduler.Start(context.Background())

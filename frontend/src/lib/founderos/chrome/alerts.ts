@@ -68,3 +68,16 @@ export function writeSpeakAlerts(on: boolean): void {
 export function spokenLine(e: Pick<AlertEvent, 'title' | 'body'>): string {
 	return e.body ? `${e.title}. ${e.body}` : e.title;
 }
+
+export type VoiceOption = { id: string; name: string; description: string; gender: string; accent: string; age: string; preview: string };
+export type VoiceList = { voices: VoiceOption[]; current: string; error?: string };
+
+/** Voices matching the filters ('' is any), one per name, in the account's order. */
+export function filterVoices(voices: VoiceOption[], accent: string, gender: string): VoiceOption[] {
+	const seen = new Set<string>();
+	return voices.filter((v) => {
+		if ((accent && v.accent !== accent) || (gender && v.gender !== gender) || seen.has(v.name)) return false;
+		seen.add(v.name);
+		return true;
+	});
+}

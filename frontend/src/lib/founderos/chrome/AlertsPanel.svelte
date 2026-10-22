@@ -19,6 +19,7 @@
 		writeSpeakAlerts,
 		type AlertStatus
 	} from './alerts';
+	import VoicePicker from './VoicePicker.svelte';
 
 	let st = $state<AlertStatus | null>(null);
 	let failure = $state<string | null>(null);
@@ -198,7 +199,7 @@
 					{/each}
 					<label class="flex items-center gap-2">
 						<span class="bn-muted">Morning brief at</span>
-						<select class="pc-input rounded-[6px] px-2 py-1 font-mono text-[11px]" value={st.briefHour} disabled={busy} onchange={(e) => setHour(Number(e.currentTarget.value))}>
+						<select aria-label="Morning brief hour" class="pc-input rounded-[6px] px-2 py-1 font-mono text-[11px]" value={st.briefHour} disabled={busy} onchange={(e) => setHour(Number(e.currentTarget.value))}>
 							{#each Array.from({ length: 24 }, (_, i) => i) as h (h)}
 								<option value={h}>{hourLabel(h)}</option>
 							{/each}
@@ -213,6 +214,7 @@
 						<Badge tone={st.voice.natural ? 'ok' : 'default'}>{st.voice.natural ? 'natural' : 'browser'}</Badge>
 					</div>
 					<p class="bn-dim font-mono text-[11px]">{st.voice.detail}</p>
+					{#if st.voice.natural}<VoicePicker />{/if}
 					<label class="flex items-center gap-2">
 						<input
 							type="checkbox"

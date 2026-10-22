@@ -227,7 +227,7 @@ func registerNotify(s *gin.RouterGroup, d *Deps) {
 			c.JSON(http.StatusBadRequest, gin.H{"error": "nothing to say"})
 			return
 		}
-		audio, err := speak(c.Request.Context(), d, body.Text)
+		audio, err := speak(c.Request.Context(), d, body.Text, voiceFor(d, personID(c)))
 		if err != nil {
 			// The browser speaks instead; this is not an outage.
 			c.JSON(http.StatusServiceUnavailable, gin.H{"fallback": true, "error": err.Error()})
@@ -235,6 +235,134 @@ func registerNotify(s *gin.RouterGroup, d *Deps) {
 		}
 		c.Data(http.StatusOK, "audio/mpeg", audio)
 	})
+	// The voices this ElevenLabs account can use, each with its free sample.
+	s.GET("/pages/voice/voices", func(c *gin.Context) {
+		list, err := voiceList(c.Request.Context(), d)
+		if err != nil {
+			c.JSON(http.StatusOK, gin.H{"voices": []voiceOption{}, "current": "", "error": err.Error()})
+			return
+		}
+		c.JSON(http.StatusOK, gin.H{"voices": list, "current": voiceFor(d, personID(c))})
+	})
+	s.PUT("/pages/voice", func(c *gin.Context) {
+		p, ok := personOf(c)
+		if !ok {
+			return
+		}
+		var body struct {
+			VoiceID string `json:"voiceId"`
+		}
+		if err := c.ShouldBindJSON(&body); err != nil || body.VoiceID == "" {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "which voice?"})
+			return
+		}
+		list, err := voiceList(c.Request.Context(), d)
+		if err != nil {
+			c.JSON(http.StatusBadGateway, gin.H{"error": err.Error()})
+			return
+		}
+		known := false
+		for _, v := range list {
+			known = known || v.ID == body.VoiceID
+		}
+		if !known {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "that voice is not on this account"})
+			return
+		}
+		if _, err := notify.Update(p.ID, func(pr *notify.Prefs) { pr.Voice = body.VoiceID }); err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			return
+		}
+		c.JSON(http.StatusOK, gin.H{"voices": list, "current": body.VoiceID})
+	})
+}
+
+func personID(c *gin.Context) string {
+	if p, ok := people.From(c.Request.Context()); ok {
+		return p.ID
+	}
+	return ""
+}
+
+// defaultVoice is the OS-wide voice: ELEVENLABS_VOICE_ID, else George.
+func defaultVoice(d *Deps) string {
+	if v := d.Resolver.Resolve("ELEVENLABS_VOICE_ID"); v != "" {
+		return v
+	}
+	return "JBFqnCBsd6RMkjVDRZzb" // George, a premade voice every plan can use
+}
+
+// voiceFor is the person's own pick, else the OS default.
+func voiceFor(d *Deps, id string) string {
+	if id != "" {
+		if v := notify.Load(id).Voice; v != "" {
+			return v
+		}
+	}
+	return defaultVoice(d)
+}
+
+type voiceOption struct {
+	ID          string `json:"id"`
+	Name        string `json:"name"`
+	Description string `json:"description"`
+	Gender      string `json:"gender"`
+	Accent      string `json:"accent"`
+	Age         string `json:"age"`
+	Preview     string `json:"preview"`
+}
+
+var voiceCache struct {
+	sync.Mutex
+	at   time.Time
+	list []voiceOption
+}
+
+// voiceList reads the account's voices (cached an hour; listing is free).
+func voiceList(ctx context.Context, d *Deps) ([]voiceOption, error) {
+	voiceCache.Lock()
+	defer voiceCache.Unlock()
+	if voiceCache.list != nil && time.Since(voiceCache.at) < time.Hour {
+		return voiceCache.list, nil
+	}
+	key := voiceKey(d)
+	if key == "" {
+		return nil, errors.New("no ElevenLabs key")
+	}
+	ctx, cancel := context.WithTimeout(ctx, 20*time.Second)
+	defer cancel()
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, elevenLabsURL+"/v1/voices", nil)
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("xi-api-key", key)
+	res, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer res.Body.Close()
+	if res.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("ElevenLabs answered %d", res.StatusCode)
+	}
+	var body struct {
+		Voices []struct {
+			ID      string            `json:"voice_id"`
+			Name    string            `json:"name"`
+			Labels  map[string]string `json:"labels"`
+			Preview string            `json:"preview_url"`
+		} `json:"voices"`
+	}
+	if err := json.NewDecoder(io.LimitReader(res.Body, 4<<20)).Decode(&body); err != nil {
+		return nil, err
+	}
+	list := []voiceOption{}
+	for _, v := range body.Voices {
+		name, desc, _ := strings.Cut(v.Name, " - ")
+		list = append(list, voiceOption{ID: v.ID, Name: strings.TrimSpace(name), Description: strings.TrimSpace(desc),
+			Gender: v.Labels["gender"], Accent: v.Labels["accent"], Age: strings.ReplaceAll(v.Labels["age"], "_", " "), Preview: v.Preview})
+	}
+	voiceCache.list, voiceCache.at = list, time.Now()
+	return list, nil
 }
 
 // ---- voice ---------------------------------------------------------------
@@ -261,14 +389,13 @@ func speakText(text string) string {
 	return cut + " The rest is on screen."
 }
 
-func speak(ctx context.Context, d *Deps, text string) ([]byte, error) {
+func speak(ctx context.Context, d *Deps, text, voice string) ([]byte, error) {
 	key := voiceKey(d)
 	if key == "" {
 		return nil, errors.New("no ElevenLabs key")
 	}
-	voice := d.Resolver.Resolve("ELEVENLABS_VOICE_ID")
 	if voice == "" {
-		voice = "JBFqnCBsd6RMkjVDRZzb" // George, a premade voice every plan can use
+		voice = defaultVoice(d)
 	}
 	model := d.Resolver.Resolve("ELEVENLABS_MODEL")
 	if model == "" {

@@ -45,12 +45,14 @@ describe('the alerts drawer', () => {
 		const box = (await screen.findByLabelText('A follow-up went out')) as HTMLInputElement;
 		await fireEvent.click(box);
 		expect(fetchMock).toHaveBeenCalledWith('/pages/notify/prefs', { method: 'PUT', json: { kinds: { sent: false } } });
-		await fireEvent.change(screen.getByRole('combobox'), { target: { value: '7' } });
+		await fireEvent.change(screen.getByRole('combobox', { name: 'Morning brief hour' }), { target: { value: '7' } });
 		expect(fetchMock).toHaveBeenCalledWith('/pages/notify/prefs', { method: 'PUT', json: { briefHour: 7 } });
 	});
 
 	it("plays today's brief in the OS voice", async () => {
-		fetchMock.mockResolvedValueOnce(status()).mockResolvedValueOnce({ text: 'Good morning. You have 2 calls today.' });
+		fetchMock.mockImplementation(async (path: string) =>
+			(path === '/pages/notify/brief' ? { text: 'Good morning. You have 2 calls today.' } : path === '/pages/notify' ? status() : { voices: [], current: '' }) as never
+		);
 		render(AlertsPanel);
 		await fireEvent.click(await screen.findByRole('button', { name: /Play today's brief/ }));
 		await waitFor(() => expect(speak).toHaveBeenCalledWith('Good morning. You have 2 calls today.'));

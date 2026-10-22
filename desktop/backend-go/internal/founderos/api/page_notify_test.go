@@ -240,3 +240,54 @@ func TestLongRepliesAreCutAtASentence(t *testing.T) {
 		t.Fatalf("%d %q", len(got), got[len(got)-40:])
 	}
 }
+
+func TestEachPersonPicksTheirOwnVoice(t *testing.T) {
+	peopleSetup(t)
+	var spokeWith string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/v1/voices" {
+			_, _ = w.Write([]byte(`{"voices":[
+				{"voice_id":"sarah1","name":"Sarah - Mature, Reassuring, Confident","labels":{"gender":"female","accent":"american","age":"young"},"preview_url":"https://cdn/s.mp3"},
+				{"voice_id":"george1","name":"George - Warm, Captivating Storyteller","labels":{"gender":"male","accent":"british","age":"middle_aged"}}]}`))
+			return
+		}
+		spokeWith = strings.TrimPrefix(r.URL.Path, "/v1/text-to-speech/")
+		_, _ = w.Write([]byte("ID3"))
+	}))
+	defer srv.Close()
+	old := elevenLabsURL
+	elevenLabsURL = srv.URL
+	defer func() { elevenLabsURL = old }()
+	voiceCache.Lock()
+	voiceCache.list = nil
+	voiceCache.Unlock()
+	t.Setenv("ELEVENLABS_API_KEY", "sk_test")
+	t.Setenv("ELEVENLABS_VOICE_ID", "george1")
+	r := asUser(t, &Deps{}, karim)
+
+	w := do(t, r, http.MethodGet, "/api/founderos/pages/voice/voices", "")
+	var got struct {
+		Voices  []voiceOption `json:"voices"`
+		Current string        `json:"current"`
+	}
+	if json.Unmarshal(w.Body.Bytes(), &got) != nil || len(got.Voices) != 2 || got.Current != "george1" {
+		t.Fatalf("voices %s", w.Body)
+	}
+	if v := got.Voices[0]; v.Name != "Sarah" || v.Description != "Mature, Reassuring, Confident" || v.Accent != "american" || v.Preview != "https://cdn/s.mp3" {
+		t.Fatalf("sarah %+v", v)
+	}
+	if w := do(t, r, http.MethodPut, "/api/founderos/pages/voice", `{"voiceId":"made-up"}`); w.Code != http.StatusBadRequest {
+		t.Fatalf("unknown voice accepted: %d", w.Code)
+	}
+	if w := do(t, r, http.MethodPut, "/api/founderos/pages/voice", `{"voiceId":"sarah1"}`); w.Code != http.StatusOK {
+		t.Fatalf("pick %d %s", w.Code, w.Body)
+	}
+	do(t, r, http.MethodPost, "/api/founderos/pages/voice/speak", `{"text":"hi"}`)
+	if !strings.HasPrefix(spokeWith, "sarah1") {
+		t.Fatalf("spoke with %q", spokeWith)
+	}
+	do(t, asUser(t, &Deps{}, ownerUser), http.MethodPost, "/api/founderos/pages/voice/speak", `{"text":"hi"}`)
+	if !strings.HasPrefix(spokeWith, "george1") {
+		t.Fatalf("someone else's pick leaked: %q", spokeWith)
+	}
+}

@@ -64,6 +64,7 @@ type Prefs struct {
 	// BriefHour is the local hour the morning summary goes out (default 8).
 	BriefHour *int   `json:"briefHour,omitempty"`
 	LastBrief string `json:"lastBrief,omitempty"` // YYYY-MM-DD
+	Voice     string `json:"voice,omitempty"`     // ElevenLabs voice id; empty is the OS default
 }
 
 func (p Prefs) Wants(kind string) bool { return kind == KindTest || !p.Off[kind] }

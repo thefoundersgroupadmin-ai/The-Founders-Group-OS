@@ -63,6 +63,7 @@ var notifyKindLabels = map[string]string{
 	notify.KindSent:     "A follow-up went out",
 	notify.KindAgent:    "An agent finished a task",
 	notify.KindBrief:    "Morning brief",
+	notify.KindHealth:   "The Conductor stops answering",
 }
 
 func notifyStatusOf(d *Deps, id string) notifyStatus {
@@ -852,6 +853,7 @@ func startNotifyWatch(d *Deps) {
 	notifyOnce.Do(func() {
 		go func() {
 			seen := loadSeen()
+			cw := &conductorWatch{}
 			t := time.NewTicker(2 * time.Minute)
 			defer t.Stop()
 			for {
@@ -861,6 +863,9 @@ func startNotifyWatch(d *Deps) {
 					notify.Publish(ctx, e)
 				}
 				seen.save()
+				for _, e := range cw.pass(ctx, d, now) {
+					notify.Publish(ctx, e)
+				}
 				notifyBriefs(ctx, d, now)
 				cancel()
 				<-t.C

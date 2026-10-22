@@ -75,6 +75,40 @@ class HostTest(unittest.TestCase):
         self.run_host()
         self.assertFalse((self.agents / "net.thefoundersgroup.tfg-paperclip.plist").exists())
 
+    def fake_node(self, name, version):
+        n = Path(self.tmp.name) / name / "node"
+        n.parent.mkdir(parents=True)
+        n.write_text(f"#!/bin/sh\necho v{version}\n")
+        n.chmod(0o755)
+        return str(n)
+
+    def test_paperclip_runs_on_a_node_it_supports_not_the_shells(self):
+        if not (REPO / "frontend" / "build" / "index.js").exists():
+            self.skipTest("no production build")
+        (self.paperclip / "package.json").write_text('{"engines": {"node": ">=24.11.0"}}')
+        old, new = self.fake_node("n22", "22.23.3"), self.fake_node("n26", "26.12.0")
+        self.env["TFG_NODE"] = old  # the shell's node is too old
+        self.env["TFG_PAPERCLIP_NODE_CANDIDATES"] = f"{self.fake_node('n24', '24.10.0')} {new}"
+        self.run_host()
+        pc = self.load("tfg-paperclip")
+        self.assertEqual(pc["ProgramArguments"][0], new)
+        self.assertTrue(pc["EnvironmentVariables"]["PATH"].startswith(str(Path(new).parent) + ":"))
+        self.assertEqual(self.load("tfg-os-web")["ProgramArguments"][0], old)
+
+    def test_no_supported_node_leaves_paperclip_as_it_was(self):
+        if not (REPO / "frontend" / "build" / "index.js").exists():
+            self.skipTest("no production build")
+        self.run_host()
+        before = (self.agents / "net.thefoundersgroup.tfg-paperclip.plist").read_bytes()
+        (self.paperclip / "package.json").write_text('{"engines": {"node": ">=24.11.0"}}')
+        self.env["TFG_NODE"] = self.fake_node("n22", "22.23.3")
+        self.env["TFG_PAPERCLIP_NODE_CANDIDATES"] = "/nonexistent/node"
+        r = self.run_host(check=False)
+        self.assertNotEqual(r.returncode, 0)
+        self.assertIn("Paperclip needs Node >= 24.11.0", r.stderr)
+        self.assertEqual((self.agents / "net.thefoundersgroup.tfg-paperclip.plist").read_bytes(), before)
+        self.assertEqual(list(self.agents.glob(".*.new")), [])
+
 
 class BackupTest(unittest.TestCase):
     def test_dumps_privately_and_keeps_the_newest(self):

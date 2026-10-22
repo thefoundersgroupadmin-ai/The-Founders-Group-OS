@@ -32,6 +32,7 @@
 		uiRequest,
 		withScreen,
 		type ScreenCtx,
+		type ConductorHealth,
 		type ThreadMessage,
 		type Turn
 	} from './conductor';
@@ -48,6 +49,10 @@
 	let awaitingSince = $state(0);
 	let error = $state<string | null>(null);
 	let threadError = $state<string | null>(null);
+	// Who answers: when the CEO seat is failing, say why instead of waiting in silence.
+	let health = $state<ConductorHealth | null>(null);
+	let retrying = $state(false);
+	let retryNote = $state<string | null>(null);
 	let scroller: HTMLDivElement | undefined = $state();
 
 	let baseline = 0;
@@ -103,8 +108,9 @@
 	/** The board thread, or null when it could not be read (said so in the dock). */
 	async function loadThread(): Promise<Turn[] | null> {
 		try {
-			const body = await founderosFetch<{ messages?: ThreadMessage[] | null }>('/pages/conductor/chat');
+			const body = await founderosFetch<{ messages?: ThreadMessage[] | null; health?: ConductorHealth }>('/pages/conductor/chat');
 			threadError = null;
+			health = body.health ?? null;
 			return threadToTurns(body.messages ?? [], clearedAt);
 		} catch (err) {
 			threadError = `Thread unavailable: ${failureMessage(err)}`;
@@ -152,6 +158,22 @@
 			if (scroller) scroller.scrollTop = scroller.scrollHeight;
 		});
 	});
+
+	async function retry() {
+		retrying = true;
+		retryNote = null;
+		try {
+			await founderosFetch('/pages/conductor/retry', { method: 'POST', json: {} });
+			retryNote = 'Woken. If the problem is fixed, the answer arrives in a minute.';
+			awaitingSince = Date.now();
+			baseline = assistantCount(boardTurns);
+			awaiting = true;
+		} catch (err) {
+			retryNote = failureMessage(err);
+		} finally {
+			retrying = false;
+		}
+	}
 
 	function clearTurns() {
 		clearedAt = Date.now();
@@ -308,6 +330,17 @@
 				</div>
 			{/if}
 		{/each}
+		{#if health && !health.ok}
+			<div class="bn-down space-y-1.5 rounded-[8px] border p-2.5 text-[11px]" role="alert" data-part="conductor-down">
+				<p class="font-semibold">{health.agent ?? 'The CEO'} can't answer right now</p>
+				<p class="bn-muted break-words font-mono text-[10px]">{health.problem}</p>
+				<p class="bn-dim text-[10px]">Your messages are saved; it answers them once this is fixed. The OS retries by itself every hour and alerts your phone.</p>
+				<button type="button" class="bn-pressable is-dark rounded-[6px] border px-2 py-1 font-mono text-[10px]" disabled={retrying} onclick={retry}>
+					{retrying ? 'Trying…' : 'Try again now'}
+				</button>
+				{#if retryNote}<p class="font-mono text-[10px]">{retryNote}</p>{/if}
+			</div>
+		{/if}
 		{#if sending || awaiting}
 			<div class="flex items-center gap-2" data-thinking>
 				<ConductorEmblem size={18} thinking />
@@ -335,6 +368,10 @@
 </aside>
 
 <style>
+	.bn-down {
+		border-color: var(--bn-err);
+		background: color-mix(in oklab, var(--bn-err) 8%, transparent);
+	}
 	.bn-dock {
 		border-color: var(--bn-border-strong);
 		background: var(--bn-surface);

@@ -36,17 +36,40 @@ JOBS=(tfg-os-stack tfg-os-web tfg-keep-awake tfg-backup)
 
 say() { printf '%s\n' "$*"; }
 
+# Paperclip states the Node it needs (package.json engines.node, ">=24.11.0").
+# The shell's `node` can be older (node@22 first on PATH), and a Paperclip on
+# too old a Node starts fine but fails every agent run, the Conductor's CEO
+# included. So pick a Node that meets it, or refuse to install.
+read -r -a PAPERCLIP_NODE_CANDIDATES <<<"${TFG_PAPERCLIP_NODE_CANDIDATES:-/opt/homebrew/opt/node/bin/node /opt/homebrew/opt/node@24/bin/node /usr/local/bin/node}"
+paperclip_node_min() { sed -n 's/.*"node"[[:space:]]*:[[:space:]]*">=\([0-9.]*\)".*/\1/p' "$PAPERCLIP_DIR/package.json" 2>/dev/null | head -1; }
+ver_ge() { [ "$(printf '%s\n%s\n' "$2" "$1" | sort -V | head -1)" = "$2" ]; }
+paperclip_node() {
+  if [ -n "${TFG_PAPERCLIP_NODE:-}" ]; then echo "$TFG_PAPERCLIP_NODE"; return 0; fi
+  local want n v
+  want="$(paperclip_node_min)"
+  if [ -z "$want" ]; then echo "$NODE"; return 0; fi
+  for n in "$NODE" "${PAPERCLIP_NODE_CANDIDATES[@]}"; do
+    [ -x "$n" ] || continue
+    v="$("$n" -v 2>/dev/null | tr -d 'v')"
+    if [ -n "$v" ] && ver_ge "$v" "$want"; then echo "$n"; return 0; fi
+  done
+  say "Paperclip needs Node >= $want and none was found (tried $NODE ${PAPERCLIP_NODE_CANDIDATES[*]})." >&2
+  say "Install one (brew install node) or set TFG_PAPERCLIP_NODE, then run this again." >&2
+  return 1
+}
+
 xml() { sed -e 's/&/\&amp;/g' -e 's/</\&lt;/g' -e 's/>/\&gt;/g' <<<"$1"; }
 
 # plist NAME SCHEDULE ARG... (SCHEDULE: keepalive | login | nightly)
 plist() {
-  local name="$1" schedule="$2" args="" a env="" when workdir="$REPO"
+  local name="$1" schedule="$2" args="" a env="" when workdir="$REPO" path="/opt/homebrew/opt/postgresql@17/bin:/opt/homebrew/opt/node/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin"
   shift 2
   for a in "$@"; do args+="<string>$(xml "$a")</string>"; done
   case "$name" in
     tfg-os-web) env="<key>PORT</key><string>$WEB_PORT</string><key>HOST</key><string>127.0.0.1</string><key>ORIGIN</key><string>https://$(xml "$PUBLIC_HOST")</string><key>BACKEND_INTERNAL_URL</key><string>http://127.0.0.1:$BACKEND_PORT</string><key>NODE_ENV</key><string>production</string>" ;;
     tfg-os-stack) env="<key>BUSINESSOS_HEADLESS</key><string>1</string>" ;;
-    tfg-paperclip) workdir="$PAPERCLIP_DIR/server" ;;
+    # its agents' tools (codex, npx) take node from PATH: the same Node first
+    tfg-paperclip) workdir="$PAPERCLIP_DIR/server"; path="$(dirname "$1"):$path" ;;
   esac
   case "$schedule" in
     keepalive) when="<key>RunAtLoad</key><true/><key>KeepAlive</key><true/><key>ThrottleInterval</key><integer>10</integer>" ;;
@@ -60,7 +83,7 @@ plist() {
   <key>Label</key><string>net.thefoundersgroup.$name</string>
   <key>ProgramArguments</key><array>$args</array>
   <key>WorkingDirectory</key><string>$(xml "$workdir")</string>
-  <key>EnvironmentVariables</key><dict><key>PATH</key><string>/opt/homebrew/opt/postgresql@17/bin:/opt/homebrew/opt/node/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>$env</dict>
+  <key>EnvironmentVariables</key><dict><key>PATH</key><string>$(xml "$path")</string>$env</dict>
   $when
   <key>StandardOutPath</key><string>$(xml "$FHOME/logs/$name.out.log")</string>
   <key>StandardErrorPath</key><string>$(xml "$FHOME/logs/$name.err.log")</string>
@@ -78,10 +101,12 @@ write_job() {
       # The self-contained bundle (cd $PAPERCLIP_DIR/server && pnpm build:runtime)
       # when there is one, else from source. server/dist alone does not run in
       # the monorepo: the workspace packages export their src/*.ts.
+      local pnode
+      pnode="$(paperclip_node)" || return 1
       if [ -f "$PAPERCLIP_DIR/server/dist-runtime/index.mjs" ]; then
-        plist "$1" keepalive "$NODE" dist-runtime/index.mjs
+        plist "$1" keepalive "$pnode" dist-runtime/index.mjs
       else
-        plist "$1" keepalive "$NODE" --import tsx src/index.ts
+        plist "$1" keepalive "$pnode" --import tsx src/index.ts
       fi ;;
   esac
 }
@@ -129,8 +154,16 @@ if [ -z "${TFG_SKIP_BUILD:-}" ]; then
   say "built the laptop usage reporter"
 fi
 for name in "${JOBS[@]}"; do
+  # Write first: a job that can't be written (say no Node Paperclip accepts)
+  # leaves the running one untouched instead of stopping it.
+  tmp="$AGENTS/.net.thefoundersgroup.$name.plist.new"
+  if ! write_job "$name" >"$tmp"; then
+    rm -f "$tmp"
+    say "left $name as it was" >&2
+    exit 1
+  fi
   unload "$name"
-  write_job "$name" >"$AGENTS/net.thefoundersgroup.$name.plist"
+  mv "$tmp" "$AGENTS/net.thefoundersgroup.$name.plist"
   # A Paperclip started by hand already holds the port: leave it, and launchd
   # takes over at the next login.
   if [ "$name" = tfg-paperclip ] && [ -z "${TFG_SKIP_LAUNCHCTL:-}" ] && lsof -nP -iTCP:"$PAPERCLIP_PORT" -sTCP:LISTEN >/dev/null 2>&1; then

@@ -40,6 +40,9 @@ export type ScreenCtx = {
 /** One cockpit comment from GET /pages/conductor/chat. */
 export type ThreadMessage = { id: string; body: string; authorType: string; createdAt: string };
 
+/** GET /pages/conductor/chat health: is the seat that answers able to? */
+export type ConductorHealth = { ok: boolean; agent?: string; agentId?: string; problem?: string; since?: string };
+
 export type Turn = {
 	id: string;
 	role: 'user' | 'assistant';

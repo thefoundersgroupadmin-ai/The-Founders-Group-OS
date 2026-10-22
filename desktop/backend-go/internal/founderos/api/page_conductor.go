@@ -82,8 +82,9 @@ func registerConductor(s *gin.RouterGroup, d *Deps) {
 		if msgs == nil {
 			msgs = []paperclip.Comment{}
 		}
-		c.JSON(http.StatusOK, gin.H{"messages": msgs, "configured": true})
+		c.JSON(http.StatusOK, gin.H{"messages": msgs, "configured": true, "health": conductorHealthFor(c.Request.Context(), d)})
 	})
+	registerConductorHealth(s, d)
 	s.POST("/pages/conductor/chat", func(c *gin.Context) {
 		var body struct {
 			Message string `json:"message"`
@@ -92,7 +93,13 @@ func registerConductor(s *gin.RouterGroup, d *Deps) {
 			c.JSON(http.StatusBadRequest, gin.H{"error": "message required"})
 			return
 		}
-		comment, err := conductorDeps(d).Board.PostCockpitMessage(c.Request.Context(), strings.TrimSpace(body.Message))
+		board := conductorDeps(d).Board
+		// A failed run can leave the thread blocked, and a blocked thread never
+		// wakes the CEO: put it back first so this message gets an answer.
+		if r, ok := board.(cockpitRepairer); ok {
+			r.RepairCockpitIssue(c.Request.Context(), "")
+		}
+		comment, err := board.PostCockpitMessage(c.Request.Context(), strings.TrimSpace(body.Message))
 		if err != nil && boardNotConfigured(err) {
 			// nothing was sent, and nothing is broken: the board is simply not set up
 			c.JSON(http.StatusConflict, gin.H{"error": "Paperclip is not configured, nothing was sent.", "notConfigured": true})

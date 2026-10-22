@@ -56,6 +56,9 @@ type Config struct {
 	WisprLimit int
 	// VaultNotes pushes the vault's note contents for the /brain view.
 	VaultNotes bool
+	// UsageOnly reads Claude and Codex usage and nothing else: no chats,
+	// dictation, vault, local stack or Ollama (a teammate's laptop).
+	UsageOnly bool
 	// SourceTimeout is each source's own budget (0: DefaultSourceTimeout).
 	// A read past it is abandoned and the tick goes on without it.
 	SourceTimeout time.Duration
@@ -241,50 +244,58 @@ func (c *Collector) Collect(ctx context.Context, now time.Time) devicepush.Paylo
 	}
 
 	fda := cfg.FullDiskAccess == nil || cfg.FullDiskAccess()
-	goSource(func() {
-		if !fda { // WhatsApp lives in another app's group container
-			wa = needsAccess(devicepush.SourceWhatsApp)
-			return
-		}
-		wa = c.status(ctx, devicepush.SourceWhatsApp, func(ctx context.Context) connectors.Status { return WhatsAppStatus(ctx, cfg.WhatsAppDBs, now) })
-		if wa.State != connectors.StateConnected {
-			return
-		}
-		if chats, err := within(ctx, c, "whatsapp-chats", func(ctx context.Context) ([]devicepush.Chat, error) {
-			return RecentChats(ctx, ResolveChatDB(cfg.WhatsAppDBs), cfg.ChatLimit, now)
-		}); err == nil {
-			waData = &devicepush.WhatsAppData{Chats: chats}
-		}
-	})
-	goSource(func() {
-		wi = c.status(ctx, devicepush.SourceWispr, func(ctx context.Context) connectors.Status { return WisprStatus(ctx, cfg.WisprDB, now) })
-		if wi.State != connectors.StateConnected {
-			return
-		}
-		if notes, err := within(ctx, c, "wispr-notes", func(ctx context.Context) ([]devicepush.WisprNote, error) {
-			return RecentWisprNotes(ctx, cfg.WisprDB, cfg.WisprLimit), nil
-		}); err == nil {
-			wiData = &devicepush.WisprData{Notes: notes}
-		}
-	})
-	goSource(func() {
-		if !fda && protectedPath(cfg.ObsidianVault, cfg.Home) {
-			ob = needsAccess(devicepush.SourceObsidian)
-			return
-		}
-		ob = c.status(ctx, devicepush.SourceObsidian, func(context.Context) connectors.Status { return ObsidianStatus(cfg.ObsidianVault, cfg.Home) })
-		if ob.State != connectors.StateConnected || !cfg.VaultNotes {
-			return
-		}
-		if notes, err := within(ctx, c, "obsidian-notes", func(context.Context) ([]devicepush.VaultNote, error) {
-			return ReadVaultNotes(cfg.ObsidianVault), nil
-		}); err == nil {
-			obData = &devicepush.ObsidianData{Notes: notes}
-		}
-	})
-	goSource(func() {
-		ls = c.status(ctx, devicepush.SourceLocalStack, func(ctx context.Context) connectors.Status { return LocalStackStatus(ctx, cfg.Stack) })
-	})
+	if !cfg.UsageOnly {
+		goSource(func() {
+			if !fda { // WhatsApp lives in another app's group container
+				wa = needsAccess(devicepush.SourceWhatsApp)
+				return
+			}
+			wa = c.status(ctx, devicepush.SourceWhatsApp, func(ctx context.Context) connectors.Status { return WhatsAppStatus(ctx, cfg.WhatsAppDBs, now) })
+			if wa.State != connectors.StateConnected {
+				return
+			}
+			if chats, err := within(ctx, c, "whatsapp-chats", func(ctx context.Context) ([]devicepush.Chat, error) {
+				return RecentChats(ctx, ResolveChatDB(cfg.WhatsAppDBs), cfg.ChatLimit, now)
+			}); err == nil {
+				waData = &devicepush.WhatsAppData{Chats: chats}
+			}
+		})
+	}
+	if !cfg.UsageOnly {
+		goSource(func() {
+			wi = c.status(ctx, devicepush.SourceWispr, func(ctx context.Context) connectors.Status { return WisprStatus(ctx, cfg.WisprDB, now) })
+			if wi.State != connectors.StateConnected {
+				return
+			}
+			if notes, err := within(ctx, c, "wispr-notes", func(ctx context.Context) ([]devicepush.WisprNote, error) {
+				return RecentWisprNotes(ctx, cfg.WisprDB, cfg.WisprLimit), nil
+			}); err == nil {
+				wiData = &devicepush.WisprData{Notes: notes}
+			}
+		})
+	}
+	if !cfg.UsageOnly {
+		goSource(func() {
+			if !fda && protectedPath(cfg.ObsidianVault, cfg.Home) {
+				ob = needsAccess(devicepush.SourceObsidian)
+				return
+			}
+			ob = c.status(ctx, devicepush.SourceObsidian, func(context.Context) connectors.Status { return ObsidianStatus(cfg.ObsidianVault, cfg.Home) })
+			if ob.State != connectors.StateConnected || !cfg.VaultNotes {
+				return
+			}
+			if notes, err := within(ctx, c, "obsidian-notes", func(context.Context) ([]devicepush.VaultNote, error) {
+				return ReadVaultNotes(cfg.ObsidianVault), nil
+			}); err == nil {
+				obData = &devicepush.ObsidianData{Notes: notes}
+			}
+		})
+	}
+	if !cfg.UsageOnly {
+		goSource(func() {
+			ls = c.status(ctx, devicepush.SourceLocalStack, func(ctx context.Context) connectors.Status { return LocalStackStatus(ctx, cfg.Stack) })
+		})
+	}
 	goSource(func() {
 		cache := c.claude
 		seat, err := within(ctx, c, devicepush.SourceClaudeUsage, func(context.Context) (devicepush.SeatUsage, error) {
@@ -321,20 +332,24 @@ func (c *Collector) Collect(ctx context.Context, now time.Time) devicepush.Paylo
 		}
 		codexSeat = seat
 	})
-	goSource(func() {
-		lane, err := within(ctx, c, devicepush.SourceOllamaUsage, func(ctx context.Context) (devicepush.OllamaLane, error) {
-			return ReadOllamaLane(ctx, nil, cfg.OllamaBaseURL, cfg.OllamaLogDir, now), nil
-		})
-		if err == nil && (lane.State == "up" || lane.Requests != nil) {
-			ollama = &devicepush.OllamaSnapshot{
-				Kind: "ollama", ID: "ollama-" + DeviceSlug(cfg.Device), Label: "Ollama · " + cfg.Label,
-				CapturedAt: isoMillis(now), Lane: lane,
+	if !cfg.UsageOnly {
+		goSource(func() {
+			lane, err := within(ctx, c, devicepush.SourceOllamaUsage, func(ctx context.Context) (devicepush.OllamaLane, error) {
+				return ReadOllamaLane(ctx, nil, cfg.OllamaBaseURL, cfg.OllamaLogDir, now), nil
+			})
+			if err == nil && (lane.State == "up" || lane.Requests != nil) {
+				ollama = &devicepush.OllamaSnapshot{
+					Kind: "ollama", ID: "ollama-" + DeviceSlug(cfg.Device), Label: "Ollama · " + cfg.Label,
+					CapturedAt: isoMillis(now), Lane: lane,
+				}
 			}
-		}
-	})
+		})
+	}
 	wg.Wait()
 
-	p.Statuses = []connectors.Status{wa, wi, ob, ls}
+	if !cfg.UsageOnly {
+		p.Statuses = []connectors.Status{wa, wi, ob, ls}
+	}
 	p.WhatsApp, p.Wispr, p.Obsidian, p.Ollama = waData, wiData, obData, ollama
 	if claudeSeat != nil {
 		p.Usage = append(p.Usage, WithClaudeOfficial(*claudeSeat, claudeOfficial))

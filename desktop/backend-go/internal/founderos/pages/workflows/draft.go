@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"github.com/rhl/businessos-backend/internal/founderos/pages/shared"
+	"github.com/rhl/businessos-backend/internal/founderos/people"
 	"os/exec"
 	"regexp"
 	"strings"
@@ -129,6 +130,9 @@ type DraftResult struct {
 }
 
 func cliFailure(r CLIResult) DraftResult {
+	if errors.Is(r.Err, people.ErrNoClaudeLogin) {
+		return DraftResult{Unavailable: true, Error: r.Err.Error()}
+	}
 	if r.Unavailable {
 		return DraftResult{Unavailable: true, Error: "drafting assistant unavailable: build manually"}
 	}

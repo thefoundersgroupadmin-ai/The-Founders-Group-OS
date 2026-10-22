@@ -56,6 +56,7 @@ func run(args []string, stdout, stderr io.Writer) int {
 	every := fs.Duration("every", 0, "repeat on this interval; 0 runs one tick")
 	dryRun := fs.Bool("dry-run", false, "print the payload as JSON instead of pushing it")
 	noVault := fs.Bool("no-vault-notes", false, "push the vault's status only, not its note contents")
+	usageOnly := fs.Bool("usage-only", false, "read only Claude and Codex usage (a teammate's laptop)")
 	deadline := fs.Duration("deadline", defaultDeadline, "end the process when a tick runs past this")
 	sourceTimeout := fs.Duration("source-timeout", defaultSourceTimeout, "give up on one source's read after this")
 	if err := fs.Parse(args); err != nil {
@@ -71,6 +72,9 @@ func run(args []string, stdout, stderr io.Writer) int {
 		return 2
 	}
 	token := res.Resolve("FOUNDEROS_COLLECTOR_TOKEN")
+	if v := os.Getenv("FOUNDEROS_COLLECTOR_TOKEN"); *usageOnly && v != "" {
+		token = v // a laptop's own token (its LaunchAgent) beats any env file
+	}
 
 	home, err := os.UserHomeDir()
 	if err != nil {
@@ -80,6 +84,7 @@ func run(args []string, stdout, stderr io.Writer) int {
 	host, _ := os.Hostname()
 	cfg := collect.DefaultConfig(res, home, host)
 	cfg.VaultNotes = !*noVault
+	cfg.UsageOnly = *usageOnly
 	cfg.SourceTimeout = *sourceTimeout
 	c := collect.NewCollector(cfg)
 

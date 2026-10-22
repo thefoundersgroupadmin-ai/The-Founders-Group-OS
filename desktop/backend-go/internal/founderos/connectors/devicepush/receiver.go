@@ -432,6 +432,7 @@ func (c sourceConnector) Status(ctx context.Context) connectors.Status {
 type Reading[T any] struct {
 	Device   string    `json:"device"`
 	Label    string    `json:"label"`
+	Owner    string    `json:"owner,omitempty"`
 	PushedAt time.Time `json:"pushedAt"`
 	Stale    bool      `json:"stale"`
 	Data     T         `json:"data"`
@@ -497,7 +498,7 @@ func (r *Receiver) UsageSeats(ctx context.Context) ([]Reading[SeatUsage], error)
 	out := []Reading[SeatUsage]{}
 	for _, rec := range latest {
 		for _, s := range rec.Payload.Usage {
-			out = append(out, Reading[SeatUsage]{Device: rec.Payload.Device, Label: rec.Payload.Label, PushedAt: rec.ReceivedAt, Stale: r.stale(rec), Data: s})
+			out = append(out, Reading[SeatUsage]{Device: rec.Payload.Device, Label: rec.Payload.Label, Owner: rec.Payload.Owner, PushedAt: rec.ReceivedAt, Stale: r.stale(rec), Data: s})
 		}
 	}
 	return out, nil
@@ -512,7 +513,7 @@ func (r *Receiver) OllamaSnapshots(ctx context.Context) ([]Reading[OllamaSnapsho
 	out := []Reading[OllamaSnapshot]{}
 	for _, rec := range latest {
 		if rec.Payload.Ollama != nil {
-			out = append(out, Reading[OllamaSnapshot]{Device: rec.Payload.Device, Label: rec.Payload.Label, PushedAt: rec.ReceivedAt, Stale: r.stale(rec), Data: *rec.Payload.Ollama})
+			out = append(out, Reading[OllamaSnapshot]{Device: rec.Payload.Device, Label: rec.Payload.Label, Owner: rec.Payload.Owner, PushedAt: rec.ReceivedAt, Stale: r.stale(rec), Data: *rec.Payload.Ollama})
 		}
 	}
 	return out, nil

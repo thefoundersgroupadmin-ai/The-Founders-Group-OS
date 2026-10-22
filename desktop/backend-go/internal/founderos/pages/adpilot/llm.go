@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"github.com/rhl/businessos-backend/internal/founderos/pages/shared"
+	"github.com/rhl/businessos-backend/internal/founderos/people"
 	"os/exec"
 	"regexp"
 	"sort"
@@ -48,6 +49,9 @@ func (c ClaudeCLI) Complete(ctx context.Context, prompt string) (string, error) 
 	defer cancel()
 	var out, stderr bytes.Buffer
 	cmd, cleanup, err := shared.ClaudeCommand(ctx, path, prompt)
+	if errors.Is(err, people.ErrNoClaudeLogin) {
+		return "", err
+	}
 	if err != nil {
 		return "", ErrLLMUnavailable
 	}

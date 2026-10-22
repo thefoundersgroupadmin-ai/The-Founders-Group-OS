@@ -33,10 +33,12 @@
 	let fetchedAt = $state(0);
 	let open = $state<PlanKey | null>('claude');
 	let clock = $state(Date.now());
+	// "me": only the viewer's own machines (the default); "team": everyone's.
+	let who = $state<'me' | 'team'>('me');
 
 	async function load() {
 		try {
-			board = await founderosFetch<UsageBody>('/pages/usage');
+			board = await founderosFetch<UsageBody>(`/pages/usage?who=${who}`);
 			error = null;
 			fetchedAt = Date.now();
 		} catch (e) {
@@ -54,10 +56,22 @@
 	const now = $derived(fetchedAt || clock);
 	const vol = $derived(board ? usageVolume({ claude: board.claude, codex: board.codex, ollama: board.ollama, now }) : null);
 	const toggle = (k: PlanKey) => (open = open === k ? null : k);
+	const pick = (w: 'me' | 'team') => {
+		if (w === who) return;
+		who = w;
+		board = null;
+		void load();
+	};
 	// prod counts the Claude/Codex plans that answered, plus Ollama's lane
 	const providers = $derived(board ? [board.claude, board.codex].filter(Boolean).length + 1 : 0);
 	const errorLine = $derived(board?.errors ? Object.entries(board.errors).map(([k, v]) => `${k}: ${v}`).join(' · ') : null);
 </script>
+
+<div class="mb-4 flex items-center gap-2" data-part="who">
+	<button type="button" class={chipClass(who === 'me')} onclick={() => pick('me')}>My usage</button>
+	<button type="button" class={chipClass(who === 'team')} onclick={() => pick('team')}>Whole team</button>
+	<span class="bn-dim font-mono text-[10.5px]">{who === 'me' ? 'your machines and your own AI logins only' : 'everyone, added together'}</span>
+</div>
 
 {#if !board || !vol}
 	<div class="bn-dim bn-border bn-surface rounded-[12px] border px-6 py-8 text-[13px]">

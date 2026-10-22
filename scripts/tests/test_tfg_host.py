@@ -23,7 +23,7 @@ class HostTest(unittest.TestCase):
         (self.paperclip / "server" / "src").mkdir(parents=True)
         (self.paperclip / "server" / "src" / "index.ts").write_text("")
         self.env = {**os.environ, "LAUNCH_AGENTS_DIR": str(self.agents), "FOUNDEROS_HOME": str(root / "fh"),
-                    "TFG_SKIP_LAUNCHCTL": "1", "TFG_NODE": "/usr/bin/true", "TFG_PAPERCLIP_DIR": str(self.paperclip)}
+                    "TFG_SKIP_LAUNCHCTL": "1", "TFG_SKIP_BUILD": "1", "TFG_NODE": "/usr/bin/true", "TFG_PAPERCLIP_DIR": str(self.paperclip)}
 
     def tearDown(self):
         self.tmp.cleanup()

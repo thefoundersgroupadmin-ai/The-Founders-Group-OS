@@ -38,7 +38,7 @@ describe('/os/usage', () => {
 		expect(screen.getByText('token burn · one plan per provider', { exact: false })).toBeTruthy();
 		const raw = screen.getByRole('link', { name: /raw reading/i });
 		expect(raw.getAttribute('href')).toBe('/api/founderos/pages/usage');
-		expect(fetchMock).toHaveBeenCalledWith('/pages/usage');
+		expect(fetchMock).toHaveBeenCalledWith('/pages/usage?who=me');
 	});
 
 	it('shows a loading line, then an honest failure when the read fails', async () => {
@@ -109,9 +109,10 @@ describe('/os/usage', () => {
 		vi.useFakeTimers();
 		fetchMock.mockResolvedValue(full);
 		render(UsagePage);
-		expect(fetchMock).toHaveBeenCalledTimes(1);
+		const usageReads = () => fetchMock.mock.calls.filter(([p]) => String(p).startsWith('/pages/usage')).length;
+		expect(usageReads()).toBe(1);
 		await vi.advanceTimersByTimeAsync(10_000);
-		expect(fetchMock).toHaveBeenCalledTimes(2);
+		expect(usageReads()).toBe(2);
 	});
 
 	it('v1 layout: hero (burn line + Burn Volume), then models / limits / top burner, then the Plans', async () => {

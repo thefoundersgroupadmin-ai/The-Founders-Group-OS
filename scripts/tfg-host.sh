@@ -16,7 +16,8 @@
 #                  from source; it reads its own ~/.paperclip instance config
 #
 # Build the web app first: cd frontend && pnpm build
-# Tests point it elsewhere with LAUNCH_AGENTS_DIR, FOUNDEROS_HOME and TFG_SKIP_LAUNCHCTL=1.
+# Tests point it elsewhere with LAUNCH_AGENTS_DIR, FOUNDEROS_HOME, TFG_SKIP_LAUNCHCTL=1
+# and TFG_SKIP_BUILD=1.
 set -euo pipefail
 
 REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -119,6 +120,14 @@ esac
 
 [ -f "$REPO/frontend/build/index.js" ] || { say "no production build: run 'cd frontend && pnpm build' first" >&2; exit 1; }
 mkdir -p "$FHOME/logs" "$AGENTS"
+# The usage reporter teammates' laptops download (Usage → Connect this laptop).
+if [ -z "${TFG_SKIP_BUILD:-}" ]; then
+  mkdir -p "$FHOME/bin/laptop"
+  for arch in arm64 amd64; do
+    (cd "$REPO/desktop/backend-go" && CGO_ENABLED=0 GOOS=darwin GOARCH=$arch go build -trimpath -o "$FHOME/bin/laptop/tfg-usage-darwin-$arch" ./cmd/founderos-collector)
+  done
+  say "built the laptop usage reporter"
+fi
 for name in "${JOBS[@]}"; do
   unload "$name"
   write_job "$name" >"$AGENTS/net.thefoundersgroup.$name.plist"

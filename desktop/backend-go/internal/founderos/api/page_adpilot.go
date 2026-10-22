@@ -13,6 +13,7 @@ import (
 
 	"github.com/rhl/businessos-backend/internal/founderos/connectors/foreplay"
 	"github.com/rhl/businessos-backend/internal/founderos/pages/adpilot"
+	"github.com/rhl/businessos-backend/internal/founderos/people"
 )
 
 // /adpilot (spec 6.18): the campaign deck and Adscout's ad library, plus
@@ -290,6 +291,10 @@ func adpilotAsk(c *gin.Context, env *adpilotEnv) {
 		return
 	}
 	answer, err := env.LLM.Complete(c.Request.Context(), adpilot.AskPrompt(q, wall, msgs))
+	if errors.Is(err, people.ErrNoClaudeLogin) {
+		c.JSON(http.StatusConflict, gin.H{"ok": false, "unavailable": true, "needsLogin": true, "error": err.Error()})
+		return
+	}
 	if errors.Is(err, adpilot.ErrLLMUnavailable) {
 		c.JSON(http.StatusServiceUnavailable, gin.H{"ok": false, "unavailable": true, "error": "Analyst unavailable"})
 		return

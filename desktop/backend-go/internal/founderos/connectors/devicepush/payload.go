@@ -35,6 +35,9 @@ type Payload struct {
 	// Device is a slug ("alexs-macbook-pro", "mini").
 	Device string `json:"device"`
 	Label  string `json:"label"`
+	// Owner is whose machine this is (an email). The receiver's route sets
+	// it from the token the push came with; a device never chooses it.
+	Owner string `json:"owner,omitempty"`
 	// CapturedAt is the collector's clock; the receiver's own time is what
 	// staleness is judged by.
 	CapturedAt string `json:"capturedAt"`

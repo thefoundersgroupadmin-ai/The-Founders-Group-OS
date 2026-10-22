@@ -45,6 +45,7 @@ import (
 	"github.com/rhl/businessos-backend/internal/founderos/connectors/vidalytics"
 	"github.com/rhl/businessos-backend/internal/founderos/connectors/zernio"
 	"github.com/rhl/businessos-backend/internal/founderos/guard"
+	"github.com/rhl/businessos-backend/internal/founderos/people"
 	"github.com/rhl/businessos-backend/internal/founderos/topology"
 )
 
@@ -225,9 +226,12 @@ func Register(api *gin.RouterGroup, d *Deps, auth ...gin.HandlerFunc) {
 
 	// The device collector has no browser session; it presents its own token.
 	b.POST("/device/push", devicePush(d))
+	// A teammate's laptop: its own token, usage only (page_laptop.go).
+	registerLaptop(b, d)
 
 	s := b.Group("")
 	s.Use(auth...)
+	s.Use(withPerson)
 	s.GET("/connections", func(c *gin.Context) {
 		ctx, cancel := context.WithTimeout(c.Request.Context(), 12*time.Second)
 		defer cancel()
@@ -261,6 +265,8 @@ func devicePush(d *Deps) gin.HandlerFunc {
 			c.JSON(http.StatusServiceUnavailable, gin.H{"error": "no device receiver"})
 			return
 		}
+		// The shared device token is the owner's own Macs.
+		p.Owner = people.OwnerEmail()
 		if err := d.Devices.Accept(c.Request.Context(), p); err != nil {
 			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 			return
@@ -274,6 +280,8 @@ func devicePush(d *Deps) gin.HandlerFunc {
 var machineRoutes = map[string]bool{
 	"/api/founderos/device/push":    true,
 	"/api/v1/founderos/device/push": true, // RegisterRoutes also mounts under /api/v1
+	"/api/founderos/laptop/push":    true,
+	"/api/v1/founderos/laptop/push": true,
 }
 
 // CSRFExempt reports whether a request path is a FounderOS machine route.

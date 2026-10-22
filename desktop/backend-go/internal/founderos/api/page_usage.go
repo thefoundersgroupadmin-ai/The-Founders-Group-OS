@@ -12,6 +12,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -19,6 +20,7 @@ import (
 	"github.com/rhl/businessos-backend/internal/founderos/connectors/devicepush"
 	"github.com/rhl/businessos-backend/internal/founderos/connectors/paperclip"
 	"github.com/rhl/businessos-backend/internal/founderos/pages/usage"
+	"github.com/rhl/businessos-backend/internal/founderos/people"
 )
 
 func init() { RegisterPage(usageRegister) }
@@ -45,11 +47,47 @@ func usageRegister(s *gin.RouterGroup, d *Deps) {
 		ctx, cancel := context.WithTimeout(c.Request.Context(), 10*time.Second)
 		defer cancel()
 		c.Header("Cache-Control", "no-store")
-		c.JSON(http.StatusOK, usageBoard(ctx, d, time.Now()))
+		c.JSON(http.StatusOK, usageBoardFor(ctx, d, time.Now(), c.Query("who"), viewerEmail(c)))
 	})
 }
 
+// viewerEmail is the signed-in person's email ("" for background reads).
+func viewerEmail(c *gin.Context) string {
+	if p, ok := people.From(c.Request.Context()); ok {
+		return p.Email
+	}
+	return ""
+}
+
+// usageBoardFor is one person's board ("me", the default: only machines
+// that are theirs) or everyone's ("team"). A push with no owner is one of
+// the owner's own Macs.
+func usageBoardFor(ctx context.Context, d *Deps, now time.Time, who, viewer string) usage.Board {
+	owner := ""
+	if who != "team" && viewer != "" {
+		owner = strings.ToLower(viewer)
+	}
+	b := usageBoardOf(ctx, d, now, owner)
+	b.Scope = "team"
+	if owner != "" {
+		b.Scope = "me"
+	}
+	return b
+}
+
 func usageBoard(ctx context.Context, d *Deps, now time.Time) usage.Board {
+	return usageBoardOf(ctx, d, now, "")
+}
+
+func seatOwner(o string) string {
+	if o == "" {
+		return people.OwnerEmail()
+	}
+	return strings.ToLower(o)
+}
+
+func usageBoardOf(ctx context.Context, d *Deps, now time.Time, owner string) usage.Board {
+	mine := func(o string) bool { return owner == "" || seatOwner(o) == owner }
 	errs := map[string]string{}
 	var seats []usage.Seat
 	var lanes []usage.Ollama
@@ -61,14 +99,18 @@ func usageBoard(ctx context.Context, d *Deps, now time.Time) usage.Board {
 			errs["push"] = err.Error()
 		} else {
 			for _, r := range rs {
-				seats = append(seats, usage.Seat{SeatUsage: r.Data, ReceiverStale: r.Stale})
+				if mine(r.Owner) {
+					seats = append(seats, usage.Seat{SeatUsage: r.Data, ReceiverStale: r.Stale})
+				}
 			}
 		}
 		if rs, err := d.Devices.OllamaSnapshots(ctx); err != nil {
 			errs["ollamaPush"] = err.Error()
 		} else {
 			for _, r := range rs {
-				lanes = append(lanes, usage.Ollama{OllamaSnapshot: r.Data, ReceiverStale: r.Stale})
+				if mine(r.Owner) {
+					lanes = append(lanes, usage.Ollama{OllamaSnapshot: r.Data, ReceiverStale: r.Stale})
+				}
 			}
 		}
 	}
@@ -77,8 +119,10 @@ func usageBoard(ctx context.Context, d *Deps, now time.Time) usage.Board {
 	if err != nil {
 		errs["stored"] = err.Error()
 	}
-	seats = append(seats, storedSeats...)
-	lanes = append(lanes, storedLanes...)
+	if mine("") { // stored /api/usage/push rows are the owner's Macs
+		seats = append(seats, storedSeats...)
+		lanes = append(lanes, storedLanes...)
+	}
 
 	var names map[string]string
 	if len(seats) > 0 {

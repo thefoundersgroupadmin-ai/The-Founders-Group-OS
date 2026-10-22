@@ -68,6 +68,8 @@ export type UsageBody = {
 	codex: PlanUsage | null;
 	/** null: no machine reported an Ollama lane (unknown, not "down"). */
 	ollama: OllamaBoard | null;
+	/** "me": the viewer's own machines; "team": everyone's. */
+	scope?: 'me' | 'team';
 	errors?: Record<string, string>;
 };
 

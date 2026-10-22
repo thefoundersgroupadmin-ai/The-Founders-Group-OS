@@ -79,11 +79,13 @@ type OllamaBoard struct {
 
 // Board is the whole /usage reading.
 type Board struct {
-	GeneratedAt string            `json:"generatedAt"`
-	Claude      *Plan             `json:"claude"`
-	Codex       *Plan             `json:"codex"`
-	Ollama      *OllamaBoard      `json:"ollama"`
-	Errors      map[string]string `json:"errors,omitempty"`
+	GeneratedAt string       `json:"generatedAt"`
+	Claude      *Plan        `json:"claude"`
+	Codex       *Plan        `json:"codex"`
+	Ollama      *OllamaBoard `json:"ollama"`
+	// Scope is "me" (the viewer's own machines) or "team" (everyone's).
+	Scope  string            `json:"scope,omitempty"`
+	Errors map[string]string `json:"errors,omitempty"`
 }
 
 func addTot(a *dp.Tot, b dp.Tot) {

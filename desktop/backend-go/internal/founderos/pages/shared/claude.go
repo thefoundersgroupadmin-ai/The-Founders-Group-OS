@@ -17,7 +17,9 @@ import (
 // A call made for a teammate (people.From(ctx)) runs on their own Claude
 // login; one with no login saved is refused with people.ErrNoClaudeLogin
 // rather than spending the owner's plan.
-func ClaudeCommand(ctx context.Context, bin, prompt string) (*exec.Cmd, func(), error) {
+//
+// extra flags go after the fixed ones (e.g. "--model", "sonnet").
+func ClaudeCommand(ctx context.Context, bin, prompt string, extra ...string) (*exec.Cmd, func(), error) {
 	p, forSomeone := people.From(ctx)
 	if forSomeone && !p.Owner && people.ClaudeToken(p.ID) == "" {
 		return nil, func() {}, people.ErrNoClaudeLogin
@@ -26,7 +28,8 @@ func ClaudeCommand(ctx context.Context, bin, prompt string) (*exec.Cmd, func(), 
 	if err != nil {
 		return nil, func() {}, err
 	}
-	cmd := exec.CommandContext(ctx, bin, "-p", prompt, "--output-format", "json", "--tools", "", "--strict-mcp-config")
+	args := append([]string{"-p", prompt, "--output-format", "json", "--tools", "", "--strict-mcp-config"}, extra...)
+	cmd := exec.CommandContext(ctx, bin, args...)
 	cmd.Dir = dir
 	if forSomeone && !p.Owner {
 		cmd.Env = people.Env(p, os.Environ())

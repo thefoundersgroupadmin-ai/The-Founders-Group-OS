@@ -40,6 +40,13 @@ export type ScreenCtx = {
 /** One cockpit comment from GET /pages/conductor/chat. */
 export type ThreadMessage = { id: string; body: string; authorType: string; createdAt: string };
 
+/** A turn of POST/GET /pages/conductor/ask. */
+export type AskTurn = { id: string; role: 'user' | 'assistant'; content: string; createdAt: string; receipt?: { text: string; href?: string } };
+
+export function askToTurn(t: AskTurn): Turn {
+	return { id: t.id, role: t.role, content: t.content, createdAt: t.createdAt, receipt: t.receipt, routedTo: t.role === 'assistant' ? 'Conductor' : undefined };
+}
+
 /** GET /pages/conductor/chat health: is the seat that answers able to? */
 export type ConductorHealth = { ok: boolean; agent?: string; agentId?: string; problem?: string; since?: string };
 

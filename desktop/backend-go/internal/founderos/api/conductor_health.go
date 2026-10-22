@@ -131,6 +131,10 @@ func forgetConductorHealth() {
 func registerConductorHealth(s gin.IRoutes, d *Deps) {
 	s.POST("/pages/conductor/retry", func(c *gin.Context) {
 		ctx := c.Request.Context()
+		if why := aiPaused(); why != "" {
+			c.JSON(http.StatusConflict, gin.H{"error": "AI work is paused: " + why})
+			return
+		}
 		forgetConductorHealth()
 		h := conductorHealthFor(ctx, d)
 		if h.AgentID == "" {
@@ -193,7 +197,7 @@ func (w *conductorWatch) step(h conductorHealth, now time.Time, retry func()) []
 		w.lastRetry = now // the board just failed it: give a fix time before retrying
 		return evs
 	}
-	if h.AgentID != "" && now.Sub(w.lastRetry) >= time.Hour {
+	if h.AgentID != "" && now.Sub(w.lastRetry) >= time.Hour && aiPaused() == "" {
 		w.lastRetry = now
 		retry()
 	}

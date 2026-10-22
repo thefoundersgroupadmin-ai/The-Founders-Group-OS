@@ -97,6 +97,7 @@ func startAutoFollowUps(d *Deps) {
 					cancel()
 					continue
 				}
+				sendCampaign(ctx, d, time.Now())
 				limit := autoFollowUpCap()
 				if limit == 0 {
 					cancel()

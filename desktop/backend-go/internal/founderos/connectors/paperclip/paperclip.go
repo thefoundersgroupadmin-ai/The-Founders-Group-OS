@@ -81,7 +81,6 @@ func (c *Connector) creds() (creds, bool) {
 		}
 	}
 
-
 	return creds{url: u, key: k, company: co}, true
 }
 
@@ -290,7 +289,6 @@ func (c *Connector) send(ctx context.Context, action, method, path string, body 
 	return out, nil
 }
 
-
 // ---- reads ------------------------------------------------------------------
 
 // Agents is the live agents list; an unreachable or refusing board is an error.
@@ -478,7 +476,6 @@ func (c *Connector) ensureCockpitIssue(ctx context.Context, localChat bool) (str
 	return id, nil
 }
 
-
 // CockpitThread is the cockpit thread, oldest to newest; limit <= 0 means 50.
 func (c *Connector) CockpitThread(ctx context.Context, limit int) ([]Comment, error) {
 	if limit <= 0 {
@@ -501,7 +498,6 @@ func (c *Connector) CockpitThread(ctx context.Context, limit int) ([]Comment, er
 	sort.SliceStable(out, func(i, j int) bool { return out[i].CreatedAt < out[j].CreatedAt })
 	return out, nil
 }
-
 
 // ---- status -----------------------------------------------------------------
 
@@ -598,7 +594,6 @@ func (c *Connector) postCockpitMessage(ctx context.Context, message, action stri
 	}
 	return first(MapComments([]any{body})), nil
 }
-
 
 // PostOnce puts a note on the cockpit thread unless a comment already carries
 // marker, so a five-minute tick cannot nag. It returns posted, already or
@@ -697,4 +692,17 @@ func (c *Connector) RepairCockpitIssue(ctx context.Context, activeCeoID string) 
 		return "failed"
 	}
 	return "patched"
+}
+
+// PauseAgent stops a seat from starting runs until it is resumed.
+func (c *Connector) PauseAgent(ctx context.Context, agentID string) (bool, error) {
+	_, err := c.send(ctx, "paperclip.agent.pause", http.MethodPost, "/api/agents/"+agentID+"/pause", map[string]any{})
+	return err == nil, err
+}
+
+// AssignIssue hands a task to a seat (which wakes it on demand).
+func (c *Connector) AssignIssue(ctx context.Context, issueID, agentID string) error {
+	_, err := c.send(ctx, "paperclip.issue.update", http.MethodPatch, "/api/issues/"+issueID,
+		map[string]any{"assigneeAgentId": agentID, "status": "todo"})
+	return err
 }

@@ -85,6 +85,7 @@ func registerConductor(s *gin.RouterGroup, d *Deps) {
 		c.JSON(http.StatusOK, gin.H{"messages": msgs, "configured": true, "health": conductorHealthFor(c.Request.Context(), d)})
 	})
 	registerConductorHealth(s, d)
+	registerConductorAsk(s, d)
 	s.POST("/pages/conductor/chat", func(c *gin.Context) {
 		var body struct {
 			Message string `json:"message"`

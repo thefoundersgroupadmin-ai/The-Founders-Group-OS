@@ -864,6 +864,9 @@ func startNotifyWatch(d *Deps) {
 					notify.Publish(ctx, e)
 				}
 				seen.save()
+				for _, e := range aiGuardPass(ctx, paperclip.New(d.Resolver), now) {
+					notify.Publish(ctx, e)
+				}
 				for _, e := range cw.pass(ctx, d, now) {
 					notify.Publish(ctx, e)
 				}

@@ -18,12 +18,13 @@ describe('the Conductor when nobody can answer', () => {
 		fetchMock.mockImplementation(async (path: string, init?: { method?: string }) => {
 			if (init?.method === 'POST') return { retried: true } as never;
 			if (path.startsWith('/pages/conductor/context')) return { title: 'Home', context: '', quickActions: [], model: null } as never;
+			if (path === '/pages/conductor/ask') return { turns: [] } as never;
 			return { messages: [], health: { ok: false, agent: 'CEO', problem } } as never;
 		});
 		render(ConductorPanel, { pathname: '/os' });
 		window.dispatchEvent(new CustomEvent(CONDUCTOR_OPEN_EVENT));
 		await tick();
-		await screen.findByText("CEO can't answer right now");
+		await screen.findByText("CEO agent can't take work right now");
 		expect(screen.getByText(problem)).toBeTruthy();
 		await fireEvent.click(screen.getByRole('button', { name: 'Try again now' }));
 		expect(fetchMock).toHaveBeenCalledWith('/pages/conductor/retry', { method: 'POST', json: {} });

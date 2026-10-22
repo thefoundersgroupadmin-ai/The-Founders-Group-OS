@@ -1,8 +1,11 @@
 <!-- The Conductor dock (FounderOS v1 components/ConductorPanel.tsx): a right-edge
      panel that knows which screen you are on. It loads the screen context
-     (GET /pages/conductor/context), sends that context with every message to
-     the real board thread (GET/POST /pages/conductor/chat), and `/ui <request>`
-     dispatches a coding agent instead (POST /pages/conductor/dispatch). It
+     (GET /pages/conductor/context) and answers directly (POST
+     /pages/conductor/ask: Claude on the asker's own login, in seconds); work
+     for the team is filed as a board task, shown as a receipt. Each person's
+     conversation is kept (GET/DELETE /pages/conductor/ask). `/ui <request>`
+     dispatches a coding agent instead (POST /pages/conductor/dispatch). The
+     board seat's health still shows (GET /pages/conductor/chat). It
      PUSHES the page rather than covering it (--bn-conductor-w), resizes from
      its left edge with the width remembered, and closes on Escape. -->
 <script lang="ts">
@@ -21,19 +24,15 @@
 		CONDUCTOR_WIDTH_KEY,
 		CONDUCTOR_W_VAR,
 		FALLBACK_QUICK_ACTIONS,
-		SLOW_AFTER_MS,
-		SLOW_MESSAGE,
-		assistantCount,
+		askToTurn,
 		clampConductorW,
 		dispatchTurn,
 		failureMessage,
 		mergeTurns,
-		threadToTurns,
 		uiRequest,
-		withScreen,
 		type ScreenCtx,
 		type ConductorHealth,
-		type ThreadMessage,
+		type AskTurn,
 		type Turn
 	} from './conductor';
 
@@ -55,11 +54,6 @@
 	let retryNote = $state<string | null>(null);
 	let scroller: HTMLDivElement | undefined = $state();
 
-	let baseline = 0;
-	// A clear is local, not a board delete: the cockpit thread is the record.
-	// Anything at or before it is dropped on every poll, or the refill would put
-	// the transcript straight back.
-	let clearedAt = 0;
 	let drag: { startX: number; startW: number } | null = null;
 
 	const turns = $derived(mergeTurns(boardTurns, localTurns));
@@ -105,48 +99,34 @@
 		if (open) void loadContext(pathname);
 	});
 
-	/** The board thread, or null when it could not be read (said so in the dock). */
-	async function loadThread(): Promise<Turn[] | null> {
+	/** This person's kept conversation with the Conductor. */
+	async function loadConversation() {
 		try {
-			const body = await founderosFetch<{ messages?: ThreadMessage[] | null; health?: ConductorHealth }>('/pages/conductor/chat');
+			const body = await founderosFetch<{ turns?: AskTurn[] }>('/pages/conductor/ask');
 			threadError = null;
-			health = body.health ?? null;
-			return threadToTurns(body.messages ?? [], clearedAt);
+			if (Array.isArray(body?.turns)) localTurns = body.turns.map(askToTurn);
 		} catch (err) {
-			threadError = `Thread unavailable: ${failureMessage(err)}`;
-			return null;
+			threadError = `Conversation unavailable: ${failureMessage(err)}`;
+		}
+	}
+
+	/** Whether the board seat that does delegated work is up. */
+	async function loadHealth() {
+		try {
+			const body = await founderosFetch<{ health?: ConductorHealth }>('/pages/conductor/chat');
+			health = body?.health ?? null;
+		} catch {
+			health = null;
 		}
 	}
 
 	$effect(() => {
 		if (!open) return;
-		void loadThread().then((t) => {
-			if (t && t.length > 0) boardTurns = t;
-		});
-	});
-
-	// One poll while open: every 4s while a reply is pending, every ~12s at idle,
-	// so a reply that lands late still shows without reopening the dock.
-	$effect(() => {
-		if (!open) return;
-		let n = 0;
-		const id = setInterval(async () => {
-			n++;
-			if (document.hidden) return;
-			if (!awaiting && n % 3 !== 0) return;
-			const thread = await loadThread();
-			if (thread && thread.length > 0) {
-				boardTurns = thread;
-				if (awaiting && assistantCount(thread) > baseline) {
-					awaiting = false;
-					error = null;
-				}
-			}
-			if (awaiting && Date.now() - awaitingSince > SLOW_AFTER_MS) {
-				awaiting = false;
-				error = SLOW_MESSAGE;
-			}
-		}, 4000);
+		void loadConversation();
+		void loadHealth();
+		const id = setInterval(() => {
+			if (!document.hidden) void loadHealth();
+		}, 60_000);
 		return () => clearInterval(id);
 	});
 
@@ -164,10 +144,8 @@
 		retryNote = null;
 		try {
 			await founderosFetch('/pages/conductor/retry', { method: 'POST', json: {} });
-			retryNote = 'Woken. If the problem is fixed, the answer arrives in a minute.';
-			awaitingSince = Date.now();
-			baseline = assistantCount(boardTurns);
-			awaiting = true;
+			retryNote = 'Woken. If the problem is fixed, its tasks start moving again in a minute.';
+			void loadHealth();
 		} catch (err) {
 			retryNote = failureMessage(err);
 		} finally {
@@ -176,9 +154,9 @@
 	}
 
 	function clearTurns() {
-		clearedAt = Date.now();
 		boardTurns = [];
 		localTurns = [];
+		void founderosFetch('/pages/conductor/ask', { method: 'DELETE' }).catch(() => {});
 	}
 
 	async function send(composed: string, display: string) {
@@ -199,12 +177,12 @@
 				localTurns = [...localTurns, dispatchTurn(request, res, Date.now())];
 				return;
 			}
-			boardTurns = [...boardTurns, bubble];
-			await founderosFetch('/pages/conductor/chat', { method: 'POST', json: { message: withScreen(composed, ctx) } });
-			// The CEO answers asynchronously; the poll picks the reply up.
-			baseline = assistantCount(boardTurns);
-			awaitingSince = Date.now();
-			awaiting = true;
+			localTurns = [...localTurns, bubble];
+			const res = await founderosFetch<{ reply?: AskTurn }>('/pages/conductor/ask', {
+				method: 'POST',
+				json: { message: composed, path: pathname }
+			});
+			if (res?.reply) localTurns = [...localTurns, askToTurn(res.reply)];
 		} catch (err) {
 			error = failureMessage(err);
 		} finally {
@@ -332,9 +310,9 @@
 		{/each}
 		{#if health && !health.ok}
 			<div class="bn-down space-y-1.5 rounded-[8px] border p-2.5 text-[11px]" role="alert" data-part="conductor-down">
-				<p class="font-semibold">{health.agent ?? 'The CEO'} can't answer right now</p>
+				<p class="font-semibold">{health.agent ?? 'The CEO'} agent can't take work right now</p>
 				<p class="bn-muted break-words font-mono text-[10px]">{health.problem}</p>
-				<p class="bn-dim text-[10px]">Your messages are saved; it answers them once this is fixed. The OS retries by itself every hour and alerts your phone.</p>
+				<p class="bn-dim text-[10px]">Questions are still answered here. Tasks handed to the team wait until this is fixed; the OS retries every hour and alerts your phone.</p>
 				<button type="button" class="bn-pressable is-dark rounded-[6px] border px-2 py-1 font-mono text-[10px]" disabled={retrying} onclick={retry}>
 					{retrying ? 'Trying…' : 'Try again now'}
 				</button>

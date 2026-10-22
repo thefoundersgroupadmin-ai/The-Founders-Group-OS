@@ -11,11 +11,11 @@ vi.mock('../api', async (orig) => ({ ...(await orig<typeof import('../api')>()),
 
 import { FounderosApiError, founderosFetch } from '../api';
 import ConductorPanel from './ConductorPanel.svelte';
-import { CONDUCTOR_OPEN_EVENT, CONDUCTOR_WIDTH_KEY, REFUSED_NOTICE, SLOW_MESSAGE } from './conductor';
+import { CONDUCTOR_OPEN_EVENT, CONDUCTOR_WIDTH_KEY, REFUSED_NOTICE } from './conductor';
 
 const fetchMock = vi.mocked(founderosFetch);
 
-type Msg = { id: string; body: string; authorType: string; createdAt: string };
+type Msg = { id: string; role: 'user' | 'assistant'; content: string; createdAt: string; receipt?: { text: string; href?: string } };
 let thread: Msg[];
 let ctxBody: unknown;
 let post: (path: string, json: unknown) => unknown;
@@ -35,15 +35,17 @@ beforeEach(() => {
 	document.documentElement.style.removeProperty('--bn-conductor-w');
 	thread = [];
 	ctxBody = CTX;
-	post = () => ({ comment: { id: 'c1' } });
+	post = () => ({ reply: { id: 'a1', role: 'assistant', content: 'All green.', createdAt: new Date().toISOString() } });
 	fetchMock.mockReset();
 	fetchMock.mockImplementation(async (path: string, init?: { method?: string; json?: unknown }) => {
 		if (init?.method === 'POST') return post(path, init.json) as never;
+		if (init?.method === 'DELETE') return { turns: [] } as never;
+		if (path === '/pages/conductor/ask') return { turns: thread } as never;
 		if (path.startsWith('/pages/conductor/context')) {
 			if (ctxBody instanceof Error) throw ctxBody;
 			return ctxBody as never;
 		}
-		if (path === '/pages/conductor/chat') return { messages: thread } as never;
+		if (path === '/pages/conductor/chat') return { messages: [], health: { ok: true } } as never;
 		throw new Error(`unexpected ${path}`);
 	});
 });
@@ -61,7 +63,7 @@ const dock = () => document.querySelector('aside[data-part="conductor"]') as HTM
 describe('ConductorPanel: open, close, push', () => {
 	it('wears the Conductor emblem, alive only while a reply is pending', async () => {
 		let release!: () => void;
-		post = () => new Promise((r) => (release = () => r({ comment: { id: 'c1' } })));
+		post = () => new Promise((r) => (release = () => r({ reply: { id: 'a1', role: 'assistant', content: 'hello back', createdAt: new Date().toISOString() } })));
 		render(ConductorPanel, { pathname: '/os/trading' });
 		await openDock();
 		const emblem = () => dock().querySelector('header .conductor-emblem') as HTMLElement;
@@ -70,12 +72,13 @@ describe('ConductorPanel: open, close, push', () => {
 		await fireEvent.input(screen.getByRole('textbox'), { target: { value: 'hi' } });
 		await fireEvent.keyDown(screen.getByRole('textbox'), { key: 'Enter' });
 		await waitFor(() => expect(emblem().classList.contains('thinking')).toBe(true));
-		release();
-		// production: the header emblem thinks while SENDING; the wait for the
-		// CEO's reply is the small emblem + synthesizing line in the transcript
-		await waitFor(() => expect(screen.getByText(/synthesizing/)).toBeTruthy());
-		expect(emblem().classList.contains('thinking')).toBe(false);
+		// the answer is on its way: the small emblem + synthesizing line in the transcript
+		expect(screen.getByText(/synthesizing/)).toBeTruthy();
 		expect(dock().querySelector('[data-thinking] .conductor-emblem')!.classList.contains('thinking')).toBe(true);
+		release();
+		await waitFor(() => expect(screen.getByText('hello back')).toBeTruthy());
+		expect(emblem().classList.contains('thinking')).toBe(false);
+		expect(screen.queryByText(/synthesizing/)).toBeNull();
 	});
 
 	it('a slow context answer for the page he left never replaces the page he is on', async () => {
@@ -85,6 +88,7 @@ describe('ConductorPanel: open, close, push', () => {
 				return new Promise((r) => (releaseTrading = () => r({ ...CTX, title: 'Trading' }))) as never;
 			if (path.startsWith('/pages/conductor/context')) return { ...CTX, title: 'Funnel' } as never;
 			if (path === '/pages/conductor/chat') return { messages: [] } as never;
+			if (path === '/pages/conductor/ask') return { turns: [] } as never;
 			throw new Error(`unexpected ${path}`);
 		});
 		const r = render(ConductorPanel, { pathname: '/os/trading' });
@@ -106,19 +110,19 @@ describe('ConductorPanel: open, close, push', () => {
 		expect(fetchMock).not.toHaveBeenCalled();
 	});
 
-	it('the open event opens it and loads this screen’s context and the board thread', async () => {
+	it('the open event opens it and loads this screen’s context and the kept conversation', async () => {
 		thread = [
-			{ id: 'm1', body: 'how is trading?', authorType: 'user', createdAt: '2026-09-30T10:00:00Z' },
-			{ id: 'm2', body: 'Flat on the day.', authorType: 'agent', createdAt: '2026-09-30T10:00:05Z' }
+			{ id: 'm1', role: 'user', content: 'how is trading?', createdAt: '2026-09-30T10:00:00Z' },
+			{ id: 'm2', role: 'assistant', content: 'Flat on the day.', createdAt: '2026-09-30T10:00:05Z' }
 		];
 		render(ConductorPanel, { pathname: '/os/trading' });
 		await openDock();
 		expect(dock().getAttribute('aria-hidden')).toBe('false');
 		expect(fetchMock).toHaveBeenCalledWith('/pages/conductor/context?path=%2Fos%2Ftrading');
-		expect(fetchMock).toHaveBeenCalledWith('/pages/conductor/chat');
+		expect(fetchMock).toHaveBeenCalledWith('/pages/conductor/ask');
 		await waitFor(() => expect(screen.getByText('Flat on the day.')).toBeTruthy());
 		expect(screen.getByText('how is trading?')).toBeTruthy();
-		expect(screen.getByText(/→ Conductor · board/)).toBeTruthy();
+		expect(screen.getByText(/→ Conductor/)).toBeTruthy();
 		expect(screen.getByText('Robinhood + Phantom board.')).toBeTruthy();
 		expect(screen.queryByRole('button', { name: /open the conductor agent panel/i })).toBeNull();
 	});
@@ -210,9 +214,9 @@ describe('ConductorPanel: header and quick actions', () => {
 		await openDock();
 		await fireEvent.click(screen.getByRole('button', { name: 'Explain the sleeve' }));
 		await waitFor(() =>
-			expect(fetchMock).toHaveBeenCalledWith('/pages/conductor/chat', {
+			expect(fetchMock).toHaveBeenCalledWith('/pages/conductor/ask', {
 				method: 'POST',
-				json: { message: 'Explain the agentic sleeve on this screen.\n\n(the operator is looking at: Trading)' }
+				json: { message: 'Explain the agentic sleeve on this screen.', path: '/os/trading' }
 			})
 		);
 		// the bubble shows the label, not the long prompt
@@ -227,18 +231,30 @@ describe('ConductorPanel: sending', () => {
 		await fireEvent.keyDown(box, { key: 'Enter' });
 	}
 
-	it('Enter sends: the user bubble shows at once, then the synthesizing wait', async () => {
+	it('Enter sends: the user bubble shows at once, the synthesizing wait, then the answer', async () => {
+		let release!: () => void;
+		post = () => new Promise((r) => (release = () => r({ reply: { id: 'a1', role: 'assistant', content: 'Earnings miss.', createdAt: new Date().toISOString() } })));
 		render(ConductorPanel, { pathname: '/os/trading' });
 		await openDock();
 		await type('why is AAPL red?');
 		expect(screen.getByText('why is AAPL red?')).toBeTruthy();
-		expect(fetchMock).toHaveBeenCalledWith('/pages/conductor/chat', {
-			method: 'POST',
-			json: { message: 'why is AAPL red?\n\n(the operator is looking at: Trading)' }
-		});
+		expect(fetchMock).toHaveBeenCalledWith('/pages/conductor/ask', { method: 'POST', json: { message: 'why is AAPL red?', path: '/os/trading' } });
 		await waitFor(() => expect(screen.getByText(/synthesizing/)).toBeTruthy());
 		// production's synth-shimmer sweep on the word
 		expect(screen.getByText(/synthesizing/).classList.contains('bn-synth-shimmer')).toBe(true);
+		release();
+		await waitFor(() => expect(screen.getByText('Earnings miss.')).toBeTruthy());
+		expect(screen.queryByText(/synthesizing/)).toBeNull();
+	});
+
+	it('work handed to the team shows its receipt', async () => {
+		post = () => ({
+			reply: { id: 'a2', role: 'assistant', content: 'Prospect Research is on it.', createdAt: new Date().toISOString(), receipt: { text: 'Filed THE-40 for Prospect Research: Find 20 fintech leads', href: '/os/agents' } }
+		});
+		render(ConductorPanel, { pathname: '/os/trading' });
+		await openDock();
+		await type('find me 20 fintech leads');
+		await waitFor(() => expect(screen.getByText(/Filed THE-40 for Prospect Research/)).toBeTruthy());
 	});
 
 	it('Shift+Enter does not send', async () => {
@@ -247,7 +263,7 @@ describe('ConductorPanel: sending', () => {
 		const box = screen.getByRole('textbox', { name: /message the conductor/i });
 		await fireEvent.input(box, { target: { value: 'two' } });
 		await fireEvent.keyDown(box, { key: 'Enter', shiftKey: true });
-		expect(fetchMock).not.toHaveBeenCalledWith('/pages/conductor/chat', expect.objectContaining({ method: 'POST' }));
+		expect(fetchMock).not.toHaveBeenCalledWith('/pages/conductor/ask', expect.objectContaining({ method: 'POST' }));
 	});
 
 	it('a 409 refusal says writes are off, and stops waiting', async () => {
@@ -298,72 +314,38 @@ describe('ConductorPanel: sending', () => {
 	});
 });
 
-describe('ConductorPanel: the poll', () => {
-	it('picks up the reply while waiting (4s) and stops the wait', async () => {
-		vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval', 'Date'] });
-		vi.setSystemTime(new Date('2026-09-30T10:00:00Z'));
-		render(ConductorPanel, { pathname: '/os/trading' });
-		await openDock();
-		const box = screen.getByRole('textbox', { name: /message the conductor/i });
-		await fireEvent.input(box, { target: { value: 'status?' } });
-		await fireEvent.keyDown(box, { key: 'Enter' });
-		await waitFor(() => expect(screen.getByText(/synthesizing/)).toBeTruthy());
-		thread = [
-			{ id: 'u', body: 'status?', authorType: 'user', createdAt: '2026-09-30T10:00:01Z' },
-			{ id: 'r', body: 'All green.', authorType: 'agent', createdAt: '2026-09-30T10:00:03Z' }
-		];
-		await vi.advanceTimersByTimeAsync(4000);
-		await waitFor(() => expect(screen.getByText('All green.')).toBeTruthy());
-		expect(screen.queryByText(/synthesizing/)).toBeNull();
-	});
-
-	it('at idle it only polls every third tick (~12s)', async () => {
+describe('ConductorPanel: conversation and health', () => {
+	it('only the board health is polled (every minute), never the conversation', async () => {
 		vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval'] });
 		render(ConductorPanel, { pathname: '/os/trading' });
 		await openDock();
-		const chatGets = () => fetchMock.mock.calls.filter(([p, i]) => p === '/pages/conductor/chat' && !i).length;
-		const base = chatGets();
-		await vi.advanceTimersByTimeAsync(8000);
-		expect(chatGets()).toBe(base);
-		await vi.advanceTimersByTimeAsync(4000);
-		expect(chatGets()).toBe(base + 1);
+		const gets = (p: string) => fetchMock.mock.calls.filter(([q, i]) => q === p && !i).length;
+		const health = gets('/pages/conductor/chat');
+		const convo = gets('/pages/conductor/ask');
+		await vi.advanceTimersByTimeAsync(59_000);
+		expect(gets('/pages/conductor/chat')).toBe(health);
+		await vi.advanceTimersByTimeAsync(1_000);
+		expect(gets('/pages/conductor/chat')).toBe(health + 1);
+		expect(gets('/pages/conductor/ask')).toBe(convo);
 	});
 
-	it('after 150s without a reply it says the run is taking a while', async () => {
-		vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval', 'Date'] });
-		vi.setSystemTime(new Date('2026-09-30T10:00:00Z'));
-		render(ConductorPanel, { pathname: '/os/trading' });
-		await openDock();
-		const box = screen.getByRole('textbox', { name: /message the conductor/i });
-		await fireEvent.input(box, { target: { value: 'slow one' } });
-		await fireEvent.keyDown(box, { key: 'Enter' });
-		await waitFor(() => expect(screen.getByText(/synthesizing/)).toBeTruthy());
-		await vi.advanceTimersByTimeAsync(152_000);
-		await waitFor(() => expect(screen.getByText(new RegExp(SLOW_MESSAGE.slice(0, 30)))).toBeTruthy());
-		expect(screen.queryByText(/synthesizing/)).toBeNull();
-	});
-
-	it('clear is local and the poll does not put the old transcript back', async () => {
-		vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval', 'Date'] });
-		vi.setSystemTime(new Date('2026-09-30T11:00:00Z'));
-		thread = [{ id: 'old', body: 'an old reply', authorType: 'agent', createdAt: '2026-09-30T10:00:00Z' }];
+	it('clear empties the conversation here and on the server', async () => {
+		thread = [{ id: 'old', role: 'assistant', content: 'an old reply', createdAt: '2026-09-30T10:00:00Z' }];
 		render(ConductorPanel, { pathname: '/os/trading' });
 		await openDock();
 		await waitFor(() => expect(screen.getByText('an old reply')).toBeTruthy());
 		await fireEvent.click(screen.getByRole('button', { name: /clear the transcript/i }));
 		expect(screen.queryByText('an old reply')).toBeNull();
-		await vi.advanceTimersByTimeAsync(12_000);
-		expect(screen.queryByText('an old reply')).toBeNull();
-		expect(fetchMock.mock.calls.some(([p, i]) => p === '/pages/conductor/chat' && (i as { method?: string })?.method === 'DELETE')).toBe(false);
+		expect(fetchMock).toHaveBeenCalledWith('/pages/conductor/ask', { method: 'DELETE' });
 	});
 
-	it('a thread that cannot load says so instead of reading empty', async () => {
+	it('a conversation that cannot load says so instead of reading empty', async () => {
 		fetchMock.mockImplementation(async (path: string) => {
 			if (path.startsWith('/pages/conductor/context')) return CTX as never;
-			throw new FounderosApiError(502, 'paperclip unreachable');
+			throw new FounderosApiError(502, 'backend unreachable');
 		});
 		render(ConductorPanel, { pathname: '/os/trading' });
 		await openDock();
-		await waitFor(() => expect(screen.getByText(/thread unavailable: paperclip unreachable/i)).toBeTruthy());
+		await waitFor(() => expect(screen.getByText(/conversation unavailable: backend unreachable/i)).toBeTruthy());
 	});
 });

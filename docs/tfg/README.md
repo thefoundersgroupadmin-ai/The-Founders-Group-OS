@@ -109,6 +109,24 @@ and ensure each has an adapter/model before enabling any heartbeat schedules.
 The Go roster and the Paperclip board are distinct systems and must be verified
 separately.
 
+## A teammate's Mac
+
+After the first run above, one command sets up the background jobs (Paperclip
+outbox every 5 min, prospect replies every 15 min, pipeline hourly, device
+collector every 5 min) with that Mac's own paths:
+
+```bash
+make tfg-machine                   # safe to rerun; ARGS=--dry-run or ARGS=--remove
+```
+
+The first run copies `config/tfg/machine/*.env.example` to `~/.founderos/.env`
+and `~/.founderos/planted.env` (mode 600, never overwritten). Each person fills
+in their own keys and runs it again; a job whose keys are still blank is
+skipped and named. Logs are in `~/.founderos/logs`.
+
+The Paperclip back-end itself is the private repo
+`thefoundersgroupadmin-ai/tfg-paperclip`.
+
 ## Gates before you ship a change
 
 ```bash

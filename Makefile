@@ -254,7 +254,7 @@ urls: ## Print service URLs
 
 # ── FounderOS demo: workspaces + dummy data ─────────────────────────────────
 .PHONY: demo
-.PHONY: tfg client tfg-brand tfg-check graph
+.PHONY: tfg client tfg-brand tfg-check tfg-machine graph
 tfg: ## The Founders Group: brand files, workspaces and TFG starting data (OWNER=<email you registered with>)
 	@test -n "$(OWNER)" || { echo "usage: make tfg OWNER=<the email you registered with at /register>"; exit 2; }
 	@python3 scripts/tfg-brand.py --check
@@ -263,6 +263,9 @@ tfg: ## The Founders Group: brand files, workspaces and TFG starting data (OWNER
 client: ## A TFG client install: workspaces + client starting data (OWNER=<client operator email>)
 	@test -n "$(OWNER)" || { echo "usage: make client OWNER=<the email registered at /register>"; exit 2; }
 	@cd desktop/backend-go && go run ./cmd/founderos-bootstrap -owner-email "$(OWNER)" && go run ./cmd/founderos-seed --profile client
+
+tfg-machine: ## This Mac's TFG OS background jobs and key files (safe to rerun; ARGS=--dry-run or --remove)
+	@scripts/tfg-setup-machine.sh $(ARGS)
 
 tfg-brand: ## Regenerate brand files after editing config/tfg/brand.yaml (BRAND=<path> for a client)
 	@python3 scripts/tfg-brand.py --brand "$(or $(BRAND),config/tfg/brand.yaml)"

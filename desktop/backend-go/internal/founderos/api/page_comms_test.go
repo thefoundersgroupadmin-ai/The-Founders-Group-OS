@@ -379,3 +379,18 @@ func TestCommsReplyIsGuarded(t *testing.T) {
 		t.Fatalf("email reply with writes off: %d %v", code, body)
 	}
 }
+
+func TestCommsEmailReplyIsTheOperatorsApprovalOfThatRecipient(t *testing.T) {
+	var got email.Reply
+	src := commsFakes()
+	src.SendEmail = func(_ context.Context, r email.Reply) error { got = r; return nil }
+	h := commsRouter(t, nil, src)
+	code, body := commsDo(t, h, http.MethodPost, "/api/founderos/pages/comms/reply",
+		`{"source":"email","to":"founder@prospect.example","subject":"Re: intro","text":"Thanks, Thursday works."}`)
+	if code != http.StatusOK || body["ok"] != true {
+		t.Fatalf("reply: %d %v", code, body)
+	}
+	if !got.RecipientApproved || got.To != "founder@prospect.example" {
+		t.Fatalf("sent %+v, want an operator-approved recipient", got)
+	}
+}

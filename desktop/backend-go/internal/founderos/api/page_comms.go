@@ -661,7 +661,9 @@ func commsRoutes(s *gin.RouterGroup, d *Deps) {
 			if body.Subject != nil {
 				subject = *body.Subject
 			}
-			if err := src.SendEmail(c.Request.Context(), email.Reply{AccountID: body.Account, To: body.To, Subject: subject, Text: body.Text}); err != nil {
+			// The operator typed this reply and pressed send: that is the mail
+			// guard's per-call approval of this one recipient.
+			if err := src.SendEmail(c.Request.Context(), email.Reply{AccountID: body.Account, To: body.To, Subject: subject, Text: body.Text, RecipientApproved: true}); err != nil {
 				c.JSON(http.StatusBadGateway, gin.H{"ok": false, "error": err.Error(), "guarded": errors.Is(err, guard.ErrWritesDisabled)})
 				return
 			}

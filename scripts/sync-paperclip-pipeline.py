@@ -1,8 +1,11 @@
 #!/usr/bin/env python3
 """Sync Paperclip's researched prospects into the TFG OS sales pipeline.
 
-Reads the prospects table from the Paperclip THE-3 "prospects" document and
-upserts one founderos_funnel_contacts row per account into the "Sales System
+Reads the prospects table from the Paperclip THE-3 "prospects" document, plus
+a "prospects" document on any other task holding a JSON array (optionally in a
+```json fence) of {"company", "website", "location", "buyer", "buyerRole",
+"email", "score", "evidence", "nextAction"} (the daily research routine writes
+these), and upserts one founderos_funnel_contacts row per account into the "Sales System
 Build" (vantage) workspace at the first_touch stage, plus a dated "researched,
 not yet contacted" touch. Recipient emails
 are picked up from any later task document that lists an address next to the
@@ -27,6 +30,8 @@ WORKSPACE_SLUG = "vantage"  # displayed as "Sales System Build"
 PRODUCT = "Sales System Build"
 EMAIL = re.compile(r"[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}")
 LINK = re.compile(r"\[([^\]]+)\]\(([^)]+)\)")
+FENCE = re.compile(r"```(?:json)?\s*(\[.*?\])\s*```", re.S)
+OWN_DOMAIN = "@thefoundersgroup.net"
 
 
 def read_env(path):
@@ -53,6 +58,36 @@ def table_rows(body):
     for line in body.splitlines():
         if line.startswith("|") and not re.match(r"^\|\s*-", line):
             yield [c.strip() for c in line.strip().strip("|").split("|")]
+
+
+def json_prospects(body):
+    """Accounts from a JSON prospects document, and how many entries were skipped."""
+    m = FENCE.search(body)
+    try:
+        data = json.loads(m.group(1) if m else body.strip())
+    except json.JSONDecodeError as e:
+        raise ValueError(f"prospects document is not a JSON array: {e}") from None
+    if not isinstance(data, list):
+        raise ValueError("prospects document must be a JSON array")
+    out, bad = [], 0
+    for e in data:
+        name = str(e.get("company") or "").strip() if isinstance(e, dict) else ""
+        if not name:
+            bad += 1
+            continue
+        email = str(e.get("email") or "").strip()
+        if not EMAIL.fullmatch(email) or email.lower().endswith(OWN_DOMAIN):
+            email = None
+        buyer = str(e.get("buyer") or "").strip() or None
+        if buyer and re.search(r"unknown|verify", buyer, re.I):
+            buyer = None
+        score = e.get("score")
+        if not (isinstance(score, int) and not isinstance(score, bool) and 0 <= score <= 100):
+            score = None
+        out.append({"name": name, "url": str(e.get("website") or "").strip() or None,
+                    "location": str(e.get("location") or ""), "evidence": str(e.get("evidence") or ""),
+                    "buyer": buyer, "score": score, "next": str(e.get("nextAction") or ""), "email": email})
+    return out, bad
 
 
 def slug(s):
@@ -91,22 +126,42 @@ def main():
         accounts.append({"name": name, "url": url, "location": row[2], "evidence": row[3],
                          "buyer": buyer, "score": score, "next": row[6]})
 
-    # Recipient addresses found by later tasks: a table row naming the company with an email in it.
+    # Later tasks: JSON "prospects" documents add accounts, and any table row
+    # naming a known company with an email in it gives its recipient address.
     emails = {}
+    other_docs = []
     for ident, issue in by_ident.items():
         if ident in (None, "THE-3"):
             continue
         docs = paperclip(pc, f"/api/issues/{issue['id']}/documents")
         docs = docs.get("documents", docs) if isinstance(docs, dict) else docs
         for d in docs:
-            for row in table_rows(doc_body(d)):
-                text = " ".join(row)
-                found = [e for e in EMAIL.findall(text) if not e.lower().endswith("@thefoundersgroup.net")]
-                if not found:
-                    continue
-                for a in accounts:
-                    if a["name"].lower() in text.lower():
-                        emails.setdefault(a["name"], found[0])
+            if d.get("key") != "prospects":
+                other_docs.append(d)
+                continue
+            try:
+                found, bad = json_prospects(doc_body(d))
+            except ValueError as e:
+                print(f"skipped {ident} prospects: {e}", file=sys.stderr)
+                continue
+            if bad:
+                print(f"{ident} prospects: skipped {bad} entries without a company", file=sys.stderr)
+            known = {slug(a["name"]) for a in accounts}
+            for a in found:
+                if a["email"]:
+                    emails.setdefault(a["name"], a["email"])
+                if slug(a["name"]) not in known:
+                    accounts.append(a)
+                    known.add(slug(a["name"]))
+    for d in other_docs:
+        for row in table_rows(doc_body(d)):
+            text = " ".join(row)
+            found = [e for e in EMAIL.findall(text) if not e.lower().endswith(OWN_DOMAIN)]
+            if not found:
+                continue
+            for a in accounts:
+                if a["name"].lower() in text.lower():
+                    emails.setdefault(a["name"], found[0])
 
     ws = subprocess.run(["psql", db, "-At", "-c", f"select id from workspaces where slug={sql(WORKSPACE_SLUG)}"],
                         capture_output=True, text=True, check=True).stdout.strip()

@@ -12,8 +12,8 @@ import (
 //   - it goes to an address this outbox already emailed (never a first contact),
 //     with one or two earlier sends (at most two follow-ups),
 //   - the latest of those went out at least two days ago,
-//   - it is linked to a pipeline contact still at first_touch or nurtured, so a
-//     reply (which moves the contact to engaged) stops it,
+//   - it is linked to a pipeline contact still at first_touch, so a reply or a
+//     booked call (engaged) or a held call (nurtured) stops it,
 //   - the owner never rejected an email to that address.
 //
 // No more than dailyCap follow-ups go out in any 24 hours. The send goes
@@ -23,7 +23,7 @@ const dueFollowUps = `
 	SELECT o.id, o.subject, o.body FROM founderos_outbox o
 	JOIN founderos_funnel_contacts c ON c.id = o.contact_id
 	WHERE o.workspace_id = $1 AND o.status = 'pending'
-	  AND c.status IN ('first_touch', 'nurtured')
+	  AND c.status = 'first_touch'
 	  AND (SELECT count(*) FROM founderos_outbox p WHERE p.workspace_id = o.workspace_id
 	       AND lower(p.to_address) = lower(o.to_address) AND p.status = 'sent') BETWEEN 1 AND 2
 	  AND (SELECT max(p.sent_at) FROM founderos_outbox p WHERE p.workspace_id = o.workspace_id

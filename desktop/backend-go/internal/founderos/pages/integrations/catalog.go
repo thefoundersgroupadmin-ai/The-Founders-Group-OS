@@ -75,7 +75,7 @@ var Catalog = []Integration{
 	// Scheduling
 	{Slug: "googlecalendar", Name: "Google Calendar", Tagline: "Events & availability", Category: "Scheduling", ConnectorID: "calendar", Popular: true, EnvKeys: none},
 	{Slug: "calendly", Name: "Calendly", Tagline: "Booking links", Category: "Scheduling"},
-	{Slug: "caldotcom", Name: "Cal.com", Tagline: "Open scheduling", Category: "Scheduling"},
+	{Slug: "caldotcom", Name: "Cal.com", Tagline: "Booked calls; a booking stops follow-ups", Category: "Scheduling", ConnectorID: "caldotcom", Popular: true, EnvKeys: []string{"CALCOM_API_KEY"}},
 	{Slug: "googlemeet", Name: "Google Meet", Tagline: "Video calls", Category: "Scheduling"},
 
 	// Finance

@@ -13,8 +13,10 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"github.com/rhl/businessos-backend/internal/founderos/connectors/caldotcom"
 	"github.com/rhl/businessos-backend/internal/founderos/connectors/email"
 	"github.com/rhl/businessos-backend/internal/founderos/guard"
+	"github.com/rhl/businessos-backend/internal/founderos/pages/bookings"
 	"github.com/rhl/businessos-backend/internal/founderos/pages/outbox"
 )
 
@@ -56,6 +58,20 @@ func autoFollowUpCap() int {
 	return 15
 }
 
+// calBookings reads upcoming and past Cal.com bookings.
+func calBookings(ctx context.Context, d *Deps) ([]caldotcom.Booking, error) {
+	c := caldotcom.New(d.Resolver)
+	var all []caldotcom.Booking
+	for _, status := range []string{"upcoming", "past"} {
+		list, err := c.Bookings(ctx, status)
+		if err != nil {
+			return nil, err
+		}
+		all = append(all, list...)
+	}
+	return all, nil
+}
+
 var autoFollowUpsOnce sync.Once
 
 // startAutoFollowUps sends safe follow-ups every five minutes (see
@@ -69,11 +85,23 @@ func startAutoFollowUps(d *Deps) {
 			t := time.NewTicker(5 * time.Minute)
 			defer t.Stop()
 			for range t.C {
-				limit := autoFollowUpCap()
-				if limit == 0 {
+				ctx, cancel := context.WithTimeout(context.Background(), 4*time.Minute)
+				// Bookings first: a prospect who just booked a call must not get a follow-up.
+				if booked, err := calBookings(ctx, d); err == nil {
+					if moved, err := bookings.MarkBooked(ctx, d.Pool, booked); moved > 0 || err != nil {
+						slog.Info("founderos pipeline: Cal.com bookings applied", "moved", moved, "err", err)
+					}
+				} else if !errors.Is(err, caldotcom.ErrNotConfigured) {
+					// Without a readable calendar a booking could be missed: send nothing this pass.
+					slog.Warn("founderos pipeline: Cal.com unreadable; holding follow-ups", "err", err)
+					cancel()
 					continue
 				}
-				ctx, cancel := context.WithTimeout(context.Background(), 4*time.Minute)
+				limit := autoFollowUpCap()
+				if limit == 0 {
+					cancel()
+					continue
+				}
 				n, err := outbox.AutoSendFollowUps(ctx, d.Pool, outboxWorkspace, limit, outboxSender(d))
 				cancel()
 				if n > 0 || err != nil {

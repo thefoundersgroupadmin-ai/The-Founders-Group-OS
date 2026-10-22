@@ -8,10 +8,12 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync/atomic"
 	"testing"
 
+	"github.com/rhl/businessos-backend/internal/founderos/brand"
 	"github.com/rhl/businessos-backend/internal/founderos/connectors"
 	"github.com/rhl/businessos-backend/internal/founderos/pages/integrations"
 )
@@ -92,7 +94,13 @@ func TestIntegrationsPagesConnectionsReturnsBoardCatalogVolumeAndSlots(t *testin
 	if err := json.Unmarshal(w.Body.Bytes(), &body); err != nil {
 		t.Fatal(err)
 	}
-	if len(body.Connections) != 4 || len(body.Catalog) != len(integrations.Catalog) || len(body.Categories) == 0 {
+	visible := 0
+	for _, e := range integrations.Catalog {
+		if !slices.Contains(brand.HiddenConnectors, e.Slug) && !slices.Contains(brand.HiddenConnectors, e.ConnectorID) {
+			visible++
+		}
+	}
+	if len(body.Connections) != 4 || len(body.Catalog) != visible || len(body.Categories) == 0 {
 		t.Fatalf("shape: %d conns, %d catalog, %d cats", len(body.Connections), len(body.Catalog), len(body.Categories))
 	}
 	by := map[string]integrations.Entry{}

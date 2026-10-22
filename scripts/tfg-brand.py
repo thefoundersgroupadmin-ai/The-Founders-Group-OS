@@ -62,6 +62,9 @@ def load(path: pathlib.Path) -> dict:
     for h in b.get("hide_views") or []:
         if not str(h).startswith("/os/") or h == "/os":
             errs.append(f"hide_views: {h!r} must be an /os/<view> path (Home cannot be hidden)")
+    hc = b.get("hide_connectors") or []
+    if not isinstance(hc, list) or not all(isinstance(x, str) and re.fullmatch(r"[a-z0-9-]+", x) for x in hc):
+        errs.append("hide_connectors must be a list of connector ids, e.g. [robinhood]")
     if not isinstance(b.get("cohort_invite", False), bool):
         errs.append("cohort_invite must be true or false")
     mpr = (b.get("impact") or {}).get("minutes_per_successful_run")
@@ -88,6 +91,9 @@ def go_source(b: dict, src: str) -> str:
         f"const Operator = {gq(b['operator'])}",
         f"const LeadMatch = {gq(b['ventures']['vantage']['lead_match'])}",
         f"const MinutesPerSuccessfulRun = {int(b['impact']['minutes_per_successful_run'])}",
+        "",
+        "// HiddenConnectors are left off the Connections board (hide_connectors).",
+        f"var HiddenConnectors = []string{{{', '.join(gq(x) for x in (b.get('hide_connectors') or []))}}}",
         "",
         "var WorkspaceNames = map[string]string{",
     ]

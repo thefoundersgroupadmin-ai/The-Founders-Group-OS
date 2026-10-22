@@ -15,11 +15,13 @@ import (
 )
 
 // FounderOS v1 lib/connectors/index.ts CHECKS (2026-09-30), with gbrain
-// replaced by the Optimal Engine row: GBrain is retired on the bridge.
+// replaced by the Optimal Engine row: GBrain is retired on the bridge, plus
+// TFG's Cal.com.
 var founderosOSBoard = []string{
 	"optimal-engine", "paperclip", "whatsapp", "zernio", "beehiiv", "manychat", "trakyo",
 	"typeform", "fathom", "plaud", "docusign", "loom", "vidalytics", "meta-ads", "arcads",
 	"wispr", "local-stack", "obsidian", "miro", "email", "calendar", "slack", "payments", "robinhood",
+	"caldotcom", // TFG: Cal.com bookings
 }
 
 func TestBoardMatchesFounderosOSConnections(t *testing.T) {

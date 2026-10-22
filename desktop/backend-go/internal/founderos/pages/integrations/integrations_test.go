@@ -61,6 +61,7 @@ func TestCatalogConnectorIDsAreOnTheBoard(t *testing.T) {
 		"optimal-engine", "paperclip", "whatsapp", "zernio", "beehiiv", "manychat", "trakyo",
 		"typeform", "fathom", "plaud", "docusign", "loom", "vidalytics", "meta-ads", "arcads",
 		"wispr", "local-stack", "obsidian", "miro", "email", "calendar", "slack", "payments", "robinhood",
+		"caldotcom", // TFG: Cal.com bookings
 	} {
 		board[id] = true
 	}

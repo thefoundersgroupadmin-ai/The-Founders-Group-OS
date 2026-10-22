@@ -12,6 +12,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"time"
 
@@ -19,9 +20,11 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/rhl/businessos-backend/internal/founderos/agents"
+	"github.com/rhl/businessos-backend/internal/founderos/brand"
 	"github.com/rhl/businessos-backend/internal/founderos/connectors"
 	"github.com/rhl/businessos-backend/internal/founderos/connectors/arcads"
 	"github.com/rhl/businessos-backend/internal/founderos/connectors/beehiiv"
+	"github.com/rhl/businessos-backend/internal/founderos/connectors/caldotcom"
 	"github.com/rhl/businessos-backend/internal/founderos/connectors/devicepush"
 	"github.com/rhl/businessos-backend/internal/founderos/connectors/docusign"
 	"github.com/rhl/businessos-backend/internal/founderos/connectors/email"
@@ -125,6 +128,7 @@ func board() []boardEntry {
 		r(manychat.Meta, func(res connectors.Resolver) connectors.Connector { return manychat.New(res) }),
 		r(trakyo.Meta, func(res connectors.Resolver) connectors.Connector { return trakyo.New(res) }),
 		r(typeform.Meta, func(res connectors.Resolver) connectors.Connector { return typeform.New(res) }),
+		r(caldotcom.Meta, func(res connectors.Resolver) connectors.Connector { return caldotcom.New(res) }),
 		r(fathomcalls.Meta, func(res connectors.Resolver) connectors.Connector { return fathomcalls.New(res) }),
 		r(plaud.Meta, func(res connectors.Resolver) connectors.Connector { return plaud.New(res) }),
 		r(docusign.Meta, func(res connectors.Resolver) connectors.Connector { return docusign.New(res) }),
@@ -160,10 +164,21 @@ func BoardIDs() []string {
 // NewBoard builds the Connections board registry.
 func NewBoard(d *Deps) *connectors.Registry {
 	reg := connectors.NewRegistry()
-	for _, e := range board() {
+	for _, e := range visibleBoard() {
 		reg.Register(e.meta, e.make(d))
 	}
 	return reg
+}
+
+// visibleBoard is board() without the connectors the brand file hides.
+func visibleBoard() []boardEntry {
+	var out []boardEntry
+	for _, e := range board() {
+		if !slices.Contains(brand.HiddenConnectors, e.meta.ID) {
+			out = append(out, e)
+		}
+	}
+	return out
 }
 
 var stagingPorts = map[string]int{"macbook": 4210, "hub": 4211, "mini": 4212}

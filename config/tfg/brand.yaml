@@ -21,6 +21,8 @@ product_tagline: Sales Command Centre
 # Upstream views this install does not use: hidden from the sidebar and the
 # command palette (the routes still exist, so nothing breaks).
 hide_views: [/os/trading, /os/brand-deals, /os/adpilot]
+# Connectors left off the Connections board (TFG does not trade).
+hide_connectors: [robinhood]
 # Upstream FounderOS shows a pop-up and footer advertising its cohort.
 cohort_invite: false
 

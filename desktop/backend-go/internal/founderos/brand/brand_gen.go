@@ -8,6 +8,9 @@ const Operator = "Nader"
 const LeadMatch = "(?i)(sales system|system build|crm build|build)"
 const MinutesPerSuccessfulRun = 6
 
+// HiddenConnectors are left off the Connections board (hide_connectors).
+var HiddenConnectors = []string{"robinhood"}
+
 var WorkspaceNames = map[string]string{
 	"founderos":        "TFG HQ",
 	"vantage":          "Sales System Build",

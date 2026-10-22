@@ -14,11 +14,13 @@ import (
 	"encoding/json"
 	"net/http"
 	"os"
+	"slices"
 	"strings"
 	"time"
 
 	"github.com/gin-gonic/gin"
 
+	"github.com/rhl/businessos-backend/internal/founderos/brand"
 	"github.com/rhl/businessos-backend/internal/founderos/pages/integrations"
 )
 
@@ -45,7 +47,7 @@ func integrationsBoard(d *Deps) gin.HandlerFunc {
 				saved[k] = v
 			}
 		}
-		catalog := integrations.ConnectionCatalog(statuses, saved)
+		catalog := visibleCatalog(integrations.ConnectionCatalog(statuses, saved))
 		resolve := func(name string) string { return d.Resolver.Resolve(name) }
 		now := time.Now().UnixMilli()
 		oauth := map[string]*integrations.OAuthReadiness{}
@@ -64,6 +66,17 @@ func integrationsBoard(d *Deps) gin.HandlerFunc {
 			"oauth":       oauth,
 		})
 	}
+}
+
+// visibleCatalog drops the tiles of connectors the brand file hides.
+func visibleCatalog(cat []integrations.Entry) []integrations.Entry {
+	out := make([]integrations.Entry, 0, len(cat))
+	for _, e := range cat {
+		if !slices.Contains(brand.HiddenConnectors, e.Slug) && !slices.Contains(brand.HiddenConnectors, e.ConnectorID) {
+			out = append(out, e)
+		}
+	}
+	return out
 }
 
 type integrationsConnectBody struct {

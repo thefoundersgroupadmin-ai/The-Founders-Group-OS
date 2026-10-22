@@ -45,6 +45,7 @@ func TestAutoSendSendsOnlyFollowUpsThatAreSafeToSend(t *testing.T) {
 	venture := catalogdb.Workspace(t, pool, "vantage")
 	contact(t, pool, venture, "fc-quiet", "first_touch")
 	contact(t, pool, venture, "fc-replied", "engaged")
+	contact(t, pool, venture, "fc-called", "nurtured")
 
 	// Due: one earlier send 3 days ago, no reply.
 	row(t, pool, ws, "sent-a", "a@quiet.example", "fc-quiet", "sent", 3*day)
@@ -54,6 +55,9 @@ func TestAutoSendSendsOnlyFollowUpsThatAreSafeToSend(t *testing.T) {
 	// They replied.
 	row(t, pool, ws, "sent-b", "b@replied.example", "fc-replied", "sent", 3*day)
 	row(t, pool, ws, "replied", "b@replied.example", "fc-replied", "pending", 0)
+	// They have had a call.
+	row(t, pool, ws, "sent-g", "g@called.example", "fc-called", "sent", 3*day)
+	row(t, pool, ws, "called", "g@called.example", "fc-called", "pending", 0)
 	// Last send was yesterday: too soon.
 	row(t, pool, ws, "sent-c", "c@quiet.example", "fc-quiet", "sent", 1*day)
 	row(t, pool, ws, "soon", "c@quiet.example", "fc-quiet", "pending", 0)
@@ -79,7 +83,7 @@ func TestAutoSendSendsOnlyFollowUpsThatAreSafeToSend(t *testing.T) {
 	if n != 1 || len(sentTo) != 1 || sentTo[0] != "due" {
 		t.Fatalf("sent %d: %v, want only [due]", n, sentTo)
 	}
-	for _, id := range []string{"first", "replied", "soon", "fourth", "after-reject", "unlinked"} {
+	for _, id := range []string{"first", "replied", "called", "soon", "fourth", "after-reject", "unlinked"} {
 		if s := status(t, pool, id); s != "pending" {
 			t.Errorf("%s: %s, want pending", id, s)
 		}

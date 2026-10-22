@@ -51,10 +51,15 @@ class HostTest(unittest.TestCase):
         self.assertEqual(pc["WorkingDirectory"], str(self.paperclip / "server"))
         self.assertEqual(pc["ProgramArguments"][1:], ["--import", "tsx", "src/index.ts"])
         # With a production build it runs that instead.
+        # server/dist alone does not run in the monorepo; the runtime bundle does.
         (self.paperclip / "server" / "dist").mkdir()
         (self.paperclip / "server" / "dist" / "index.js").write_text("")
         self.run_host()
-        self.assertEqual(self.load("tfg-paperclip")["ProgramArguments"][1:], ["dist/index.js"])
+        self.assertEqual(self.load("tfg-paperclip")["ProgramArguments"][1:], ["--import", "tsx", "src/index.ts"])
+        (self.paperclip / "server" / "dist-runtime").mkdir()
+        (self.paperclip / "server" / "dist-runtime" / "index.mjs").write_text("")
+        self.run_host()
+        self.assertEqual(self.load("tfg-paperclip")["ProgramArguments"][1:], ["dist-runtime/index.mjs"])
         self.run_host("--remove")
         self.assertEqual(list(self.agents.glob("*.plist")), [])
 

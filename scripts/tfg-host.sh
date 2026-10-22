@@ -12,8 +12,8 @@
 #   tfg-keep-awake stops the Mac sleeping while it is on power
 #   tfg-backup     nightly database dump (scripts/tfg-backup.sh)
 #   tfg-paperclip  the Paperclip agent back-end ($TFG_PAPERCLIP_DIR), when it is on
-#                  this Mac: its production build (server/dist) if built, else from
-#                  source; it reads its own ~/.paperclip instance config
+#                  this Mac: its runtime bundle (server/dist-runtime) if built, else
+#                  from source; it reads its own ~/.paperclip instance config
 #
 # Build the web app first: cd frontend && pnpm build
 # Tests point it elsewhere with LAUNCH_AGENTS_DIR, FOUNDEROS_HOME and TFG_SKIP_LAUNCHCTL=1.
@@ -74,9 +74,11 @@ write_job() {
     tfg-keep-awake) plist "$1" keepalive /usr/bin/caffeinate -s -i ;;
     tfg-backup) plist "$1" nightly /bin/bash "$REPO/scripts/tfg-backup.sh" ;;
     tfg-paperclip)
-      # Production build (cd $PAPERCLIP_DIR && pnpm build) when there is one, else from source.
-      if [ -f "$PAPERCLIP_DIR/server/dist/index.js" ]; then
-        plist "$1" keepalive "$NODE" dist/index.js
+      # The self-contained bundle (cd $PAPERCLIP_DIR/server && pnpm build:runtime)
+      # when there is one, else from source. server/dist alone does not run in
+      # the monorepo: the workspace packages export their src/*.ts.
+      if [ -f "$PAPERCLIP_DIR/server/dist-runtime/index.mjs" ]; then
+        plist "$1" keepalive "$NODE" dist-runtime/index.mjs
       else
         plist "$1" keepalive "$NODE" --import tsx src/index.ts
       fi ;;
@@ -90,6 +92,12 @@ unload() {
 
 load() {
   [ -n "${TFG_SKIP_LAUNCHCTL:-}" ] && return 0
+  # bootout finishes asynchronously, so a bootstrap straight after it can fail.
+  local i
+  for i in 1 2 3 4 5; do
+    launchctl bootstrap "gui/$(id -u)" "$AGENTS/net.thefoundersgroup.$1.plist" 2>/dev/null && return 0
+    sleep 1
+  done
   launchctl bootstrap "gui/$(id -u)" "$AGENTS/net.thefoundersgroup.$1.plist"
 }
 

@@ -70,6 +70,7 @@ var Catalog = []Integration{
 	{Slug: "vercel", Name: "Vercel", Tagline: "Deploys & logs", Category: "Developer"},
 	{Slug: "sentry", Name: "Sentry", Tagline: "Errors & traces", Category: "Developer"},
 	{Slug: "gitlab", Name: "GitLab", Tagline: "Repos & pipelines", Category: "Developer"},
+	{Slug: "cloudflare", Name: "Cloudflare", Tagline: "Tunnel & team sign-in for os.thefoundersgroup.net", Category: "Developer", EnvKeys: []string{"CLOUDFLARE_API_TOKEN", "CLOUDFLARE_ACCOUNT_ID"}},
 
 	// Scheduling
 	{Slug: "googlecalendar", Name: "Google Calendar", Tagline: "Events & availability", Category: "Scheduling", ConnectorID: "calendar", Popular: true, EnvKeys: none},

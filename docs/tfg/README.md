@@ -127,6 +127,36 @@ skipped and named. Logs are in `~/.founderos/logs`.
 The Paperclip back-end itself is the private repo
 `thefoundersgroupadmin-ai/tfg-paperclip`.
 
+## Hosting the team from this Mac
+
+The team uses one TFG OS (one database) at `https://os.thefoundersgroup.net`,
+served from the owner's Mac through the existing Cloudflare tunnel and gated by
+Cloudflare Access (team emails only).
+
+```bash
+cd frontend && pnpm build && cd ..      # production web app (adapter-node)
+make tfg-host                           # ARGS=--dry-run or ARGS=--remove
+```
+
+That installs the LaunchAgents: the stack at login (headless), the web app on
+`127.0.0.1:5300` (it proxies `/api` to the backend and refuses
+`/api/internal/*`), keep-awake while on power, a 03:15 database dump to
+iCloud Drive `TFG-OS-backups` (newest 14 kept; `scripts/tfg-backup.sh`), and
+Paperclip itself from `~/Downloads/paperclip` (`TFG_PAPERCLIP_DIR`) when it is
+on this Mac.
+
+- The backend listens on `127.0.0.1` only (`SERVER_HOST`); nothing but the
+  web app and this Mac reach it.
+- Who can use the `/os` views: `FOUNDEROS_OWNER_EMAIL` in
+  `desktop/backend-go/.env`, comma-separated. Each teammate registers at
+  `/register` with that email.
+- The Cloudflare key goes in on the Connections view (Cloudflare card):
+  `CLOUDFLARE_API_TOKEN` (Account: Cloudflare Tunnel Edit, Access: Apps and
+  Policies Edit; Zone: DNS Edit for thefoundersgroup.net) and
+  `CLOUDFLARE_ACCOUNT_ID`.
+- With the lid closed the Mac sleeps unless it has a display attached; keep it
+  open on power.
+
 ## Gates before you ship a change
 
 ```bash

@@ -13,6 +13,16 @@ function setSecurityHeaders(response: Response): Response {
   return response;
 }
 
+function isInternalApiPath(pathname: string): boolean {
+  let decoded: string;
+  try {
+    decoded = decodeURIComponent(pathname);
+  } catch {
+    return true;
+  }
+  return /^\/+api\/+(v\d+\/+)?internal(\/|$)/i.test(decoded);
+}
+
 export const handle: Handle = async ({ event, resolve }) => {
   // Same-origin /api/* proxy for the adapter-node (Docker) deployment.
   // The web frontend always calls its own origin (see lib/config/runtime.ts);
@@ -22,6 +32,12 @@ export const handle: Handle = async ({ event, resolve }) => {
   // proxy).
   const backend = env.BACKEND_INTERNAL_URL;
   if (backend && event.url.pathname.startsWith("/api/")) {
+    // Service-to-service routes (/api[/vN]/internal/*) trust the caller's
+    // address, and every request through this proxy comes from this machine.
+    // The backend decodes the path, so check the decoded form.
+    if (isInternalApiPath(event.url.pathname)) {
+      return setSecurityHeaders(new Response("Not found", { status: 404 }));
+    }
     const target = new URL(
       event.url.pathname + event.url.search,
       backend,

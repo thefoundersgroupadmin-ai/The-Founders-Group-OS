@@ -254,7 +254,7 @@ urls: ## Print service URLs
 
 # ── FounderOS demo: workspaces + dummy data ─────────────────────────────────
 .PHONY: demo
-.PHONY: tfg client tfg-brand tfg-check tfg-machine graph
+.PHONY: tfg client tfg-brand tfg-check tfg-machine tfg-host graph
 tfg: ## The Founders Group: brand files, workspaces and TFG starting data (OWNER=<email you registered with>)
 	@test -n "$(OWNER)" || { echo "usage: make tfg OWNER=<the email you registered with at /register>"; exit 2; }
 	@python3 scripts/tfg-brand.py --check
@@ -266,6 +266,9 @@ client: ## A TFG client install: workspaces + client starting data (OWNER=<clien
 
 tfg-machine: ## This Mac's TFG OS background jobs and key files (safe to rerun; ARGS=--dry-run or --remove)
 	@scripts/tfg-setup-machine.sh $(ARGS)
+
+tfg-host: ## Host TFG OS for the team from this Mac: stack, web app, keep-awake, nightly backup (ARGS=--dry-run or --remove)
+	@scripts/tfg-host.sh $(ARGS)
 
 tfg-brand: ## Regenerate brand files after editing config/tfg/brand.yaml (BRAND=<path> for a client)
 	@python3 scripts/tfg-brand.py --brand "$(or $(BRAND),config/tfg/brand.yaml)"

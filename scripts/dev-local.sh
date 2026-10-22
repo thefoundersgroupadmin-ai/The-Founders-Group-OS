@@ -104,6 +104,9 @@ ensure_backend_env() {
     set_env_value "$be_env" TOKEN_ENCRYPTION_KEY "$(generate_token_encryption_key)"
     set_env_value "$be_env" REDIS_KEY_HMAC_SECRET "$(generate_secret 32)"
     set_env_value "$be_env" ENVIRONMENT development
+    # Loopback only: the LAN (and a tunnel) reach the backend through the web
+    # server's /api proxy, never directly.
+    set_env_value "$be_env" SERVER_HOST 127.0.0.1
     set_env_value "$be_env" OPTIMAL_ENGINE_URL "http://127.0.0.1:$ENGINE_PORT"
     chmod 600 "$be_env"
     ok "Created $be_env with local-only credentials"

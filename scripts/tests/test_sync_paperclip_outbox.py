@@ -40,5 +40,19 @@ class EntriesTest(unittest.TestCase):
                 sync.entries(bad)
 
 
+class ContactTest(unittest.TestCase):
+    def test_contact_id_matches_the_pipeline_sync(self):
+        self.assertEqual(sync.contact_id({"company": "Basalt Health", "to": "ben@basalt.health"}), "fc-pc-basalt-health")
+
+    def test_contact_id_falls_back_to_the_domain(self):
+        self.assertEqual(sync.contact_id({"company": None, "to": "info@gallatin.ai"}), "fc-pc-gallatin-ai")
+
+    def test_our_own_addresses_are_not_prospects(self):
+        own = {"thefoundersgroupadmin@gmail.com"}
+        self.assertTrue(sync.is_own("Nader@TheFoundersGroup.net", own))
+        self.assertTrue(sync.is_own("TheFoundersGroupAdmin@gmail.com", own))
+        self.assertFalse(sync.is_own("ben@basalt.health", own))
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -90,6 +90,20 @@ def json_prospects(body):
     return out, bad
 
 
+def address_for_company(name, text, addr):
+    """Whether addr, found in a table row's text, is this company's: the name appears
+    as a whole word and the address's domain belongs to it ("Rise" is not Sandstone's)."""
+    if not re.search(r"(?<![a-z0-9])" + re.escape(name.lower()) + r"(?![a-z0-9])", text.lower()):
+        return False
+    domain = addr.rsplit("@", 1)[1].lower()
+    stem = domain.split(".")[0]
+    compact_name = re.sub(r"[^a-z0-9]", "", name.lower())
+    compact_domain = re.sub(r"[^a-z0-9]", "", domain)
+    first = re.sub(r"[^a-z0-9]", "", name.lower().split()[0]) if name.split() else ""
+    return ((len(stem) >= 3 and stem in compact_name) or (len(compact_name) >= 3 and compact_name in compact_domain)
+            or (len(first) >= 4 and first in stem))
+
+
 def slug(s):
     return re.sub(r"[^a-z0-9]+", "-", s.lower()).strip("-")
 
@@ -160,8 +174,9 @@ def main():
             if not found:
                 continue
             for a in accounts:
-                if a["name"].lower() in text.lower():
-                    emails.setdefault(a["name"], found[0])
+                match = next((e for e in found if address_for_company(a["name"], text, e)), None)
+                if match:
+                    emails.setdefault(a["name"], match)
 
     ws = subprocess.run(["psql", db, "-At", "-c", f"select id from workspaces where slug={sql(WORKSPACE_SLUG)}"],
                         capture_output=True, text=True, check=True).stdout.strip()

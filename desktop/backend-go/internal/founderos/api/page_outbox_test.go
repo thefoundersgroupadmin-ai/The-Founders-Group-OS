@@ -88,3 +88,19 @@ func TestOutboxMapsAnUncertainSMTPDeliveryToUncertain(t *testing.T) {
 		t.Fatalf("uncertain: %d %v", code, body)
 	}
 }
+
+func TestAutoFollowUpsAreOffUnlessSwitchedOn(t *testing.T) {
+	t.Setenv("FOUNDEROS_AUTO_FOLLOWUPS", "")
+	t.Setenv("FOUNDEROS_AUTO_FOLLOWUPS_DAILY_CAP", "40")
+	if n := autoFollowUpCap(); n != 0 {
+		t.Fatalf("off: cap %d", n)
+	}
+	t.Setenv("FOUNDEROS_AUTO_FOLLOWUPS", "1")
+	if n := autoFollowUpCap(); n != 40 {
+		t.Fatalf("on with cap: %d", n)
+	}
+	t.Setenv("FOUNDEROS_AUTO_FOLLOWUPS_DAILY_CAP", "")
+	if n := autoFollowUpCap(); n != 15 {
+		t.Fatalf("on, default cap: %d", n)
+	}
+}

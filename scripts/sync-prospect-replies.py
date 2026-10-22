@@ -1,12 +1,14 @@
 #!/usr/bin/env python3
 """Route prospect email replies to the Paperclip sales team.
 
-Reads the INBOX_1 mailbox (read-only IMAP) for messages from the email
-domains of pipeline contacts synced from Paperclip (fc-pc-*). For each new
-reply it:
+Reads the INBOX_1 mailbox (read-only IMAP) for messages from pipeline contacts
+synced from Paperclip (fc-pc-*): any address at a company's domain, or, for
+personal mail providers (gmail.com and the like), the contact's own address.
+For each new reply it:
   - creates a Paperclip task for Sales Enablement and Delivery to draft a
-    response (sending still needs owner approval in the Resend tool), and
-  - marks the TFG OS pipeline contact engaged, with an email touch.
+    response, handed to the TFG OS Outbox for the owner's approval, and
+  - marks the TFG OS pipeline contact engaged, with an email touch, which also
+    stops automatic follow-ups to them.
 Processed Message-IDs are kept in ~/.founderos/state/prospect-replies.json,
 so re-runs never create a second task for the same email.
 
@@ -27,6 +29,22 @@ from pathlib import Path
 REPO = Path(__file__).resolve().parent.parent
 STATE = Path.home() / ".founderos/state/prospect-replies.json"
 ASSIGNEE = "Sales Enablement and Delivery"
+# Shared mail providers: match the contact's address, never the whole domain.
+FREEMAIL = {"gmail.com", "googlemail.com", "outlook.com", "hotmail.com", "live.com", "yahoo.com", "icloud.com",
+            "me.com", "aol.com", "proton.me", "protonmail.com", "gmx.com", "zoho.com"}
+OWN_DOMAIN = "thefoundersgroup.net"
+
+
+def watch_keys(contacts, own):
+    """What to search the inbox for: {domain-or-address: contact}, skipping our own mailboxes."""
+    out = {}
+    for cid, ws, company, addr in contacts:
+        addr = addr.strip().lower()
+        domain = addr.rsplit("@", 1)[1]
+        if domain == OWN_DOMAIN or addr in own:
+            continue
+        out.setdefault(addr if domain in FREEMAIL else domain, (cid, ws, company))
+    return out
 
 
 def read_env(path):
@@ -77,9 +95,8 @@ def main():
 
     contacts = psql(db, "select id, workspace_id, company, email from founderos_funnel_contacts "
                         "where id like 'fc-pc-%' and email is not null")
-    domains = {}
-    for cid, ws, company, addr in contacts:
-        domains[addr.rsplit("@", 1)[1].lower()] = (cid, ws, company)
+    own = {parseaddr(keys.get(k, ""))[1].lower() for k in ("INBOX_1_USER", "INBOX_1_FROM")} - {""}
+    domains = watch_keys(contacts, own)
     if not domains:
         print("no pipeline contacts with an email yet")
         return
@@ -92,13 +109,14 @@ def main():
 
     found = []
     for domain, contact in domains.items():
-        _, data = m.search(None, f'(SINCE {since} FROM "@{domain}")')
+        whole = "@" in domain  # a personal address, not a company domain
+        _, data = m.search(None, f'(SINCE {since} FROM "{domain if whole else "@" + domain}")')
         for num in data[0].split():
             _, parts = m.fetch(num, "(BODY.PEEK[])")
             msg = email.message_from_bytes(parts[0][1])
             mid = (msg.get("Message-ID") or "").strip() or f"{domain}:{num.decode()}"
             sender = parseaddr(msg.get("From", ""))[1].lower()
-            if mid in seen or not sender.endswith("@" + domain):
+            if mid in seen or not (sender == domain if whole else sender.endswith("@" + domain)):
                 continue
             found.append((mid, contact, sender, str(make_header(decode_header(msg.get("Subject", "")))),
                           msg.get("Date", ""), text_body(msg)))
@@ -121,10 +139,11 @@ def main():
             "description": (f"A prospect replied to outreach.\n\n- **From:** {sender}\n- **Company:** {company}\n"
                             f"- **Received:** {when}\n- **Subject:** {subject}\n\n**Their message:**\n\n> "
                             + snippet.replace("\n", "\n> ") +
-                            "\n\nDraft a reply from Nader (CEO, The Founders Group) and send it with the Resend "
-                            "`send-email` tool from hello@thefoundersgroup.net, keeping the opt-out line. Each send "
-                            "needs owner approval. If they asked to opt out, add them to suppression and do not reply. "
-                            "If they want a call, propose times and note it in the pipeline."),
+                            "\n\nDraft a reply from Nader (CEO, The Founders Group) and hand it over as a document with "
+                            "key \"outbox\" on this task: a JSON array of {\"to\", \"toName\", \"company\", \"subject\", "
+                            "\"body\"}. The owner approves it in the TFG OS Outbox; never send any other way. Automatic "
+                            "follow-ups to them have stopped. If they asked to opt out, do not reply and note it in the "
+                            "pipeline. If they want a call, propose times and note it in the pipeline."),
             "status": "todo", "priority": "high", "workMode": "standard", "assigneeAgentId": assignee})
         psql(db, f"update founderos_funnel_contacts set status='engaged', relationship='warm' "
                  f"where id={sql(cid)} and status in ('first_touch','nurtured')")

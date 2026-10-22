@@ -47,10 +47,10 @@ describe('ConductorComposer', () => {
 		expect(screen.queryByTitle(/model holding the Conductor seat/)).toBeNull();
 	});
 
-	it('the mic says so when the browser has no speech recognition', async () => {
+	it('without browser speech recognition the mic uses the OS Mac, and says so when there is no microphone', async () => {
 		const onError = vi.fn();
 		render(ConductorComposer, { onSend: vi.fn(), onError });
 		await fireEvent.click(screen.getByRole('button', { name: /dictate/i }));
-		expect(onError).toHaveBeenCalledWith('Voice input is not available in this browser.');
+		await waitFor(() => expect(onError).toHaveBeenCalledWith(expect.stringMatching(/^Voice input: /)));
 	});
 });

@@ -6,6 +6,29 @@ import { csrfHeaders, founderosUrl } from './api';
 
 let current: { stop: () => void } | null = null;
 
+// One audio element for every answer: iPhone only lets an element play
+// without a tap if a tap once started it, so unlockAudio() (called from the
+// Talk button) primes it and later answers reuse it.
+let shared: HTMLAudioElement | null = null;
+const SILENCE = 'data:audio/wav;base64,UklGRiQAAABXQVZFZm10IBAAAAABAAEAQB8AAIA+AAACABAAZGF0YQAAAAA=';
+
+function player(): HTMLAudioElement {
+	shared ??= new Audio();
+	return shared;
+}
+
+/** Call inside a tap: lets later answers play on iPhone and in Safari. */
+export function unlockAudio(): void {
+	try {
+		const a = player();
+		a.src = SILENCE;
+		void a.play().catch(() => {});
+		if (typeof speechSynthesis !== 'undefined') speechSynthesis.speak(new SpeechSynthesisUtterance(''));
+	} catch {
+		/* nothing to unlock here */
+	}
+}
+
 /** Stop whatever is speaking. */
 export function stopSpeaking(): void {
 	current?.stop();
@@ -53,7 +76,7 @@ export async function speak(text: string): Promise<void> {
 	stopSpeaking();
 	const said = plainForSpeech(text);
 	if (!said) return;
-	let audio: HTMLAudioElement | null = null;
+	let url: string | null = null;
 	try {
 		const res = await fetch(founderosUrl('/pages/voice/speak'), {
 			method: 'POST',
@@ -62,16 +85,18 @@ export async function speak(text: string): Promise<void> {
 			body: JSON.stringify({ text: said })
 		});
 		if (res.ok && (res.headers.get('content-type') ?? '').startsWith('audio/')) {
-			audio = new Audio(URL.createObjectURL(await res.blob()));
+			url = URL.createObjectURL(await res.blob());
 		}
 	} catch {
-		audio = null;
+		url = null;
 	}
-	if (!audio) return browserVoice(said);
-	const a = audio;
+	if (!url) return browserVoice(said);
+	const a = player();
+	a.src = url;
 	return new Promise((resolve) => {
 		const done = () => {
-			URL.revokeObjectURL(a.src);
+			a.onended = a.onerror = null;
+			URL.revokeObjectURL(url as string);
 			if (current === handle) current = null;
 			resolve();
 		};
@@ -85,9 +110,11 @@ export async function speak(text: string): Promise<void> {
 		a.onerror = done;
 		current = handle;
 		a.play().catch(() => {
-			// autoplay refused (no click on the page yet): the browser voice may still work
-			done();
-			void browserVoice(said);
+			// autoplay refused (no tap on the page yet): the browser voice may still work
+			a.onended = a.onerror = null;
+			URL.revokeObjectURL(url as string);
+			if (current === handle) current = null;
+			void browserVoice(said).then(resolve);
 		});
 	});
 }

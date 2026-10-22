@@ -237,6 +237,7 @@ func registerNotify(s *gin.RouterGroup, d *Deps) {
 		}
 		c.Data(http.StatusOK, "audio/mpeg", audio)
 	})
+	registerVoiceListen(s)
 	// The voices this ElevenLabs account can use, each with its free sample.
 	s.GET("/pages/voice/voices", func(c *gin.Context) {
 		list, err := voiceList(c.Request.Context(), d)

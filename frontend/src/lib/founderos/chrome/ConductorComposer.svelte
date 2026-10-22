@@ -9,7 +9,8 @@
      display is what the caller shows as the user bubble. -->
 <script lang="ts">
 	import { AudioLines, Headphones, Mic, Plus, Send, X } from '$lib/founderos/icons';
-	import { speak, stopSpeaking } from '$lib/founderos/voice';
+	import { speak, stopSpeaking, unlockAudio } from '$lib/founderos/voice';
+	import { listenOnce, needsServerListening, recordTurn, releaseMic, transcribe as transcribeAudio } from '$lib/founderos/listen';
 	import '../kit/kit.css';
 	import { COMPOSER_MAX_PX, composerHeight } from './conductor';
 
@@ -37,12 +38,12 @@
 	let fileInput: HTMLInputElement | undefined = $state();
 	let rec: { stop: () => void } | null = null;
 	let dictationBase = '';
-	// hands-free: listening → (pause) send → waiting for the reply → speaking → listening
+	// hands-free: listening → (pause) heard → waiting for the reply → speaking → listening
 	let talking = $state(false);
+	let talkState = $state<'listening' | 'hearing' | 'transcribing' | 'waiting' | 'speaking'>('listening');
 	let awaiting = $state(false);
 	let replyBefore: string | null | undefined = null;
-	let pauseTimer: ReturnType<typeof setTimeout> | null = null;
-	const PAUSE_MS = 1400;
+	let turnAbort: AbortController | null = null;
 
 	// Reset to auto before measuring, or the box could only ever grow.
 	$effect(() => {
@@ -82,19 +83,21 @@
 		stop: () => void;
 	};
 
+	function recognition(): (new () => Recognition) | null {
+		const w = window as unknown as { SpeechRecognition?: new () => Recognition; webkitSpeechRecognition?: new () => Recognition };
+		return w.SpeechRecognition ?? w.webkitSpeechRecognition ?? null;
+	}
+
+	const failure = (e: unknown) => (e instanceof Error ? e.message : String(e));
+
 	function toggleMic() {
 		if (listening) {
 			rec?.stop();
 			return;
 		}
-		listen(false);
-	}
-
-	function listen(handsFree: boolean) {
-		const w = window as unknown as { SpeechRecognition?: new () => Recognition; webkitSpeechRecognition?: new () => Recognition };
-		const SR = w.SpeechRecognition ?? w.webkitSpeechRecognition;
-		if (!SR) {
-			onError?.('Voice input is not available in this browser.');
+		const SR = recognition();
+		if (needsServerListening(navigator.userAgent, !!SR) || !SR) {
+			void dictateOnMac();
 			return;
 		}
 		const r = new SR();
@@ -106,26 +109,30 @@
 			let heard = '';
 			for (const res of Array.from(e.results)) heard += res[0].transcript;
 			input = (dictationBase ? `${dictationBase} ` : '') + heard;
-			if (handsFree) {
-				if (pauseTimer) clearTimeout(pauseTimer);
-				pauseTimer = setTimeout(() => {
-					if (!talking || !input.trim()) return;
-					rec?.stop();
-					replyBefore = lastReply;
-					awaiting = true;
-					send();
-				}, PAUSE_MS);
-			}
 		};
-		r.onend = () => {
-			listening = false;
-			// browsers end recognition after a silence: keep the conversation open
-			if (handsFree && talking && !awaiting && !speaking) setTimeout(() => talking && !awaiting && !speaking && !listening && listen(true), 250);
-		};
+		r.onend = () => (listening = false);
 		r.onerror = () => (listening = false);
 		r.start();
 		rec = r;
 		listening = true;
+	}
+
+	// One dictated turn through the OS Mac (the desktop app, iPhone): it stops by
+	// itself at a pause; the mic button stops it early.
+	async function dictateOnMac() {
+		const ac = new AbortController();
+		rec = { stop: () => ac.abort() };
+		listening = true;
+		try {
+			const text = await listenOnce({ signal: ac.signal });
+			if (text) input = input.trim() ? `${input.trim()} ${text}` : text;
+		} catch (e) {
+			onError?.(`Voice input: ${failure(e)}`);
+		} finally {
+			listening = false;
+			rec = null;
+			releaseMic();
+		}
 	}
 
 	async function say(text: string) {
@@ -147,18 +154,52 @@
 		void say(lastReply);
 	}
 
+	function stopTalk() {
+		talking = false;
+		awaiting = false;
+		turnAbort?.abort();
+		turnAbort = null;
+		stopSpeaking();
+		releaseMic();
+	}
+
 	function toggleTalk() {
 		if (talking) {
-			talking = false;
-			awaiting = false;
-			if (pauseTimer) clearTimeout(pauseTimer);
-			rec?.stop();
-			stopSpeaking();
+			stopTalk();
 			return;
 		}
+		unlockAudio(); // inside the tap, so the answers may play (iPhone)
 		talking = true;
-		listen(true);
-		if (!listening) talking = false; // no voice input in this browser (listen said so)
+		void turn();
+	}
+
+	// Listen for one thing said, then send it; the effect below says the answer.
+	async function turn() {
+		while (talking) {
+			talkState = 'listening';
+			turnAbort = new AbortController();
+			let text = '';
+			try {
+				const audio = await recordTurn({ signal: turnAbort.signal, onSpeaking: (s) => (talkState = s ? 'hearing' : talkState) });
+				if (!talking) return;
+				if (!audio) continue; // nobody spoke: keep listening
+				talkState = 'transcribing';
+				text = await transcribeAudio(audio, turnAbort.signal);
+			} catch (e) {
+				if (!talking) return;
+				onError?.(`Voice: ${failure(e)}`);
+				stopTalk();
+				return;
+			}
+			if (!talking) return;
+			if (!text) continue;
+			input = text;
+			replyBefore = lastReply;
+			awaiting = true;
+			talkState = 'waiting';
+			send();
+			return;
+		}
 	}
 
 	// The answer arrived: say it, then listen for the next thing.
@@ -166,12 +207,26 @@
 		const reply = lastReply;
 		if (!talking || !awaiting || disabled || !reply || reply === replyBefore) return;
 		awaiting = false;
+		talkState = 'speaking';
 		void say(reply).then(() => {
-			if (talking) listen(true);
+			if (talking) void turn();
 		});
 	});
+
+	const TALK_LINE = {
+		listening: 'Listening… just talk',
+		hearing: 'Hearing you…',
+		transcribing: 'Got it, writing it down…',
+		waiting: 'Sent. Waiting for the answer…',
+		speaking: 'Answering… (tap the headphones to stop)'
+	} as const;
 </script>
 
+{#if talking}
+	<p class="bn-talk mb-1.5 flex items-center gap-1.5 font-mono text-[10px]" data-part="talk-state" aria-live="polite">
+		<span class="bn-talk-dot {talkState === 'hearing' ? 'is-live' : ''}"></span>{TALK_LINE[talkState]}
+	</p>
+{/if}
 <div class="bn-pressable is-row bn-composer rounded-[10px] border px-3 pb-2 pt-2.5">
 	<textarea
 		bind:this={box}
@@ -268,6 +323,19 @@
 	}
 	.bn-err {
 		color: var(--bn-err);
+	}
+	.bn-talk {
+		color: var(--bn-text-2, var(--bn-text));
+	}
+	.bn-talk-dot {
+		width: 7px;
+		height: 7px;
+		border-radius: 999px;
+		background: var(--bn-text-3);
+	}
+	.bn-talk-dot.is-live {
+		background: var(--bn-accent);
+		box-shadow: 0 0 0 3px color-mix(in oklab, var(--bn-accent) 30%, transparent);
 	}
 	.bn-send {
 		border-color: var(--bn-border-strong);

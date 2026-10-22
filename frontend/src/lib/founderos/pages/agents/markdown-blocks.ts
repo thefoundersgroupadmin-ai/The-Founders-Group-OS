@@ -158,15 +158,18 @@ export function parseMarkdown(md: string): Block[] {
     const para: string[] = [];
     while (i < lines.length) {
       const s = lines[i].trim();
+      // The first line always belongs here: it reached this point because no
+      // block rule took it ("#tag", a lone "|" row), so it is text and the
+      // scan must advance past it rather than spin on it.
       if (
         !s ||
-        s.startsWith('#') ||
+        (para.length > 0 && (s.startsWith('#') ||
         s.startsWith('>') ||
         s.startsWith('|') ||
         s.startsWith('```') ||
         /^(-{3,}|\*{3,}|={3,})$/.test(s) ||
         /^[-*+]\s+/.test(s) ||
-        /^\d+[.)]\s+/.test(s)
+        /^\d+[.)]\s+/.test(s)))
       ) {
         break;
       }

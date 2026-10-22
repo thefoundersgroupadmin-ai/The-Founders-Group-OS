@@ -108,3 +108,18 @@ describe('parseInline - the marks inside a line', () => {
     expect(parseInline('a ** b')).toEqual([{ type: 'text', text: 'a ** b' }]);
   });
 });
+
+describe('parseMarkdown - lines that look like a block but are not', () => {
+	test('a #hashtag is text, and the parse finishes', { timeout: 1000 }, () => {
+		expect(parseMarkdown('#tag line\nnext')).toEqual([{ type: 'paragraph', text: '#tag line next' }]);
+	});
+
+	test('a lone pipe row without a divider is text', { timeout: 1000 }, () => {
+		expect(parseMarkdown('| not a table |')).toEqual([{ type: 'paragraph', text: '| not a table |' }]);
+	});
+
+	test('a pipe row after a paragraph does not stall', { timeout: 1000 }, () => {
+		const out = parseMarkdown('Intro line\n| a | b |\nmore');
+		expect(out.map((b) => b.type)).toEqual(['paragraph', 'paragraph']);
+	});
+});

@@ -50,6 +50,11 @@ class HostTest(unittest.TestCase):
         pc = self.load("tfg-paperclip")
         self.assertEqual(pc["WorkingDirectory"], str(self.paperclip / "server"))
         self.assertEqual(pc["ProgramArguments"][1:], ["--import", "tsx", "src/index.ts"])
+        # With a production build it runs that instead.
+        (self.paperclip / "server" / "dist").mkdir()
+        (self.paperclip / "server" / "dist" / "index.js").write_text("")
+        self.run_host()
+        self.assertEqual(self.load("tfg-paperclip")["ProgramArguments"][1:], ["dist/index.js"])
         self.run_host("--remove")
         self.assertEqual(list(self.agents.glob("*.plist")), [])
 

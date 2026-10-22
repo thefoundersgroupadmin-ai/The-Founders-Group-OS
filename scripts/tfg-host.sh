@@ -12,7 +12,8 @@
 #   tfg-keep-awake stops the Mac sleeping while it is on power
 #   tfg-backup     nightly database dump (scripts/tfg-backup.sh)
 #   tfg-paperclip  the Paperclip agent back-end ($TFG_PAPERCLIP_DIR), when it is on
-#                  this Mac; it reads its own ~/.paperclip instance config
+#                  this Mac: its production build (server/dist) if built, else from
+#                  source; it reads its own ~/.paperclip instance config
 #
 # Build the web app first: cd frontend && pnpm build
 # Tests point it elsewhere with LAUNCH_AGENTS_DIR, FOUNDEROS_HOME and TFG_SKIP_LAUNCHCTL=1.
@@ -72,7 +73,13 @@ write_job() {
     tfg-os-web) plist "$1" keepalive "$NODE" "$REPO/frontend/build" ;;
     tfg-keep-awake) plist "$1" keepalive /usr/bin/caffeinate -s -i ;;
     tfg-backup) plist "$1" nightly /bin/bash "$REPO/scripts/tfg-backup.sh" ;;
-    tfg-paperclip) plist "$1" keepalive "$NODE" --import tsx src/index.ts ;;
+    tfg-paperclip)
+      # Production build (cd $PAPERCLIP_DIR && pnpm build) when there is one, else from source.
+      if [ -f "$PAPERCLIP_DIR/server/dist/index.js" ]; then
+        plist "$1" keepalive "$NODE" dist/index.js
+      else
+        plist "$1" keepalive "$NODE" --import tsx src/index.ts
+      fi ;;
   esac
 }
 

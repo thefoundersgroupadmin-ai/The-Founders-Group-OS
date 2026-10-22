@@ -16,6 +16,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"sync"
 	"testing"
@@ -310,6 +311,8 @@ type voiceOption struct {
 	Accent      string `json:"accent"`
 	Age         string `json:"age"`
 	Preview     string `json:"preview"`
+	// Library is a community voice: the free ElevenLabs plan can't speak with it.
+	Library bool `json:"library"`
 }
 
 var voiceCache struct {
@@ -346,10 +349,11 @@ func voiceList(ctx context.Context, d *Deps) ([]voiceOption, error) {
 	}
 	var body struct {
 		Voices []struct {
-			ID      string            `json:"voice_id"`
-			Name    string            `json:"name"`
-			Labels  map[string]string `json:"labels"`
-			Preview string            `json:"preview_url"`
+			ID       string            `json:"voice_id"`
+			Name     string            `json:"name"`
+			Labels   map[string]string `json:"labels"`
+			Preview  string            `json:"preview_url"`
+			Category string            `json:"category"`
 		} `json:"voices"`
 	}
 	if err := json.NewDecoder(io.LimitReader(res.Body, 4<<20)).Decode(&body); err != nil {
@@ -359,7 +363,8 @@ func voiceList(ctx context.Context, d *Deps) ([]voiceOption, error) {
 	for _, v := range body.Voices {
 		name, desc, _ := strings.Cut(v.Name, " - ")
 		list = append(list, voiceOption{ID: v.ID, Name: strings.TrimSpace(name), Description: strings.TrimSpace(desc),
-			Gender: v.Labels["gender"], Accent: v.Labels["accent"], Age: strings.ReplaceAll(v.Labels["age"], "_", " "), Preview: v.Preview})
+			Gender: v.Labels["gender"], Accent: v.Labels["accent"], Age: strings.ReplaceAll(v.Labels["age"], "_", " "), Preview: v.Preview,
+			Library: v.Category != "" && v.Category != "premade"})
 	}
 	voiceCache.list, voiceCache.at = list, time.Now()
 	return list, nil
@@ -389,6 +394,23 @@ func speakText(text string) string {
 	return cut + " The rest is on screen."
 }
 
+// sayAs fixes how names are said: FOUNDEROS_SAY_AS is "Word=Spoken,Word2=Spoken2"
+// (whole words, any case). The screen still shows the real spelling.
+func sayAs(text, rules string) string {
+	for _, r := range strings.Split(rules, ",") {
+		word, spoken, ok := strings.Cut(r, "=")
+		word, spoken = strings.TrimSpace(word), strings.TrimSpace(spoken)
+		if !ok || word == "" || spoken == "" {
+			continue
+		}
+		re, err := regexp.Compile(`(?i)\b` + regexp.QuoteMeta(word) + `\b`)
+		if err == nil {
+			text = re.ReplaceAllString(text, spoken)
+		}
+	}
+	return text
+}
+
 func speak(ctx context.Context, d *Deps, text, voice string) ([]byte, error) {
 	key := voiceKey(d)
 	if key == "" {
@@ -401,7 +423,7 @@ func speak(ctx context.Context, d *Deps, text, voice string) ([]byte, error) {
 	if model == "" {
 		model = "eleven_flash_v2_5" // half the characters of the multilingual model
 	}
-	payload, _ := json.Marshal(map[string]any{"text": speakText(text), "model_id": model})
+	payload, _ := json.Marshal(map[string]any{"text": sayAs(speakText(text), d.Resolver.Resolve("FOUNDEROS_SAY_AS")), "model_id": model})
 	ctx, cancel := context.WithTimeout(ctx, 40*time.Second)
 	defer cancel()
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost,
@@ -429,6 +451,9 @@ func speak(ctx context.Context, d *Deps, text, voice string) ([]byte, error) {
 			} `json:"detail"`
 		}
 		_ = json.Unmarshal(raw, &e)
+		if e.Detail.Status == "payment_required" {
+			return nil, errors.New("that voice needs a paid ElevenLabs plan")
+		}
 		if e.Detail.Status == "quota_exceeded" {
 			return nil, errors.New("this month's ElevenLabs characters are used up")
 		}

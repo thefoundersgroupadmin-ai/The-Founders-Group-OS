@@ -69,7 +69,7 @@ export function spokenLine(e: Pick<AlertEvent, 'title' | 'body'>): string {
 	return e.body ? `${e.title}. ${e.body}` : e.title;
 }
 
-export type VoiceOption = { id: string; name: string; description: string; gender: string; accent: string; age: string; preview: string };
+export type VoiceOption = { id: string; name: string; description: string; gender: string; accent: string; age: string; preview: string; library?: boolean };
 export type VoiceList = { voices: VoiceOption[]; current: string; error?: string };
 
 /** Voices matching the filters ('' is any), one per name, in the account's order. */

@@ -291,3 +291,10 @@ func TestEachPersonPicksTheirOwnVoice(t *testing.T) {
 		t.Fatalf("someone else's pick leaked: %q", spokeWith)
 	}
 }
+
+func TestNamesAreSaidTheWayTheOwnerSaysThem(t *testing.T) {
+	got := sayAs("Good morning, Nader. NADER's calls; Naderson stays.", "Nader=Nadeer, bad")
+	if got != "Good morning, Nadeer. Nadeer's calls; Naderson stays." {
+		t.Fatalf("%q", got)
+	}
+}

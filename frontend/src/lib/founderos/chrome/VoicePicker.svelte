@@ -87,7 +87,7 @@
 						</button>
 					{/if}
 					<span class="min-w-0 flex-1">
-						<span class="font-semibold">{v.name}</span>
+						<span class="font-semibold">{v.name}</span>{#if v.library}<span class="bn-dim ml-1.5 font-mono text-[10px]">needs paid plan</span>{/if}
 						<span class="bn-dim block truncate text-[11px]">{v.description}{v.age ? ` · ${v.age}` : ''}</span>
 					</span>
 					{#if v.id === list.current}

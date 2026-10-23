@@ -8,7 +8,8 @@
 //
 // Logins live under ~/.founderos/people/<user id>/ (FOUNDEROS_PEOPLE_DIR),
 // directory 0700 and files 0600, like the rest of ~/.founderos. They are
-// written here and read back only to start a CLI; no route ever returns one.
+// written here and read back to start a CLI or read that account's plan
+// gauge; no route ever returns a saved token.
 package people
 
 import (

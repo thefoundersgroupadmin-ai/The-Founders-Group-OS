@@ -48,6 +48,18 @@ describe('My AI accounts', () => {
 		await waitFor(() => expect(screen.getByText(/TFG_LAPTOP_TOKEN=tfgl_1/)).toBeTruthy());
 	});
 
+	it('offers a Windows PowerShell install with the Windows platform selected', async () => {
+		fetchMock.mockResolvedValue(mate());
+		render(MyAccounts);
+		const platform = await screen.findByLabelText('Laptop operating system');
+		await fireEvent.change(platform, { target: { value: 'windows' } });
+		fetchMock.mockResolvedValueOnce({ command: 'windows-install-command', device: 'laptop-karim', platform: 'windows' });
+		await fireEvent.click(screen.getByRole('button', { name: 'Connect this laptop' }));
+		expect(fetchMock).toHaveBeenCalledWith('/pages/ai-accounts/laptop', { method: 'POST', json: { platform: 'windows' } });
+		await screen.findByText('windows-install-command');
+		expect(screen.getByText(/open/i, { selector: 'p[data-part="install-instructions"]' }).textContent).toContain('PowerShell');
+	});
+
 	it('tells the owner they run on this Mac and asks for nothing', async () => {
 		fetchMock.mockResolvedValue(mate({ owner: true, claude: { connected: true, via: "this Mac's Claude login" }, codex: { connected: true, via: "this Mac's Codex login", login: { state: 'none' } } }));
 		render(MyAccounts);

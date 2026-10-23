@@ -7,9 +7,9 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"runtime"
 	"strings"
 	"sync"
-	"syscall"
 	"time"
 
 	"github.com/rhl/businessos-backend/internal/founderos/connectors"
@@ -56,7 +56,7 @@ func binExists(candidates ...string) bool {
 		if c == "" {
 			continue
 		}
-		if fi, err := os.Stat(c); err == nil && !fi.IsDir() && syscall.Access(c, 0x1) == nil {
+		if fi, err := os.Stat(c); err == nil && fi.Mode().IsRegular() && (runtime.GOOS == "windows" || fi.Mode().Perm()&0111 != 0) {
 			return true
 		}
 	}

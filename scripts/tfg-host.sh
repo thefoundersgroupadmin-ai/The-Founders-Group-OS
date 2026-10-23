@@ -150,6 +150,7 @@ if [ -z "${TFG_SKIP_BUILD:-}" ]; then
   mkdir -p "$FHOME/bin/laptop"
   for arch in arm64 amd64; do
     (cd "$REPO/desktop/backend-go" && CGO_ENABLED=0 GOOS=darwin GOARCH=$arch go build -trimpath -o "$FHOME/bin/laptop/tfg-usage-darwin-$arch" ./cmd/founderos-collector)
+    (cd "$REPO/desktop/backend-go" && CGO_ENABLED=0 GOOS=windows GOARCH=$arch go build -trimpath -o "$FHOME/bin/laptop/tfg-usage-windows-$arch.exe" ./cmd/founderos-collector)
   done
   say "built the laptop usage reporter"
 fi

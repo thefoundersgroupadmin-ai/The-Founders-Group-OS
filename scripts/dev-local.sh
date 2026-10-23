@@ -256,7 +256,7 @@ build_backend_if_stale() {
     # The server embeds SQL migrations with go:embed. Rebuild when either Go
     # source, dependency metadata, or a migration changes. Otherwise a restart
     # can execute stale code or SQL.
-    if [ ! -x "$BACKEND_BIN" ] || [ -n "$(find "$src" -type f \( -name '*.go' -o -name '*.sql' -o -name 'go.mod' -o -name 'go.sum' \) -newer "$BACKEND_BIN" -print -quit 2>/dev/null)" ]; then
+    if [ ! -x "$BACKEND_BIN" ] || [ -n "$(find "$src" -type f \( -name '*.go' -o -name '*.sql' -o -name '*.ps1' -o -name 'go.mod' -o -name 'go.sum' \) -newer "$BACKEND_BIN" -print -quit 2>/dev/null)" ]; then
         info "Building backend (Go) → $BACKEND_BIN"
         ( cd "$src" && go build -o "$BACKEND_BIN" ./cmd/server )
         BACKEND_REBUILT=1

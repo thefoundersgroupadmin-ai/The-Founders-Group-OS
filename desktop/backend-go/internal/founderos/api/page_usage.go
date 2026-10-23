@@ -91,6 +91,9 @@ func usageBoardOf(ctx context.Context, d *Deps, now time.Time, owner string) usa
 	errs := map[string]string{}
 	var seats []usage.Seat
 	var lanes []usage.Ollama
+	if personal := people.ClaudeUsage(ctx, now); personal != nil {
+		seats = append(seats, usage.Seat{SeatUsage: *personal})
+	}
 
 	if d.Devices == nil {
 		errs["push"] = "no device receiver"

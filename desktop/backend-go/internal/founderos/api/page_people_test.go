@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -179,5 +180,45 @@ func TestLaptopPayloadKeepsUsageOnly(t *testing.T) {
 	out := LaptopPayload(people.Laptop{Email: "ilya.b@example.com"}, in)
 	if out.Device != "laptop-ilya-b" || out.Obsidian != nil || out.WhatsApp != nil || len(out.Usage) != 2 || out.Label != "ilya.b's laptop" {
 		t.Fatalf("%+v", out)
+	}
+}
+
+func TestWindowsLaptopInstallAndAuthenticatedDownload(t *testing.T) {
+	peopleSetup(t)
+	binDir := t.TempDir()
+	t.Setenv("FOUNDEROS_LAPTOP_BIN_DIR", binDir)
+	r := asUser(t, &Deps{}, karim)
+	w := do(t, r, http.MethodPost, "/api/founderos/pages/ai-accounts/laptop", `{"platform":"windows"}`, "Origin", "https://os.example.net")
+	var line struct{ Command, Platform string }
+	_ = json.Unmarshal(w.Body.Bytes(), &line)
+	if w.Code != 200 || line.Platform != "windows" || !strings.Contains(line.Command, "install.ps1") || !strings.Contains(line.Command, "-LaptopToken 'tfgl_") {
+		t.Fatalf("Windows install line: %d %s", w.Code, w.Body)
+	}
+	if w := do(t, r, http.MethodPost, "/api/founderos/pages/ai-accounts/laptop", `{"platform":"unknown"}`); w.Code != 400 {
+		t.Fatalf("unknown platform: %d", w.Code)
+	}
+	token, err := people.IssueLaptopToken(people.Person{ID: karim.ID, Email: strings.ToLower(karim.Email)}, time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, arch := range []string{"windows-amd64", "windows-arm64"} {
+		if err := os.WriteFile(filepath.Join(binDir, "tfg-usage-"+arch+".exe"), []byte("windows-reporter"), 0600); err != nil {
+			t.Fatal(err)
+		}
+		path := "/api/founderos/laptop/collector/" + arch
+		if w := do(t, r, http.MethodGet, path, ""); w.Code != 401 {
+			t.Fatalf("unauthenticated download: %d", w.Code)
+		}
+		w := do(t, r, http.MethodGet, path, "", "Authorization", "Bearer "+token)
+		if w.Code != 200 || w.Body.String() != "windows-reporter" || !strings.Contains(w.Header().Get("Content-Disposition"), ".exe") {
+			t.Fatalf("Windows download: %d %s", w.Code, w.Body)
+		}
+	}
+	if w := do(t, r, http.MethodGet, "/api/founderos/laptop/collector/windows-unknown", "", "Authorization", "Bearer "+token); w.Code != 404 {
+		t.Fatalf("unknown architecture: %d", w.Code)
+	}
+	w = do(t, r, http.MethodGet, "/api/founderos/laptop/install.ps1", "")
+	if w.Code != 200 || strings.Contains(w.Body.String(), "tfgl_") || !strings.Contains(w.Body.String(), "Register-ScheduledTask") || !strings.Contains(w.Body.String(), "ConvertFrom-SecureString") {
+		t.Fatalf("public Windows installer: %d", w.Code)
 	}
 }

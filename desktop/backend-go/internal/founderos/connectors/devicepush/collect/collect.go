@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"path/filepath"
 	"regexp"
+	"runtime"
 	"sort"
 	"strings"
 	"sync"
@@ -91,6 +92,12 @@ func DefaultConfig(res connectors.Resolver, home, hostname string) Config {
 	}
 	host := shortHost(hostname)
 	slug := DeviceSlug(hostname)
+	claudeDir := get("CLAUDE_CONFIG_DIR", filepath.Join(home, ".claude"))
+	codexDir := get("CODEX_HOME", filepath.Join(home, ".codex"))
+	nativeClaudeToken := TokenSource(KeychainClaudeToken)
+	if runtime.GOOS == "windows" {
+		nativeClaudeToken = claudeFileToken(filepath.Join(claudeDir, ".credentials.json"))
+	}
 	c := Config{
 		Device:            get("FOUNDEROS_COLLECTOR_DEVICE", slug),
 		Label:             get("FOUNDEROS_COLLECTOR_LABEL", host),
@@ -99,15 +106,15 @@ func DefaultConfig(res connectors.Resolver, home, hostname string) Config {
 		ObsidianVault:     get("OBSIDIAN_VAULT", filepath.Join(home, "Documents", "Obsidian Vault")),
 		Home:              home,
 		FullDiskAccess:    func() bool { return HasFullDiskAccess(home) },
-		ClaudeProjectsDir: get("CLAUDE_PROJECTS_DIR", filepath.Join(home, ".claude", "projects")),
+		ClaudeProjectsDir: get("CLAUDE_PROJECTS_DIR", filepath.Join(claudeDir, "projects")),
 		Claude: SeatInfo{
 			ID:         get("FOUNDEROS_OS_SEAT_ID", "claude-"+slug),
 			Label:      get("FOUNDEROS_OS_SEAT_LABEL", "Claude · "+host),
 			ConfigJSON: get("CLAUDE_CONFIG_JSON", filepath.Join(home, ".claude.json")),
 		},
-		ClaudeToken:    ClaudeTokenSource(res, KeychainClaudeToken),
+		ClaudeToken:    ClaudeTokenSource(res, nativeClaudeToken),
 		ClaudeUsageURL: ClaudeUsageURL,
-		CodexDir:       get("CODEX_SESSIONS_DIR", filepath.Join(home, ".codex", "sessions")),
+		CodexDir:       get("CODEX_SESSIONS_DIR", filepath.Join(codexDir, "sessions")),
 		CodexLabel:     "Codex · " + host,
 		OllamaBaseURL:  get("OLLAMA_BASE_URL", "http://localhost:11434"),
 		OllamaLogDir:   get("OLLAMA_LOG_DIR", filepath.Join(home, ".ollama", "logs")),
@@ -122,7 +129,7 @@ func DefaultConfig(res connectors.Resolver, home, hostname string) Config {
 		WisprLimit: 40,
 		VaultNotes: true,
 	}
-	if res.Resolve("CODEX_SESSIONS_DIR") == "" {
+	if res.Resolve("CODEX_SESSIONS_DIR") == "" && res.Resolve("CODEX_HOME") == "" {
 		c.CodexBoardRoot = get("PAPERCLIP_HOME", filepath.Join(home, ".paperclip"))
 	}
 	return c
@@ -243,7 +250,10 @@ func (c *Collector) Collect(ctx context.Context, now time.Time) devicepush.Paylo
 		go func() { defer wg.Done(); f() }()
 	}
 
-	fda := cfg.FullDiskAccess == nil || cfg.FullDiskAccess()
+	fda := true
+	if !cfg.UsageOnly && cfg.FullDiskAccess != nil {
+		fda = cfg.FullDiskAccess()
+	}
 	if !cfg.UsageOnly {
 		goSource(func() {
 			if !fda { // WhatsApp lives in another app's group container

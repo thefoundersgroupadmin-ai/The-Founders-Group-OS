@@ -19,6 +19,7 @@
 	let showKey = $state(false);
 	let line = $state<LaptopLine | null>(null);
 	let copied = $state(false);
+	let platform = $state<'darwin' | 'windows'>('darwin');
 
 	async function load() {
 		try {
@@ -68,7 +69,7 @@
 		});
 	const makeLine = () =>
 		act(async () => {
-			line = await founderosFetch<LaptopLine>('/pages/ai-accounts/laptop', { method: 'POST', json: {} });
+			line = await founderosFetch<LaptopLine>('/pages/ai-accounts/laptop', { method: 'POST', json: { platform } });
 			copied = false;
 		});
 	async function copy() {
@@ -82,6 +83,7 @@
 	}
 
 	onMount(() => {
+		if (/Windows/i.test(navigator.userAgent)) platform = 'windows';
 		void load();
 		// a ChatGPT sign-in finishes in another tab: keep reading while one waits
 		const t = setInterval(() => {
@@ -168,13 +170,21 @@
 				</div>
 				<p class="bn-dim font-mono text-[11px]">{laptopLine(a.laptop)}</p>
 				<p class="bn-muted text-[12px]">Shows the Claude and Codex work you do on your own laptop on this page. It reads only usage numbers: no chats, files or notes.</p>
+				<label class="flex items-center gap-2">
+					Laptop operating system
+					<select aria-label="Laptop operating system" class="pc-input rounded-[6px] px-2 py-1" bind:value={platform} onchange={() => { line = null; copied = false; }}>
+						<option value="darwin">macOS</option>
+						<option value="windows">Windows</option>
+					</select>
+				</label>
 				{#if line}
-					<p class="text-[12px]">On your Mac, open <b>Terminal</b>, paste this line and press Enter:</p>
+					<p data-part="install-instructions" class="text-[12px]">On your {platform === 'windows' ? 'Windows PC' : 'Mac'}, open <b>{platform === 'windows' ? 'Windows PowerShell' : 'Terminal'}</b>, paste this line and press Enter:</p>
 					<div class="flex flex-wrap items-start gap-2">
 						<code data-part="laptop-line" class="bn-border min-w-0 flex-1 break-all rounded-[6px] border bg-[var(--bn-bg)] p-2 font-mono text-[11px]">{line.command}</code>
 						<Pressable tone="primary" onclick={copy}>{copied ? 'Copied' : 'Copy'}</Pressable>
 					</div>
 					<p class="bn-dim font-mono text-[10.5px]">The line is yours only. Don't share it; making a new one stops the old one.</p>
+					<p class="bn-muted text-[12px]">Refresh Usage after the installer finishes. Readings update every 10 minutes while your computer is on{platform === 'windows' ? ' and you are signed in' : ''}. Run Claude Code or Codex on this computer to record local token counts.</p>
 				{:else}
 					<div class="flex flex-wrap gap-2">
 						<Pressable tone="primary" disabled={busy} onclick={makeLine}>{a.laptop.issued ? 'Make a new install line' : 'Connect this laptop'}</Pressable>

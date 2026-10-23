@@ -20,6 +20,7 @@ package api
 import (
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -168,15 +169,34 @@ func peopleRegister(s *gin.RouterGroup, d *Deps) {
 		if !ok {
 			return
 		}
+		var body struct {
+			Platform string `json:"platform"`
+		}
+		if err := c.ShouldBindJSON(&body); err != nil && err != io.EOF {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid laptop install request"})
+			return
+		}
+		if body.Platform == "" {
+			body.Platform = "darwin"
+		}
+		if body.Platform != "darwin" && body.Platform != "windows" {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "choose macOS or Windows"})
+			return
+		}
 		token, err := people.IssueLaptopToken(p, time.Now())
 		if err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 			return
 		}
 		base := publicBase(c)
+		command := fmt.Sprintf("curl -fsSL %s/api/founderos/laptop/install.sh | TFG_OS_URL=%s TFG_LAPTOP_TOKEN=%s bash", base, base, token)
+		if body.Platform == "windows" {
+			command = fmt.Sprintf("& ([scriptblock]::Create((Invoke-WebRequest -UseBasicParsing %s).Content)) -OsUrl %s -LaptopToken %s", powershellQuote(base+"/api/founderos/laptop/install.ps1"), powershellQuote(base), powershellQuote(token))
+		}
 		c.JSON(http.StatusOK, gin.H{
-			"command": fmt.Sprintf("curl -fsSL %s/api/founderos/laptop/install.sh | TFG_OS_URL=%s TFG_LAPTOP_TOKEN=%s bash", base, base, token),
-			"device":  laptopDevice(p.Email),
+			"command":  command,
+			"platform": body.Platform,
+			"device":   laptopDevice(p.Email),
 		})
 	})
 	g.DELETE("/:what", func(c *gin.Context) {
@@ -252,22 +272,35 @@ func registerLaptop(b *gin.RouterGroup, d *Deps) {
 		c.Header("Cache-Control", "no-store")
 		c.Data(http.StatusOK, "text/x-shellscript; charset=utf-8", []byte(laptopInstaller))
 	})
+	b.GET("/laptop/install.ps1", func(c *gin.Context) {
+		c.Header("Cache-Control", "no-store")
+		c.Data(http.StatusOK, "text/plain; charset=utf-8", []byte(windowsLaptopInstaller))
+	})
 	b.GET("/laptop/collector/:arch", func(c *gin.Context) {
 		if _, ok := laptopToken(c); !ok {
 			return
 		}
 		arch := c.Param("arch")
-		if arch != "arm64" && arch != "amd64" {
+		binaries := map[string]string{
+			"arm64": "tfg-usage-darwin-arm64", "amd64": "tfg-usage-darwin-amd64",
+			"windows-amd64": "tfg-usage-windows-amd64.exe", "windows-arm64": "tfg-usage-windows-arm64.exe",
+		}
+		binary, ok := binaries[arch]
+		if !ok {
 			c.JSON(http.StatusNotFound, gin.H{"error": "no reporter for " + arch})
 			return
 		}
-		path := filepath.Join(LaptopBinDir(), "tfg-usage-darwin-"+arch)
+		path := filepath.Join(LaptopBinDir(), binary)
 		if _, err := os.Stat(path); err != nil {
 			c.JSON(http.StatusServiceUnavailable, gin.H{"error": "the reporter is not built on the OS host yet: run make tfg-host there"})
 			return
 		}
 		c.Header("Cache-Control", "no-store")
-		c.FileAttachment(path, "tfg-usage")
+		name := "tfg-usage"
+		if strings.HasSuffix(binary, ".exe") {
+			name += ".exe"
+		}
+		c.FileAttachment(path, name)
 	})
 	b.POST("/laptop/push", func(c *gin.Context) {
 		l, ok := laptopToken(c)

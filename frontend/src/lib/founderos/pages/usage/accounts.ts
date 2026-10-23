@@ -15,7 +15,7 @@ export type AiAccounts = {
 	laptop: { connected: boolean; issued: boolean; device: string; lastPushAt: string | null };
 };
 
-export type LaptopLine = { command: string; device: string };
+export type LaptopLine = { command: string; device: string; platform?: 'darwin' | 'windows' };
 
 /** The one-line status a provider row shows. */
 export function loginLine(a: { connected: boolean; via: string }): string {

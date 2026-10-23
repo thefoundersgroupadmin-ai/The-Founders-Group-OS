@@ -44,7 +44,7 @@ type Surface struct{ Href, Label string }
 var Surfaces = []Surface{
 	{"/os", "Home"}, {"/os/comms", "Comms"}, {"/os/funnel", "Funnel"}, {"/os/workflows", "Workflows"},
 	{"/os/social", "Social"}, {"/os/content", "Content"}, {"/os/brand-deals", "Brand Deals"},
-	{"/os/finances", "Finances"}, {"/os/trading", "Trading"}, {"/os/adpilot", "AdPilot"},
+	{"/os/finances", "Finances"}, {"/os/trading", "Trading"}, {"/os/adpilot", "AdPilot"}, {"/os/dialer", "Dialer"},
 	{"/os/agents", "Agents"}, {"/os/chats", "Chats"}, {"/os/tasks", "Tasks"}, {"/os/approvals", "Approvals"}, {"/os/outbox", "Outbox"}, {"/os/skills", "Skills"},
 	{"/os/org", "Org Chart"}, {"/os/blueprint", "Blueprint"}, {"/os/brain", "Brain"}, {"/os/doctor", "Doctor"},
 	{"/os/integrations", "Connections"}, {"/os/usage", "Usage"}, {"/os/roadmap", "Roadmap"},
@@ -80,7 +80,7 @@ var toolToConnector = map[string]string{
 var surfaceIcon = map[string]string{
 	"/": "home", "/comms": "message-square", "/funnel": "filter", "/workflows": "workflow", "/social": "share-2",
 	"/content": "clapperboard", "/brand-deals": "handshake", "/finances": "wallet", "/trading": "bar-chart-3",
-	"/clients": "users", "/adpilot": "crosshair", "/agents": "users", "/tasks": "list-checks", "/skills": "sparkles",
+	"/clients": "users", "/adpilot": "crosshair", "/dialer": "phone", "/agents": "users", "/tasks": "list-checks", "/skills": "sparkles",
 	"/org": "network", "/blueprint": "waypoints", "/brain": "brain", "/doctor": "wrench", "/integrations": "plug",
 	"/usage": "radar", "/analytics": "bar-chart-3", "/personas": "layers",
 	"/chats": "messages-square", "/roadmap": "map", "/reference": "book-open",

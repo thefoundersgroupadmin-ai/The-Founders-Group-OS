@@ -228,6 +228,8 @@ func Register(api *gin.RouterGroup, d *Deps, auth ...gin.HandlerFunc) {
 	b.POST("/device/push", devicePush(d))
 	// A teammate's laptop: its own token, usage only (page_laptop.go).
 	registerLaptop(b, d)
+	// Twilio and Apollo call back here; each request proves itself (dialer_hooks.go).
+	registerDialerHooks(b, d)
 
 	s := b.Group("")
 	s.Use(auth...)
@@ -282,6 +284,13 @@ var machineRoutes = map[string]bool{
 	"/api/v1/founderos/device/push": true, // RegisterRoutes also mounts under /api/v1
 	"/api/founderos/laptop/push":    true,
 	"/api/v1/founderos/laptop/push": true,
+	// Twilio and Apollo webhooks: signed, not a browser
+	"/api/founderos/hooks/twilio/voice":     true,
+	"/api/v1/founderos/hooks/twilio/voice":  true,
+	"/api/founderos/hooks/twilio/status":    true,
+	"/api/v1/founderos/hooks/twilio/status": true,
+	"/api/founderos/hooks/apollo":           true,
+	"/api/v1/founderos/hooks/apollo":        true,
 }
 
 // CSRFExempt reports whether a request path is a FounderOS machine route.

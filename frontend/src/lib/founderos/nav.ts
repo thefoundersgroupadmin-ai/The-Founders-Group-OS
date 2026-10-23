@@ -33,6 +33,7 @@ import {
 	MessagesSquare,
 	MessageSquare,
 	Network,
+	Phone,
 	Plug,
 	Send,
 	Share2,
@@ -67,7 +68,8 @@ export const NAV_OPERATE: NavItem[] = [
 	{ href: '/os/finances', label: 'Finances', icon: icon(Wallet) },
 	{ href: '/os/trading', label: 'Trading', icon: icon(CandlestickChart) },
 	// Last in Operate on purpose, outside the nine digit shortcuts.
-	{ href: '/os/adpilot', label: 'AdPilot', icon: icon(Crosshair) }
+	{ href: '/os/adpilot', label: 'AdPilot', icon: icon(Crosshair) },
+	{ href: '/os/dialer', label: 'Dialer', icon: icon(Phone) }
 ];
 
 export const NAV_AGENTS: NavItem[] = [

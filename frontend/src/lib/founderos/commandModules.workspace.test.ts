@@ -5,7 +5,7 @@ const personal = { enabled_builtin_modules: ['dashboard', 'founderos-os', 'found
 
 describe('FounderOS modules follow the workspace', () => {
 	it('a workspace with no module list gets every FounderOS page', () => {
-		expect(founderosHrefsFor({}).size).toBe(26);
+		expect(founderosHrefsFor({}).size).toBe(27);
 	});
 
 	it('a workspace with a list gets only its the operator pages', () => {

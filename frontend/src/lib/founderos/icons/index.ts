@@ -103,6 +103,8 @@ export { default as Monitor } from './Monitor.svelte';
 export { default as Music2 } from './Music2.svelte';
 export { default as Network } from './Network.svelte';
 export { default as Palette } from './Palette.svelte';
+export { default as Phone } from './Phone.svelte';
+export { default as PhoneOff } from './PhoneOff.svelte';
 export { default as PanelLeft } from './PanelLeft.svelte';
 export { default as PanelRightClose } from './PanelRightClose.svelte';
 export { default as PanelRightOpen } from './PanelRightOpen.svelte';

@@ -167,6 +167,16 @@ func splitDelegation(reply string) (string, *delegation) {
 // system replaces Claude Code's own system prompt, so the operator's personal
 // CLAUDE.md and memory on this Mac never steer the Conductor into tool calls.
 var askClaude = func(ctx context.Context, system, prompt string) (string, error) {
+	model := strings.TrimSpace(os.Getenv("FOUNDEROS_CONDUCTOR_MODEL"))
+	if model == "" {
+		model = "sonnet"
+	}
+	return runClaude(ctx, system, prompt, model, 90*time.Second)
+}
+
+// runClaude is one text-only Claude call (no tools, the asker's login) with
+// its own system prompt.
+func runClaude(ctx context.Context, system, prompt, model string, timeout time.Duration) (string, error) {
 	bin, err := exec.LookPath("claude")
 	if err != nil {
 		for _, p := range []string{"/opt/homebrew/bin/claude", filepath.Join(os.Getenv("HOME"), ".local/bin/claude")} {
@@ -179,12 +189,8 @@ var askClaude = func(ctx context.Context, system, prompt string) (string, error)
 			return "", errors.New("the Claude command is not installed on the OS Mac")
 		}
 	}
-	ctx, cancel := context.WithTimeout(ctx, 90*time.Second)
+	ctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
-	model := strings.TrimSpace(os.Getenv("FOUNDEROS_CONDUCTOR_MODEL"))
-	if model == "" {
-		model = "sonnet"
-	}
 	cmd, cleanup, err := shared.ClaudeCommand(ctx, bin, prompt, "--model", model, "--system-prompt", system, "--disable-slash-commands")
 	if err != nil {
 		return "", err

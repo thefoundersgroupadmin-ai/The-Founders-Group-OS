@@ -59,6 +59,8 @@ var Catalog = []Integration{
 
 	// CRM & Sales
 	{Slug: "hubspot", Name: "HubSpot", Tagline: "Contacts & deals", Category: "CRM & Sales", Popular: true},
+	{Slug: "twilio", Name: "Twilio", Tagline: "Calls from the Dialer (Account SID + Auth Token)", Category: "CRM & Sales", Popular: true, EnvKeys: []string{"TWILIO_ACCOUNT_SID", "TWILIO_AUTH_TOKEN"}},
+	{Slug: "apollo", Name: "Apollo", Tagline: "Prospects' direct dials and mobiles for the Dialer", Category: "CRM & Sales", Popular: true, EnvKeys: []string{"APOLLO_API_KEY"}},
 	{Slug: "salesforce", Name: "Salesforce", Tagline: "Accounts & pipeline", Category: "CRM & Sales"},
 	{Slug: "zendesk", Name: "Zendesk", Tagline: "Tickets & support", Category: "CRM & Sales"},
 	{Slug: "intercom", Name: "Intercom", Tagline: "Chat & lifecycle", Category: "CRM & Sales"},

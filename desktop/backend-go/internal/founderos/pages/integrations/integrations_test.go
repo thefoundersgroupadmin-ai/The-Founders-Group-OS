@@ -104,11 +104,11 @@ func TestOptimalEngineReplacesGBrain(t *testing.T) {
 
 // FounderOS v1 lib/integrations-catalog.ts (2026-09-30): 70 tools in this
 // order, 10 categories, with the Optimal Engine where G-Brain sits, plus
-// TFG's Cloudflare (the team tunnel).
+// TFG's Cloudflare (the team tunnel) and the Dialer's Twilio and Apollo.
 var prodSlugs = []string{
 	"slack", "gmail", "whatsapp", "discord", "telegram", "zoom", "manychat",
 	"airtable", "googlesheets", "googledocs", "clickup", "trello", "coda", "wispr",
-	"hubspot", "salesforce", "zendesk", "intercom",
+	"hubspot", "twilio", "apollo", "salesforce", "zendesk", "intercom",
 	"github", "linear", "jira", "vercel", "sentry", "gitlab", "cloudflare",
 	"googlecalendar", "calendly", "caldotcom", "googlemeet",
 	"stripe", "stripe-vantage", "quickbooks", "xero", "paypal", "wise", "plaid", "robinhood", "paykit", "phantom",

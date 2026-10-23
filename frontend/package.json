@@ -64,6 +64,7 @@
 		"@optimal-engine/client": "link:../optimal-engine/sdks/typescript",
 		"@threlte/core": "^8.3.1",
 		"@threlte/extras": "^9.7.1",
+		"@twilio/voice-sdk": "2.18.5",
 		"@types/d3-force": "^3.0.10",
 		"@types/three": "^0.182.0",
 		"@xterm/addon-clipboard": "^0.2.0",

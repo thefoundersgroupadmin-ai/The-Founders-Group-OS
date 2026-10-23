@@ -6,6 +6,7 @@
  */
 import type { Component } from 'svelte';
 import {
+	Phone,
 	Activity,
 	AppWindow,
 	BarChart3,
@@ -97,6 +98,7 @@ const ICON_MAP: Record<string, Icon> = {
 	'share-2': c(Share2),
 	clapperboard: c(Clapperboard),
 	crosshair: c(Crosshair),
+	phone: c(Phone),
 	wallet: c(Wallet),
 	users: c(Users),
 	'list-checks': c(ListChecks),

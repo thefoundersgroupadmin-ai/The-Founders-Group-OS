@@ -75,7 +75,7 @@ const MODULES: WorkspaceModuleDefinition[] = [
     ["workflows", "Workflows", "workflows"], ["social", "Social", "social"],
     ["content", "Content", "clapperboard"], ["brand-deals", "Brand Deals", "handshake"],
     ["finances", "Finances", "finance"], ["trading", "Trading", "trading"],
-    ["adpilot", "AdPilot", "crosshair"],
+    ["adpilot", "AdPilot", "crosshair"], ["dialer", "Dialer", "communication"],
     ["agents", "Agents", "agents"], ["chats", "Chats", "communication"],
     ["tasks", "Tasks", "tasks"], ["approvals", "Approvals", "tasks"],
     ["outbox", "Outbox", "communication"], ["skills", "Skills", "intelligence"],

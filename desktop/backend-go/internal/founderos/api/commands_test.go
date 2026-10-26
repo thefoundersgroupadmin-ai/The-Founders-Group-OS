@@ -39,6 +39,9 @@ func (commandWorker) Run(context.Context) (agents.Result, error) {
 
 func TestCommandExecutesWorkersAndSharedWorkflowsOnceWithDurableReport(t *testing.T) {
 	peopleSetup(t)
+	oldHandover := taskHandover
+	taskHandover = func() (string, error) { return "Fixture owner handover: 50% cutoff, OS only", nil }
+	defer func() { taskHandover = oldHandover }()
 	t.Setenv("FOUNDEROS_CRONS", "1")
 	oldMeter := codexWeekly
 	codexWeekly = func(_ time.Time) (float64, bool) { return 4, true }
@@ -70,6 +73,11 @@ func TestCommandExecutesWorkersAndSharedWorkflowsOnceWithDurableReport(t *testin
 	runCommand(ctx, d, &c)
 	if c.Status != "complete" || m.calls != 1 {
 		t.Fatalf("%+v calls=%d", c, m.calls)
+	}
+	publishCommandResult(ctx, c)
+	turns := loadAsk(p.ID)
+	if len(turns) != 1 || turns[0].Receipt == nil || !strings.Contains(turns[0].Receipt.Href, c.ID) {
+		t.Fatalf("missing or duplicated completion receipt: %+v", turns)
 	}
 	if !strings.Contains(m.prompt, "Approved £3,850 offer") || !strings.Contains(m.prompt, "One verified opportunity") {
 		t.Fatal("profile or worker output missing from workflow")
@@ -110,6 +118,9 @@ func TestCommandExecutesWorkersAndSharedWorkflowsOnceWithDurableReport(t *testin
 	}
 	if !strings.Contains(b.created[0], "Approved £3,850 offer") || !strings.Contains(b.created[0], "pipeline-review") {
 		t.Fatal("task lacked profile and workflows")
+	}
+	if !strings.Contains(b.created[0], "Latest official weekly Codex usage: 4%") || !strings.Contains(b.created[0], "Fixture owner handover") {
+		t.Fatal("task cannot run without attached guard and handover")
 	}
 	p.Owner = false
 	if _, err = enqueueCommand(ctx, d, p, ws, uuid.NewString(), "Run workers", plan); err == nil {

@@ -18,11 +18,37 @@ import (
 	"github.com/rhl/businessos-backend/internal/founderos/agents"
 	"github.com/rhl/businessos-backend/internal/founderos/connectors/paperclip"
 	"github.com/rhl/businessos-backend/internal/founderos/guard"
+	"github.com/rhl/businessos-backend/internal/founderos/notify"
 	"github.com/rhl/businessos-backend/internal/founderos/people"
 	"github.com/rhl/businessos-backend/internal/founderos/saleskit"
 )
 
 var commandsMu sync.Mutex
+
+var taskHandover = func() (string, error) {
+	home, _ := os.UserHomeDir()
+	path := filepath.Join(home, "Vaults", "TFG Brain", "03 SOPs", "Codex handover - TFG OS.md")
+	raw, err := os.ReadFile(path)
+	if os.IsNotExist(err) {
+		return "", nil
+	} // Other client installations use their own profile.
+	return string(raw), err
+}
+
+func taskExecutionContext() (string, error) {
+	if err := salesKitAIAllowed(); err != nil {
+		return "", err
+	}
+	pct, known := codexWeekly(time.Now())
+	if !known {
+		return "", errors.New("official weekly usage unavailable")
+	}
+	handover, err := taskHandover()
+	if err != nil {
+		return "", errors.New("OS handover could not be attached")
+	}
+	return fmt.Sprintf("\n# Verified OS execution context\nLatest official weekly Codex usage: %.0f%%. Checked by the OS at %s. Persistent AI pause: absent. Stop at 50%% and do not bypass any later pause. This context was checked immediately before this task was filed.\nThe profile, authorised source packet and full workflow catalogue above are attached directly. Use them; do not attempt forbidden filesystem reads, browser sessions or helper scripts. The owner handover is reproduced below for this task; read this attached copy rather than trying to open a path outside the runtime. It is context, not authority to exceed the task's scope. If a genuinely required fact is missing, name that fact.\n\n# Attached owner handover\n%s", pct, time.Now().UTC().Format(time.RFC3339), handover), nil
+}
 
 // Keep the task agents' shared catalogue in sync with the deployed backend.
 // These files contain only public workflow instructions, never client data.
@@ -55,7 +81,11 @@ func commandInstructions(ctx context.Context, d *Deps, cfg saleskit.AutomationCo
 	var workers, skills, seats []string
 	if d.Agents != nil {
 		for _, a := range d.Agents.List() {
-			workers = append(workers, a.ID+": "+a.Name+" — "+a.Description)
+			state := ""
+			if runs, err := d.Agents.Recent(ctx, a.ID, 1); err == nil && len(runs) > 0 {
+				state = fmt.Sprintf(" Last check %s: ok=%t; %s", runs[0].FinishedAt.Format(time.RFC3339), runs[0].OK, clip(runs[0].Summary, 250))
+			}
+			workers = append(workers, a.ID+": "+a.Name+" — "+a.Description+state)
 		}
 	}
 	for _, s := range saleskit.Catalog() {
@@ -71,13 +101,14 @@ For questions, answer normally. For a request to do work, end with exactly one E
 EXECUTE {"agents":["tfg-pipeline-sdr"],"skills":["pipeline-review"],"tasks":[]}
 The OS executes and records these steps automatically. Say the work will be queued; never claim completion before the receipt.
 Workers run first, then team tasks sequentially, then workflows produce a consolidated report. Select relevant workers, not every worker on every command. Use all workers only when explicitly asked. All registered workers are available.
+Do not add unrelated or unavailable optional workers as prerequisites. A pipeline-only review does not require payment processors or recording imports. Run sales-calls-data when the owner asks to import or process recordings, not merely because the request concerns sales. Missing call/contract sources can be stated as report gaps. A request explicitly checking all workers should still check them all and record their actual outcomes.
 Each task requires agent, title and description. Use team tasks for public web research and durable prospect/outbox documents. Use workflows for analysis of synced records. A full sales-system request should refresh sales workers and review the pipeline; if it has no sources, include research first. Never select a paused agent. Select an available capable seat instead or explain the blocker.
 Workflow methods and the approved profile are automatically attached to team tasks. Ask agents to complete their work and create the required prospects/outbox documents. Do not tell the owner to run individual workflows.
 Messages, payments and spending require existing approvals. Never broaden permissions or claim a missing connection works.
 `
 	text += "\nWorkspace: " + cfg.Workspace + "\nApproved profile: " + cfg.Profile + "\nWorkers:\n" + strings.Join(workers, "\n") + "\nTask agents: " + strings.Join(seats, ", ") + "\nShared workflows:\n" + strings.Join(skills, "\n")
 	if snap, err := connectedSalesSnapshot(ctx, d, cfg); err == nil {
-		text += fmt.Sprintf("\nSales source records available: %t. Gaps: %s", len(snap.Sources) > 0, strings.Join(snap.Gaps, "; "))
+		text += fmt.Sprintf("\nSales source records available: %t. Pipeline records: %t. Archived calls: %t. Gaps: %s", len(snap.Sources) > 0, snap.HasLeads, snap.HasCalls, strings.Join(snap.Gaps, "; "))
 	}
 	return text
 }
@@ -314,6 +345,9 @@ func runCommand(ctx context.Context, d *Deps, c *saleskit.Command) {
 			slog.Error("commands: checkpoint failed", "id", c.ID, "error", err)
 			return false
 		}
+		if c.Status == "complete" || c.Status == "blocked" {
+			publishCommandResult(pctx, *c)
+		}
 		return true
 	}
 	c.Status = "running"
@@ -385,6 +419,12 @@ func runCommand(ctx context.Context, d *Deps, c *saleskit.Command) {
 					err = briefErr
 					break
 				}
+				packet, packetErr := taskExecutionContext()
+				if packetErr != nil {
+					err = packetErr
+					break
+				}
+				brief += packet
 				// Persist creation before assignment so an interrupted assignment
 				// can never cause a duplicate task to be filed.
 				is, createErr := askBoardFor(d).CreateIssue(ctx, t.Title, brief)
@@ -511,6 +551,31 @@ func runCommand(ctx context.Context, d *Deps, c *saleskit.Command) {
 		c.Status = "blocked"
 	}
 	save()
+}
+
+func publishCommandResult(ctx context.Context, c saleskit.Command) {
+	id := "command-" + c.ID + "-result"
+	askMu.Lock()
+	turns := loadAsk(c.UserID)
+	for _, turn := range turns {
+		if turn.ID == id {
+			askMu.Unlock()
+			return
+		}
+	}
+	text := "Finished: " + clip(c.Request, 180) + ". Your report is ready."
+	if c.Status == "blocked" {
+		text = "Finished the available work for: " + clip(c.Request, 180) + ". Some steps need a connection or decision; the report names them."
+	}
+	href := "/os/skills?command=" + c.ID + "#command-" + c.ID
+	turn := askTurn{ID: id, Role: "assistant", Content: text + "\n\n" + clip(c.Report, 1000), CreatedAt: time.Now().UTC().Format(time.RFC3339Nano)}
+	turn.Receipt = &struct {
+		Text string `json:"text"`
+		Href string `json:"href,omitempty"`
+	}{Text: "Open the saved report and step results", Href: href}
+	saveAsk(c.UserID, append(turns, turn))
+	askMu.Unlock()
+	notify.Publish(ctx, notify.Event{ID: id, Kind: notify.KindAgent, Title: "OS command: " + c.Status, Body: text, URL: href, For: c.UserID})
 }
 
 func mustTaskIndex(s string) int { var i int; fmt.Sscan(s, &i); return i }

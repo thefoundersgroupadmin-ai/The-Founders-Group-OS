@@ -134,6 +134,16 @@ func askFacts(ctx context.Context, d *Deps, now time.Time) string {
 		add(fmt.Sprintf("- Outreach campaign %s (owner pre-approved, up to 50 first emails, 20 a day in US business hours): %d sent, %d drafted and waiting, %s", ref, sent, waiting, state))
 	}()
 	wg.Wait()
+	if p, ok := people.From(ctx); ok && d.Pool != nil {
+		if commands, err := (saleskit.CommandStore{Pool: d.Pool}).List(ctx, p.ID, p.Owner); err == nil {
+			for i, c := range commands {
+				if i >= 4 {
+					break
+				}
+				lines = append(lines, "- OS command: "+c.Status+"; "+clip(c.Request, 150)+"; result: "+clip(c.Report, 900))
+			}
+		}
+	}
 	if why := aiPaused(); why != "" {
 		lines = append(lines, "- AI work is PAUSED: "+why)
 	}

@@ -41,9 +41,9 @@ func Agents(d roster.Deps) []agents.Agent {
 			Deals: NewPgDealStore(d.Pool, d.Workspaces[BrandDealWorkspace]),
 		},
 		conductor,
-		&SalesAgent{Leads: typeform.New(d.Res), Calls: fathom, Processors: pay.Processors},
-		&LaunchpadCohort{Trakyo: trakyo.New(d.Res)},
-		vantageSales(),
+		&SalesAgent{Pipeline: osPipeline{Pool: d.Pool, Workspaces: []string{d.Workspaces["vantage"], d.Workspaces["launchpad-cohort"]}}, Leads: typeform.New(d.Res), Calls: fathom, Processors: pay.Processors},
+		&LaunchpadCohort{Pipeline: osPipeline{Pool: d.Pool, Workspaces: []string{d.Workspaces["launchpad-cohort"]}}, Trakyo: trakyo.New(d.Res)},
+		&osPipelineLane{meta: metaVantageSales, Source: osPipeline{Pool: d.Pool, Workspaces: []string{d.Workspaces["vantage"]}}},
 		paykitSales(lookup),
 		vantagePaykit(lookup),
 		&StripeSales{Stripe: pay.Stripe},
@@ -111,6 +111,7 @@ func (c *Conductor) Run(ctx context.Context) (agents.Result, error) {
 // SalesAgent aggregates the pipeline: Typeform leads in, Fathom calls held,
 // payment processors out (Attio was the pipeline read until 2026-09-23).
 type SalesAgent struct {
+	Pipeline   connectors.Connector
 	Leads      connectors.Connector
 	Calls      connectors.Connector
 	Processors func() []payments.ProcessorInfo
@@ -128,19 +129,29 @@ func (a *SalesAgent) Run(ctx context.Context) (agents.Result, error) {
 	if procs.OK {
 		on = "LIVE"
 	}
-	return agents.Result{
+	result := agents.Result{
 		OK: leads.State == connectors.StateConnected || calls.State == connectors.StateConnected || procs.OK,
 		Summary: fmt.Sprintf("Sales pipeline · leads (Typeform) %s · calls (Fathom) %s · processors %s · PayKit/FlexPay lanes mapped",
 			live(leads), live(calls), on),
 		Data: map[string]any{"leads": leads, "calls": calls, "processors": procs},
-	}, nil
+	}
+	if a.Pipeline != nil {
+		pipeline := a.Pipeline.Status(ctx)
+		result.OK = result.OK || pipeline.State == connectors.StateConnected
+		result.Summary = "OS pipeline · " + pipeline.Detail + " · " + result.Summary
+		result.Data.(map[string]any)["osPipeline"] = pipeline
+	}
+	return result, nil
 }
 
 // ---- agency launchpads ------------------------------------------------------------
 
 // LaunchpadCohort runs on Trakyo attribution alone (the webinar funnel was
 // retired 2026-08-19).
-type LaunchpadCohort struct{ Trakyo connectors.Connector }
+type LaunchpadCohort struct {
+	Trakyo   connectors.Connector
+	Pipeline connectors.Connector
+}
 
 func (a *LaunchpadCohort) Meta() agents.Meta { return metaLaunchpadCohort }
 
@@ -150,6 +161,11 @@ func (a *LaunchpadCohort) Run(ctx context.Context) (agents.Result, error) {
 	summary := "Launchpad Cohort · Trakyo " + string(s.State)
 	if !ok {
 		summary += " — no live attribution source for this lane"
+	}
+	if a.Pipeline != nil {
+		pipeline := a.Pipeline.Status(ctx)
+		ok = ok || pipeline.State == connectors.StateConnected
+		summary += " · OS pipeline " + pipeline.Detail
 	}
 	return agents.Result{OK: ok, Summary: summary, Data: map[string]any{"trakyo": s}}, nil
 }

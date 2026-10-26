@@ -44,7 +44,7 @@ func salesAutomationTick(d *Deps) {
 	if err := salesKitAIAllowed(); err != nil {
 		return
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+	ctx, cancel := context.WithTimeout(context.Background(), 8*time.Minute)
 	defer cancel()
 	store := saleskit.AutomationStore{Pool: d.Pool}
 	// Only installation owners can configure these routines; each config retains
@@ -114,7 +114,7 @@ func salesAutomationTick(d *Deps) {
 		runErr := salesKitAIAllowed()
 		answer := ""
 		if runErr == nil {
-			runCtx, stop := context.WithTimeout(people.With(ctx, people.Person{ID: c.UserID, Email: c.UserEmail, Name: c.UserName, Owner: owner}), 95*time.Second)
+			runCtx, stop := context.WithTimeout(people.With(ctx, people.Person{ID: c.UserID, Email: c.UserEmail, Name: c.UserName, Owner: owner}), 185*time.Second)
 			answer, runErr = completeSalesAnalysis(runCtx, d, c, id, prompt)
 			stop()
 			if runErr == nil && strings.TrimSpace(answer) == "" {
@@ -123,6 +123,7 @@ func salesAutomationTick(d *Deps) {
 		}
 		safeErr := runErr
 		if runErr != nil {
+			slog.Warn("sales automation: analysis failed", "workspace", c.Workspace, "error", runErr)
 			safeErr = errors.New("Automatic sales analysis did not complete. Check your AI account and usage pause. The same source packet is not automatically retried.")
 		}
 		finishCtx, finishCancel := context.WithTimeout(context.Background(), 10*time.Second)

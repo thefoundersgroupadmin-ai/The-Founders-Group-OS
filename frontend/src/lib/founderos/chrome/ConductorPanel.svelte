@@ -105,7 +105,7 @@
 		try {
 			const body = await founderosFetch<{ turns?: AskTurn[] }>('/pages/conductor/ask');
 			threadError = null;
-			if (Array.isArray(body?.turns)) localTurns = body.turns.map(askToTurn);
+			if (Array.isArray(body?.turns) && !sending) localTurns = body.turns.map(askToTurn);
 		} catch (err) {
 			threadError = `Conversation unavailable: ${failureMessage(err)}`;
 		}
@@ -128,7 +128,10 @@
 		const id = setInterval(() => {
 			if (!document.hidden) void loadHealth();
 		}, 60_000);
-		return () => clearInterval(id);
+		const conversationId = setInterval(() => {
+			if (!document.hidden && !sending) void loadConversation();
+		}, 10_000);
+		return () => { clearInterval(id); clearInterval(conversationId); };
 	});
 
 	$effect(() => {

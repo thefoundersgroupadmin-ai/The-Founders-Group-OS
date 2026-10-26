@@ -483,7 +483,25 @@ func runCommand(ctx context.Context, d *Deps, c *saleskit.Command) {
 				}
 				found = true
 				if is.Status == "done" {
-					step.Output += " · complete"
+					step.Output = "Completed " + is.Identifier + " for " + t.Agent
+					if reader, ok := askBoardFor(d).(interface {
+						IssueDocuments(context.Context, string) ([]paperclip.Document, error)
+					}); ok {
+						docs, readErr := reader.IssueDocuments(ctx, step.TaskID)
+						if readErr != nil {
+							c.Status = "waiting"
+							step.Status = "waiting"
+							c.Report = step.Output + "; waiting to retrieve its saved documents"
+							save()
+							return
+						}
+						for j, doc := range docs {
+							if j >= 10 {
+								break
+							}
+							step.Output += "\n\n## " + doc.Title + " (" + doc.Key + ")\n" + clip(doc.Body, 8000)
+						}
+					}
 					break
 				}
 				if is.Status == "blocked" || is.Status == "cancelled" {

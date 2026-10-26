@@ -1,6 +1,7 @@
 <script lang="ts">
  import { onMount } from 'svelte';
  import { currentWorkspace } from '$lib/stores/workspaces';
+ import { page } from '$app/stores';
  import { founderosFetch } from '$lib/founderos/api';
  import { SlabCard, PILL } from '$lib/founderos/kit';
  import SkillMarkdown from './SkillMarkdown.svelte';
@@ -38,7 +39,7 @@
   <p class="bn-dim">Messages awaiting approval appear in <a href="/os/outbox" class="underline">Outbox</a>. Agent questions appear in <a href="/os/approvals" class="underline">Approvals</a>. Missing connections can be configured in <a href="/os/integrations" class="underline">Connections</a>.</p>
   {#if commands.length===0}<p class="bn-dim">Your commands and progress will appear here.</p>{/if}
   {#each commands as command (command.id)}
-   <details class="bn-border border p-3" open={command.status==='running'||command.status==='waiting'||command.status==='queued'}>
+   <details id={`command-${command.id}`} class="bn-border border p-3" open={$page?.url?.searchParams?.get('command')===command.id||command.status==='running'||command.status==='waiting'||command.status==='queued'}>
     <summary class="cursor-pointer">{command.status} · {command.request} · {new Date(command.createdAt).toLocaleString()}</summary>
     <ol class="my-3 space-y-2 pl-4 list-decimal">{#each command.steps as step}<li>{step.kind} · {step.id} · {step.status}{#if step.taskId} · <a href="/os/tasks" class="underline">Task</a>{/if}</li>{/each}</ol>
     {#if command.report}<SkillMarkdown src={command.report}/>{/if}

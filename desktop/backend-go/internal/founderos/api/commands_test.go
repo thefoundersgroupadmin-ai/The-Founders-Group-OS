@@ -22,6 +22,10 @@ type commandBoard struct {
 	done bool
 }
 
+func (b *commandBoard) IssueDocuments(context.Context, string) ([]paperclip.Document, error) {
+	return []paperclip.Document{{Key: "report", Title: "Research verification", Body: "Verified internal result"}}, nil
+}
+
 func (b *commandBoard) Issues(context.Context, int) ([]paperclip.Issue, error) {
 	status := "todo"
 	if b.done {
@@ -115,6 +119,9 @@ func TestCommandExecutesWorkersAndSharedWorkflowsOnceWithDurableReport(t *testin
 	runCommand(ctx, d, &team)
 	if team.Status != "complete" || m.calls != 2 || len(b.created) != 1 {
 		t.Fatalf("handoff: %+v calls=%d", team, m.calls)
+	}
+	if !strings.Contains(team.Report, "Verified internal result") {
+		t.Fatal("task receipt omitted the actual deliverable")
 	}
 	if !strings.Contains(b.created[0], "Approved £3,850 offer") || !strings.Contains(b.created[0], "pipeline-review") {
 		t.Fatal("task lacked profile and workflows")

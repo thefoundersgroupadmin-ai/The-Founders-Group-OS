@@ -87,7 +87,7 @@ def json_prospects(body):
             score = None
         out.append({"name": name, "url": str(e.get("website") or "").strip() or None,
                     "location": str(e.get("location") or ""), "evidence": str(e.get("evidence") or ""),
-                    "buyer": buyer, "score": score, "next": str(e.get("nextAction") or ""), "email": email})
+                    "buyer": buyer, "buyerRole": str(e.get("buyerRole") or "").strip() or None, "score": score, "next": str(e.get("nextAction") or ""), "email": email})
     return out, bad
 
 
@@ -143,6 +143,7 @@ def main():
 
     issues = paperclip(pc, f"/api/companies/{company}/issues")
     issues = issues.get("issues", issues) if isinstance(issues, dict) else issues
+    issues = sorted(issues, key=lambda i: (i.get("updatedAt") or i.get("createdAt") or "", i.get("id", "")))
     by_ident = {i.get("identifier"): i for i in issues}
 
     prospects = paperclip(pc, f"/api/issues/{by_ident['THE-3']['id']}/documents/prospects")
@@ -183,11 +184,15 @@ def main():
             known = {(a.get("workspace", WORKSPACE_SLUG), slug(a["name"])) for a in accounts}
             for a in found:
                 a["workspace"] = target
+                a["sourceRef"] = ident
                 if a["email"]:
-                    emails.setdefault((target, a["name"]), a["email"])
+                    emails[(target, a["name"])] = a["email"]
                 if (target, slug(a["name"])) not in known:
                     accounts.append(a)
                     known.add((target, slug(a["name"])))
+                else:
+                    existing = next(item for item in accounts if (item.get("workspace", WORKSPACE_SLUG), slug(item["name"])) == (target, slug(a["name"])))
+                    existing.update({key: value for key, value in a.items() if value not in (None, "")})
     for d in other_docs:
         for row in table_rows(doc_body(d)):
             text = " ".join(row)
@@ -222,11 +227,17 @@ def main():
         email = emails.get((target, a["name"]))
         stmts.append(
             "INSERT INTO founderos_funnel_contacts (id, workspace_id, name, venture, status, product, relationship, "
-            "likelihood, email, person, company, created_at) VALUES ("
+            "likelihood, email, person, company, website, location, buyer_role, research_evidence, next_action, research_source_ref, created_at) VALUES ("
             f"{sql(cid)}, {sql(ws)}, {sql(a['buyer'] or a['name'])}, {sql(target)}, 'first_touch', {sql(PRODUCT)}, 'cold', "
-            f"{sql(a['score'])}, {sql(email)}, {sql(a['buyer'])}, {sql(a['name'])}, now()) "
+            f"{sql(a['score'])}, {sql(email)}, {sql(a['buyer'])}, {sql(a['name'])}, {sql(a.get('url'))}, {sql(a.get('location'))}, {sql(a.get('buyerRole'))}, {sql(a.get('evidence'))}, {sql(a.get('next'))}, {sql(a.get('sourceRef', 'THE-3'))}, now()) "
             "ON CONFLICT (id) DO UPDATE SET likelihood = EXCLUDED.likelihood, person = EXCLUDED.person, "
-            "company = EXCLUDED.company, email = COALESCE(EXCLUDED.email, founderos_funnel_contacts.email);")
+            "company = EXCLUDED.company, email = COALESCE(EXCLUDED.email, founderos_funnel_contacts.email), "
+            "website = COALESCE(NULLIF(EXCLUDED.website,''),founderos_funnel_contacts.website), "
+            "location = COALESCE(NULLIF(EXCLUDED.location,''),founderos_funnel_contacts.location), "
+            "buyer_role = COALESCE(NULLIF(EXCLUDED.buyer_role,''),founderos_funnel_contacts.buyer_role), "
+            "research_evidence = COALESCE(NULLIF(EXCLUDED.research_evidence,''),founderos_funnel_contacts.research_evidence), "
+            "next_action = COALESCE(NULLIF(EXCLUDED.next_action,''),founderos_funnel_contacts.next_action), "
+            "research_source_ref = EXCLUDED.research_source_ref;")
         stmts.append(
             "INSERT INTO founderos_funnel_touches (id, workspace_id, contact_id, seq, stage, channel, label, source, at) VALUES ("
             f"{sql(cid + '-research')}, {sql(ws)}, {sql(cid)}, 1, 'first_touch', 'crm', "

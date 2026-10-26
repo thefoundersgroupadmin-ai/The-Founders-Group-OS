@@ -4,6 +4,7 @@ import { writable } from 'svelte/store';
 import CommandHistory from './CommandHistory.svelte';
 const api=vi.hoisted(()=>({request:vi.fn()}));
 vi.mock('$lib/founderos/api',()=>({founderosFetch:api.request}));
+vi.mock('$app/stores',()=>({page:writable({url:new URL('http://localhost/os/skills')})}));
 vi.mock('$lib/stores/workspaces',()=>({currentWorkspace:writable({id:'hq-id'})}));
 afterEach(()=>{cleanup();vi.resetAllMocks();});
 it('submits one command with the active workspace and shows its receipt',async()=>{

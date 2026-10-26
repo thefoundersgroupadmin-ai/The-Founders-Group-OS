@@ -4,7 +4,7 @@ Skills starts with a command box and durable command history, followed by Sales 
 
 ## One command
 
-Tell the Conductor an outcome, for example: “Review my sales pipeline, prioritise qualified US buyers and prepare the next outreach.” The active workspace travels with the command. The owner-only execution path validates worker IDs, workflow IDs and task-agent names against the actual registries. Commands persist before execution. Native workers run first, team tasks run sequentially, then shared workflows consolidate results. Progress, blockers and reports appear in Skills. Agent questions remain in Approvals; valid draft emails go to Outbox.
+Tell the Conductor an outcome, for example: “Review my sales pipeline, prioritise qualified US buyers and prepare the next outreach.” The active workspace travels with the command. The owner-only execution path validates worker IDs, workflow IDs and task-agent names against the actual registries. Commands persist before execution. Native workers run first, team tasks run sequentially, then shared workflows consolidate results. Progress, blockers and reports appear in Skills. Completed task documents are included in the report; the Conductor receives a completion turn and the owner notification feed receives a scoped event. Agent questions remain in Approvals; valid draft emails go to Outbox.
 
 Tasks carry the approved profile, source records and workflow methods. Task agents also receive a shared local workflow catalogue and use `scripts/tfg-agent-context.py` to read saved context without relying on an authenticated browser session. Prospect and Outbox document imports retain the command workspace. Pipeline/Outbox sync jobs run every minute; reply routing runs every five minutes. No caller needs to trigger individual workflows.
 
@@ -24,7 +24,7 @@ The backend polls every minute when FOUNDEROS_CRONS=1, without a browser. It rea
 
 The first run can combine several routines into one model call. Unchanged records and completed review windows are skipped. Reports, source IDs, routine names and errors persist in the OS database. Assignments and activity changes remain proposals. Structured outreach drafts are resolved against authorised, eligible contacts and stored as pending Outbox items. Existing outreach is suppressed; this path never sends.
 
-Migration 168 adds workspace-scoped configuration and run tables. Migration 169 adds explicit source bindings and durable command records. Reads require installation ownership, workspace ownership or active membership. Configuration is installation-owner-only. Background calls retain the authorising person's identity and stop when that person is no longer the installation owner.
+Migration 168 adds workspace-scoped configuration and run tables. Migration 169 adds explicit source bindings and durable command records. Migration 170 preserves sourced company websites, location, buyer roles, full research evidence and proposed next actions; unknown next-action and close dates remain null. Reads require installation ownership, workspace ownership or active membership. Configuration is installation-owner-only. Background calls retain the authorising person's identity and stop when that person is no longer the installation owner.
 
 ## Duplicate work and failures
 

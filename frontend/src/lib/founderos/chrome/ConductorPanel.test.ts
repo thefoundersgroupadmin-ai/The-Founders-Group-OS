@@ -315,7 +315,7 @@ describe('ConductorPanel: sending', () => {
 });
 
 describe('ConductorPanel: conversation and health', () => {
-	it('only the board health is polled (every minute), never the conversation', async () => {
+	it('polls health each minute and receives command completions every ten seconds', async () => {
 		vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval'] });
 		render(ConductorPanel, { pathname: '/os/trading' });
 		await openDock();
@@ -326,7 +326,7 @@ describe('ConductorPanel: conversation and health', () => {
 		expect(gets('/pages/conductor/chat')).toBe(health);
 		await vi.advanceTimersByTimeAsync(1_000);
 		expect(gets('/pages/conductor/chat')).toBe(health + 1);
-		expect(gets('/pages/conductor/ask')).toBe(convo);
+		expect(gets('/pages/conductor/ask')).toBe(convo + 6);
 	});
 
 	it('clear empties the conversation here and on the server', async () => {

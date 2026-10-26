@@ -1,0 +1,14 @@
+{
+  "workspace": "client-example",
+  "company": "Example Company",
+  "operator": "Sales lead",
+  "timezone": "Europe/London",
+  "offers": [{"name": "Inventory planning", "approved_claims": ["Consolidates stock forecasts"], "pricing": "Confirm with sales lead"}],
+  "ideal_customer": {"industries": ["Wholesale"], "size": "20–200 employees", "buying_triggers": ["New warehouse"], "disqualifiers": ["No stock operations"]},
+  "stage_exit_criteria": {"qualified": ["Need confirmed", "Decision process understood", "Next meeting agreed"]},
+  "voice": {"tone": "Clear and practical", "avoid": ["Unverified ROI claims"]},
+  "contact_rules": {"opt_outs": "Never contact", "follow_up_limit": "Agree during onboarding", "sending": "Human reviews and sends"},
+  "forecast_categories": {"commit": "Buyer has confirmed decision timing and remaining approvals"},
+  "sources": {"crm": "Client installation only", "calendar": "Client-owned account", "knowledge": "Configured workspace Optimal Engine"},
+  "approval_owner": "Sales lead"
+}

@@ -103,6 +103,7 @@ func NewDeps(pool *pgxpool.Pool) *Deps {
 			d.Scheduler.Start(context.Background())
 		}
 	}
+	startSalesAutomation(d)
 	return d
 }
 

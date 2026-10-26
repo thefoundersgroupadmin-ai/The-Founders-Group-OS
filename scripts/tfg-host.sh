@@ -62,7 +62,7 @@ xml() { sed -e 's/&/\&amp;/g' -e 's/</\&lt;/g' -e 's/>/\&gt;/g' <<<"$1"; }
 
 # plist NAME SCHEDULE ARG... (SCHEDULE: keepalive | login | nightly)
 plist() {
-  local name="$1" schedule="$2" args="" a env="" when workdir="$REPO" path="/opt/homebrew/opt/postgresql@17/bin:/opt/homebrew/opt/node/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin"
+  local name="$1" schedule="$2" args="" a env="" when workdir="$REPO" path="/opt/homebrew/opt/postgresql@17/bin:/opt/homebrew/opt/node/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin:/opt/homebrew/opt/node@22/bin"
   shift 2
   for a in "$@"; do args+="<string>$(xml "$a")</string>"; done
   case "$name" in
@@ -83,7 +83,7 @@ plist() {
   <key>Label</key><string>net.thefoundersgroup.$name</string>
   <key>ProgramArguments</key><array>$args</array>
   <key>WorkingDirectory</key><string>$(xml "$workdir")</string>
-  <key>EnvironmentVariables</key><dict><key>PATH</key><string>$(xml "$path")</string>$env</dict>
+  <key>EnvironmentVariables</key><dict><key>PATH</key><string>$(xml "$path")</string><key>LANG</key><string>en_US.UTF-8</string><key>LC_ALL</key><string>en_US.UTF-8</string>$env</dict>
   $when
   <key>StandardOutPath</key><string>$(xml "$FHOME/logs/$name.out.log")</string>
   <key>StandardErrorPath</key><string>$(xml "$FHOME/logs/$name.err.log")</string>

@@ -69,3 +69,7 @@ The client enters their own passwords and keys. TFG never needs to see them.
 - Friday: the Impact Reporter's summary goes in the client update, with its formula.
 - When `tfg` gets a fix: `git switch client/acme && git merge tfg`, run
   `make tfg-check BRAND=config/tfg/clients/acme.yaml`, then restart their stack.
+
+## Sales Kit package
+
+The Skills view includes Sales automation and a 37-skill instruction library with ZIP export. Install migration 168, configure each workspace once and enable automatic analysis. Four routines orchestrate 12 skills with saved reports; the other 25 remain on demand. Confirm the OS schedule switch and existing sales syncs are running, test client records and record acceptance in Deliverables. See [SALES-KIT.md](SALES-KIT.md) for boundaries. Sending, booking and CRM writes are not enabled by this package.

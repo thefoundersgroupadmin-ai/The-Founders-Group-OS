@@ -9,6 +9,8 @@
 	import { founderosFetch } from '$lib/founderos/api';
 	import { BigStat, Chip, DotMatrix, InsightCard, MeterStack, PILL, Slab, SlabCard, SlabTitle } from '$lib/founderos/kit';
 	import SkillsGrid from '$lib/founderos/pages/skills/SkillsGrid.svelte';
+	import SalesKit from '$lib/founderos/pages/skills/SalesKit.svelte';
+	import SalesAutomation from '$lib/founderos/pages/skills/SalesAutomation.svelte';
 	import type { SkillsBody } from '$lib/founderos/pages/skills/types';
 
 	// FounderOS v1 globals.css --send-activity / --ramp-1 / --ramp-4
@@ -46,6 +48,12 @@
 			<a href="/os/agents" data-lens="c" class={PILL}>Agents</a>
 		{/snippet}
 	</SlabTitle>
+
+	<SalesAutomation />
+	<details class="mt-6">
+		<summary class="bn-dim cursor-pointer font-mono text-[12px]">Individual workflow tools and client package</summary>
+		<SalesKit />
+	</details>
 
 	{#if data && v}
 		{#if data.operatorError}

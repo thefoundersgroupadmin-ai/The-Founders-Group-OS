@@ -25,7 +25,7 @@ const config = {
             precompress: false,
             strict: false,
           })
-        : adapterNode(),
+        : adapterNode({ out: process.env.FOUNDEROS_WEB_BUILD_DIR || "build" }),
     // Disable prerendering for Electron and Cloudflare (pure SPA)
     prerender:
       isElectronBuild || isCloudflareBuild ? { entries: [] } : undefined,

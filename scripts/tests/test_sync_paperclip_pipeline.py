@@ -16,6 +16,11 @@ GOOD = ('{"company": "OuterSignal", "website": "https://outersignal.com", "locat
 
 
 class JsonProspectsTest(unittest.TestCase):
+    def test_command_prospects_are_scoped_without_changing_historical_ids(self):
+        self.assertEqual(sync.prospect_id("vantage", "Acme"), "fc-pc-acme")
+        self.assertEqual(sync.prospect_id("founderos", "Acme"), "fc-pc-founderos-acme")
+        self.assertNotEqual(sync.prospect_id("client-a", "Acme"), sync.prospect_id("client-b", "Acme"))
+
     def test_reads_a_fenced_json_array(self):
         got, bad = sync.json_prospects("New accounts today:\n```json\n[" + GOOD + "]\n```\n")
         self.assertEqual(bad, 0)

@@ -53,7 +53,8 @@ const json = (body: unknown, status = 200) =>
 let fetchMock: ReturnType<typeof vi.fn<(...args: unknown[]) => Promise<Response>>>;
 beforeEach(() => {
 	fetchMock = vi.fn<(...args: unknown[]) => Promise<Response>>();
-	vi.stubGlobal('fetch', (url: string, ...args: unknown[]) => url.endsWith('/pages/sales-kit/automation')
+	vi.stubGlobal('fetch', (url: string, ...args: unknown[]) =>
+ url.endsWith('/pages/conductor/commands') ? Promise.resolve(json({commands:[],configured:true})) : url.endsWith('/pages/sales-kit/automation')
 		? Promise.resolve(json({ configured: false, workspaces: [], runs: [] }))
 		: url.endsWith('/pages/sales-kit')
 		? Promise.resolve(json({ version: '0.1.0', skills: [], paused: false }))
@@ -182,7 +183,7 @@ describe('/os/skills page', () => {
 		expect(screen.getByText('3 live · 1 drafts')).toBeTruthy();
 		// section order matches v1 app/skills/page.tsx
 		const titles = [...container.querySelectorAll('h2')].map((h) => h.textContent?.trim());
-		expect(titles).toEqual(['Sales automation', 'Sales Kit', 'Skill Library', 'Skill Volume', 'Categories', 'Owners', 'Skills']);
+		expect(titles).toEqual(['Give the OS a command', 'Sales automation', 'Sales Kit', 'Skill Library', 'Skill Volume', 'Categories', 'Owners', 'Skills']);
 		expect(screen.getByText('skills per source group')).toBeTruthy();
 		expect(screen.getByText('operator skills')).toBeTruthy();
 		expect(screen.getByText('agents wielding them')).toBeTruthy();

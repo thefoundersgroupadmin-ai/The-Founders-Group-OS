@@ -32,7 +32,9 @@ MODE="${1:-install}"
 PAPERCLIP_DIR="${TFG_PAPERCLIP_DIR:-$HOME/Downloads/paperclip}"
 PAPERCLIP_PORT="${TFG_PAPERCLIP_PORT:-3101}"
 JOBS=(tfg-os-stack tfg-os-web tfg-keep-awake tfg-backup)
-[ -f "$PAPERCLIP_DIR/server/src/index.ts" ] && JOBS+=(tfg-paperclip)
+if [ -f "$PAPERCLIP_DIR/server/src/index.ts" ]; then
+  JOBS+=(tfg-paperclip paperclip-pipeline-sync paperclip-outbox prospect-replies)
+fi
 
 say() { printf '%s\n' "$*"; }
 
@@ -75,6 +77,8 @@ plist() {
     keepalive) when="<key>RunAtLoad</key><true/><key>KeepAlive</key><true/><key>ThrottleInterval</key><integer>10</integer>" ;;
     login) when="<key>RunAtLoad</key><true/>" ;;
     nightly) when="<key>StartCalendarInterval</key><dict><key>Hour</key><integer>3</integer><key>Minute</key><integer>15</integer></dict>" ;;
+    minute) when="<key>RunAtLoad</key><true/><key>StartInterval</key><integer>60</integer>" ;;
+    five_minutes) when="<key>RunAtLoad</key><true/><key>StartInterval</key><integer>300</integer>" ;;
   esac
   cat <<EOF
 <?xml version="1.0" encoding="UTF-8"?>
@@ -97,6 +101,9 @@ write_job() {
     tfg-os-web) plist "$1" keepalive "$NODE" "$REPO/frontend/build" ;;
     tfg-keep-awake) plist "$1" keepalive /usr/bin/caffeinate -s -i ;;
     tfg-backup) plist "$1" nightly /bin/bash "$REPO/scripts/tfg-backup.sh" ;;
+    paperclip-pipeline-sync) plist "$1" minute /usr/bin/python3 -I "$REPO/scripts/sync-paperclip-pipeline.py" ;;
+    paperclip-outbox) plist "$1" minute /usr/bin/python3 -I "$REPO/scripts/sync-paperclip-outbox.py" ;;
+    prospect-replies) plist "$1" five_minutes /usr/bin/python3 -I "$REPO/scripts/sync-prospect-replies.py" ;;
     tfg-paperclip)
       # The self-contained bundle (cd $PAPERCLIP_DIR/server && pnpm build:runtime)
       # when there is one, else from source. server/dist alone does not run in

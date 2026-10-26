@@ -15,6 +15,7 @@
 	import SparkIcon from '../kit/SparkIcon.svelte';
 	import '../kit/kit.css';
 	import { founderosFetch } from '../api';
+	import { currentWorkspace } from '$lib/stores/workspaces';
 	import { loadKey, saveKey } from './chrome';
 	import ConductorComposer from './ConductorComposer.svelte';
 	import Synthesizing from './Synthesizing.svelte';
@@ -180,7 +181,7 @@
 			localTurns = [...localTurns, bubble];
 			const res = await founderosFetch<{ reply?: AskTurn }>('/pages/conductor/ask', {
 				method: 'POST',
-				json: { message: composed, path: pathname }
+				json: { message: composed, path: pathname, workspaceId: $currentWorkspace?.id, requestId: crypto.randomUUID() }
 			});
 			if (res?.reply) localTurns = [...localTurns, askToTurn(res.reply)];
 		} catch (err) {

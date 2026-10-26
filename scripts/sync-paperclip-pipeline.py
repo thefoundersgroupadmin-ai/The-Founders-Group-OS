@@ -16,6 +16,7 @@ Config: ~/.founderos/.env (PAPERCLIP_API_URL, PAPERCLIP_BOARD_KEY,
 PAPERCLIP_COMPANY_ID) and desktop/backend-go/.env (DATABASE_URL).
 Usage: python3 scripts/sync-paperclip-pipeline.py [--dry-run]
 """
+import fcntl
 import json
 import os
 import re
@@ -116,11 +117,29 @@ def sql(v):
     return "'" + str(v).replace("'", "''") + "'"
 
 
+def prospect_id(workspace, company):
+    # Retain historical IDs, and isolate new command/client records.
+    return "fc-pc-" + (slug(workspace) + "-" if workspace != WORKSPACE_SLUG else "") + slug(company)
+
+
 def main():
     dry = "--dry-run" in sys.argv
     pc = read_env("~/.founderos/.env")
     db = read_env(REPO / "desktop/backend-go/.env")["DATABASE_URL"]
     company = pc["PAPERCLIP_COMPANY_ID"]
+    state = Path.home() / ".founderos/state"
+    state.mkdir(parents=True, exist_ok=True)
+    lock = open(state / "paperclip-pipeline.lock", "w")
+    try:
+        fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except BlockingIOError:
+        print("another pipeline sync is running; skipping")
+        return
+    # A task inherits its target from a durable OS command, not from model text.
+    mapping_sql = "SELECT COALESCE(jsonb_object_agg(step->>'taskId',w.slug),'{}'::jsonb) FROM founderos_commands c JOIN workspaces w ON w.id=c.workspace_id CROSS JOIN LATERAL jsonb_array_elements(c.steps) step WHERE step->>'taskId' IS NOT NULL"
+    mapped = subprocess.run(["psql", db, "-At", "-c", mapping_sql], capture_output=True, text=True)
+    task_workspaces = json.loads(mapped.stdout.strip()) if mapped.returncode == 0 and mapped.stdout.strip() else {}
+
 
     issues = paperclip(pc, f"/api/companies/{company}/issues")
     issues = issues.get("issues", issues) if isinstance(issues, dict) else issues
@@ -160,13 +179,15 @@ def main():
                 continue
             if bad:
                 print(f"{ident} prospects: skipped {bad} entries without a company", file=sys.stderr)
-            known = {slug(a["name"]) for a in accounts}
+            target = task_workspaces.get(issue["id"], WORKSPACE_SLUG)
+            known = {(a.get("workspace", WORKSPACE_SLUG), slug(a["name"])) for a in accounts}
             for a in found:
+                a["workspace"] = target
                 if a["email"]:
-                    emails.setdefault(a["name"], a["email"])
-                if slug(a["name"]) not in known:
+                    emails.setdefault((target, a["name"]), a["email"])
+                if (target, slug(a["name"])) not in known:
                     accounts.append(a)
-                    known.add(slug(a["name"]))
+                    known.add((target, slug(a["name"])))
     for d in other_docs:
         for row in table_rows(doc_body(d)):
             text = " ".join(row)
@@ -174,24 +195,35 @@ def main():
             if not found:
                 continue
             for a in accounts:
+                if a.get("workspace", WORKSPACE_SLUG) != WORKSPACE_SLUG:
+                    continue
                 match = next((e for e in found if address_for_company(a["name"], text, e)), None)
                 if match:
-                    emails.setdefault(a["name"], match)
+                    emails.setdefault((WORKSPACE_SLUG, a["name"]), match)
 
     ws = subprocess.run(["psql", db, "-At", "-c", f"select id from workspaces where slug={sql(WORKSPACE_SLUG)}"],
                         capture_output=True, text=True, check=True).stdout.strip()
     if not ws:
         sys.exit(f"workspace {WORKSPACE_SLUG!r} not found")
 
+    workspace_ids = {WORKSPACE_SLUG: ws}
+    for target in {a.get("workspace", WORKSPACE_SLUG) for a in accounts}:
+        if target not in workspace_ids:
+            result = subprocess.run(["psql", db, "-At", "-c", f"select id from workspaces where slug={sql(target)}"], capture_output=True, text=True, check=True)
+            if not result.stdout.strip():
+                sys.exit("command workspace no longer exists")
+            workspace_ids[target] = result.stdout.strip()
     today = date.today().isoformat()
     stmts = ["BEGIN;"]
     for a in accounts:
-        cid = "fc-pc-" + slug(a["name"])
-        email = emails.get(a["name"])
+        target = a.get("workspace", WORKSPACE_SLUG)
+        ws = workspace_ids[target]
+        cid = prospect_id(target, a["name"])
+        email = emails.get((target, a["name"]))
         stmts.append(
             "INSERT INTO founderos_funnel_contacts (id, workspace_id, name, venture, status, product, relationship, "
             "likelihood, email, person, company, created_at) VALUES ("
-            f"{sql(cid)}, {sql(ws)}, {sql(a['buyer'] or a['name'])}, {sql(WORKSPACE_SLUG)}, 'first_touch', {sql(PRODUCT)}, 'cold', "
+            f"{sql(cid)}, {sql(ws)}, {sql(a['buyer'] or a['name'])}, {sql(target)}, 'first_touch', {sql(PRODUCT)}, 'cold', "
             f"{sql(a['score'])}, {sql(email)}, {sql(a['buyer'])}, {sql(a['name'])}, now()) "
             "ON CONFLICT (id) DO UPDATE SET likelihood = EXCLUDED.likelihood, person = EXCLUDED.person, "
             "company = EXCLUDED.company, email = COALESCE(EXCLUDED.email, founderos_funnel_contacts.email);")
@@ -204,12 +236,12 @@ def main():
     print(f"{len(accounts)} accounts, {len(emails)} with a recipient address")
     if dry:
         for a in accounts:
-            print(f"  {a['score'] or '-':>3}  {a['name']:<28} {a['buyer'] or '(buyer unknown)':<30} {emails.get(a['name'], '')}")
+            print(f"  {a['score'] or '-':>3}  {a['name']:<28} {a['buyer'] or '(buyer unknown)':<30} {emails.get((a.get('workspace', WORKSPACE_SLUG), a['name']), '')}")
         return
     r = subprocess.run(["psql", db, "-q", "-v", "ON_ERROR_STOP=1"], input="\n".join(stmts), text=True, capture_output=True)
     if r.returncode:
         sys.exit("sync failed, nothing written: " + r.stderr.strip().splitlines()[0])
-    print("synced into TFG OS pipeline (Sales System Build)")
+    print("synced into TFG OS pipelines: " + ", ".join(sorted(workspace_ids)))
 
 
 if __name__ == "__main__":

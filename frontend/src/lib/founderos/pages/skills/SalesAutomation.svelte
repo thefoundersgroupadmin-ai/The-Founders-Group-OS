@@ -3,7 +3,7 @@
  import { founderosFetch } from '$lib/founderos/api';
  import { SlabCard, PILL } from '$lib/founderos/kit';
  import SkillMarkdown from './SkillMarkdown.svelte';
- type Workspace={workspaceId:string;workspace:string;name:string;profile:string;enabled:boolean;timezone:string};
+ type Workspace={workspaceId:string;workspace:string;name:string;profile:string;enabled:boolean;timezone:string;sourceWorkspaceIds?:string[]};
  type Run={id:string;routines:string[];skills:string[];status:string;markdown:string;error:string;startedAt:string;sourceIds:string[]};
  type State={configured:boolean;detail?:string;workspaces:Workspace[];selected?:Workspace;canConfigure?:boolean;schedulesEnabled?:boolean;paused?:boolean;hasSources?:boolean;gaps?:string[];runs:Run[]};
  let data=$state<State|null>(null);
@@ -11,6 +11,7 @@
  let profile=$state('');
  let timezone=$state('Europe/London');
  let enabled=$state(false);
+ let sourceWorkspaceIds=$state<string[]>([]);
  let failure=$state('');
  let notice=$state('');
  let busy=$state(false);
@@ -25,7 +26,7 @@
    const state=await founderosFetch<State>(`/pages/sales-kit/automation${workspaceId?`?workspace=${encodeURIComponent(workspaceId)}`:''}`);
    if(ticket!==sequence)return;
    data=state;failure='';
-   if(reset||!editing){workspaceId=state.selected?.workspaceId??'';profile=state.selected?.profile??'';timezone=state.selected?.timezone??'Europe/London';enabled=state.selected?.enabled??false;}
+   if(reset||!editing){workspaceId=state.selected?.workspaceId??'';profile=state.selected?.profile??'';timezone=state.selected?.timezone??'Europe/London';enabled=state.selected?.enabled??false;sourceWorkspaceIds=state.selected?.sourceWorkspaceIds??[];}
   }catch(e){if(ticket===sequence)failure=e instanceof Error?e.message:'Automation unavailable';}
  }
  onMount(()=>{
@@ -36,7 +37,7 @@
  async function save(){
   busy=true;failure='';notice='';
   try{
-   await founderosFetch('/pages/sales-kit/automation',{method:'PUT',json:{workspaceId,profile,timezone,enabled}});
+   await founderosFetch('/pages/sales-kit/automation',{method:'PUT',json:{workspaceId,profile,timezone,enabled,sourceWorkspaceIds}});
    editing=false;await load(true);
    notice=enabled?'Automation saved. Relevant work will run when sales records change and during daily and weekly reviews.':'Automation paused for this workspace.';
   }catch(e){failure=e instanceof Error?e.message:'Could not save automation';}finally{busy=false;}
@@ -72,6 +73,13 @@
       <label class="flex max-w-lg flex-col gap-2">Review timezone
        <input bind:value={timezone} oninput={()=>editing=true} placeholder="Europe/London" class="bn-border border bg-[var(--bn-bg)] p-2" />
       </label>
+      <fieldset class="space-y-2">
+       <legend class="mb-2">Connected source workspaces</legend>
+       <p class="bn-dim">This workspace's records are always included. Select only workspaces belonging to this sales operation.</p>
+       {#each data.workspaces.filter(w=>w.workspaceId!==workspaceId) as ws}
+        <label class="flex items-center gap-2"><input type="checkbox" value={ws.workspaceId} bind:group={sourceWorkspaceIds} onchange={()=>editing=true}/>{ws.name}</label>
+       {/each}
+      </fieldset>
       <label class="flex items-center gap-2"><input type="checkbox" bind:checked={enabled} onchange={()=>editing=true} /> Automatically analyse this workspace</label>
       <button type="button" class={PILL} disabled={!profile.trim()} onclick={save}>{busy?'Saving…':'Save automation settings'}</button>
      </fieldset>

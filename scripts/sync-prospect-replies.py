@@ -133,6 +133,12 @@ def main():
     assignee = next(a["id"] for a in agents if a["name"] == ASSIGNEE)
 
     for mid, (cid, ws, company), sender, subject, when, body in found:
+        # Creating this task wakes an AI worker. Fail closed on the official
+        # usage guard before every wake; leave the reply unclaimed for resume.
+        usage = subprocess.run([sys.executable, str(REPO / "scripts/tfg-agent-context.py"), "--check-usage-only"], capture_output=True, text=True)
+        if usage.returncode:
+            print("Reply retained: AI execution is paused or official usage is unavailable.")
+            return
         snippet = re.sub(r"\n{3,}", "\n\n", body.strip())[:3000]
         issue = paperclip(pc, "POST", f"/api/companies/{pc['PAPERCLIP_COMPANY_ID']}/issues", {
             "title": f"Prospect reply from {company}: {subject}"[:200],

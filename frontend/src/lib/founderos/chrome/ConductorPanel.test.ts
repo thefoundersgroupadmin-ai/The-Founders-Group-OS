@@ -216,7 +216,7 @@ describe('ConductorPanel: header and quick actions', () => {
 		await waitFor(() =>
 			expect(fetchMock).toHaveBeenCalledWith('/pages/conductor/ask', {
 				method: 'POST',
-				json: { message: 'Explain the agentic sleeve on this screen.', path: '/os/trading' }
+				json: { message: 'Explain the agentic sleeve on this screen.', path: '/os/trading', workspaceId: undefined, requestId: expect.any(String) }
 			})
 		);
 		// the bubble shows the label, not the long prompt
@@ -238,7 +238,7 @@ describe('ConductorPanel: sending', () => {
 		await openDock();
 		await type('why is AAPL red?');
 		expect(screen.getByText('why is AAPL red?')).toBeTruthy();
-		expect(fetchMock).toHaveBeenCalledWith('/pages/conductor/ask', { method: 'POST', json: { message: 'why is AAPL red?', path: '/os/trading' } });
+		expect(fetchMock).toHaveBeenCalledWith('/pages/conductor/ask', { method: 'POST', json: { message: 'why is AAPL red?', path: '/os/trading', workspaceId: undefined, requestId: expect.any(String) } });
 		await waitFor(() => expect(screen.getByText(/synthesizing/)).toBeTruthy());
 		// production's synth-shimmer sweep on the word
 		expect(screen.getByText(/synthesizing/).classList.contains('bn-synth-shimmer')).toBe(true);

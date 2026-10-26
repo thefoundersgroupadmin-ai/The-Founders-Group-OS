@@ -61,4 +61,22 @@ func TestAutomationStoreScopesSourcesAndClaimsWorkOnce(t *testing.T) {
 	if err != nil || len(other) != 0 {
 		t.Fatal("run history crossed workspaces")
 	}
+	// Source access is opt-in: a workspace remains isolated until the owner
+	// deliberately binds another workspace. Removing a link removes its data.
+	linked, err := store.SnapshotFor(ctx, saleskit.AutomationConfig{WorkspaceID: a, SourceWorkspaceIDs: []string{b}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	linkedRaw, _ := json.Marshal(linked)
+	if !strings.Contains(string(linkedRaw), "lead-b") {
+		t.Fatal("explicitly connected source missing")
+	}
+	isolated, err := store.SnapshotFor(ctx, saleskit.AutomationConfig{WorkspaceID: a})
+	if err != nil {
+		t.Fatal(err)
+	}
+	isolatedRaw, _ := json.Marshal(isolated)
+	if strings.Contains(string(isolatedRaw), "lead-b") {
+		t.Fatal("removed source still accessible")
+	}
 }

@@ -1,0 +1,26 @@
+import importlib.util
+import json
+from pathlib import Path
+import tempfile
+import unittest
+
+spec = importlib.util.spec_from_file_location("agent_context", Path(__file__).resolve().parents[1] / "tfg-agent-context.py")
+module = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(module)
+
+
+class UsageSnapshotTest(unittest.TestCase):
+    def test_uses_latest_official_event_across_durable_sessions(self):
+        with tempfile.TemporaryDirectory() as root:
+            for filename, timestamp, percent in [("new.jsonl", "2026-10-26T14:00:00Z", 52), ("old.jsonl", "2026-10-26T13:00:00Z", 9)]:
+                Path(root, filename).write_text(json.dumps({"timestamp": timestamp, "payload": {"rate_limits": {"secondary": {"used_percent": percent}}}}) + "\n")
+            self.assertEqual(module.latest_weekly_usage(root), 52)
+
+    def test_missing_or_unofficial_usage_is_unknown(self):
+        with tempfile.TemporaryDirectory() as root:
+            Path(root, "usage.jsonl").write_text('{"used_percent": 4}\n')
+            self.assertIsNone(module.latest_weekly_usage(root))
+
+
+if __name__ == "__main__":
+    unittest.main()

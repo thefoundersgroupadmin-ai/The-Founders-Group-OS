@@ -13,14 +13,15 @@ import (
 // Snapshot contains only the selected workspace's synced OS records, never
 // credentials or records fetched from another installation.
 type Snapshot struct {
-	LeadRecords  map[string]string `json:"-"`
-	CallRecords  map[string]string `json:"-"`
-	Sources      []Source          `json:"sources"`
-	LeadRevision string            `json:"leadRevision"`
-	CallRevision string            `json:"callRevision"`
-	HasLeads     bool              `json:"hasLeads"`
-	HasCalls     bool              `json:"hasCalls"`
-	Gaps         []string          `json:"gaps"`
+	LeadRecords     map[string]string `json:"-"`
+	CallRecords     map[string]string `json:"-"`
+	Sources         []Source          `json:"sources"`
+	LeadRevision    string            `json:"leadRevision"`
+	CallRevision    string            `json:"callRevision"`
+	HasLeads        bool              `json:"hasLeads"`
+	HasCalls        bool              `json:"hasCalls"`
+	ContextRevision string            `json:"contextRevision"`
+	Gaps            []string          `json:"gaps"`
 }
 type Checkpoint struct {
 	LeadRecords map[string]string `json:"leadRecords,omitempty"`
@@ -29,6 +30,7 @@ type Checkpoint struct {
 	Week        string            `json:"week"`
 	Leads       string            `json:"leads"`
 	Calls       string            `json:"calls"`
+	Context     string            `json:"context"`
 }
 type AutomationPlan struct {
 	ChangedLeads []string   `json:"changedLeads"`
@@ -68,6 +70,10 @@ func Plan(now time.Time, previous Checkpoint, s Snapshot) AutomationPlan {
 		p.Next.CallRecords = s.CallRecords
 		p.Next.Calls = s.CallRevision
 	}
+	if s.ContextRevision != "" && previous.Context != s.ContextRevision {
+		add("connected email and calendar changes", "inbox-sweep", "calendar-events", "schedule-meeting")
+		p.Next.Context = s.ContextRevision
+	}
 	if s.HasLeads && previous.Day != day {
 		add("daily pipeline review", "daily-briefing", "pipeline-review", "crm-hygiene-check")
 		p.Next.Day = day
@@ -96,9 +102,9 @@ func Digest(v any) string {
 }
 func BatchKey(p AutomationPlan, s Snapshot, profile string) string {
 	return Digest(struct {
-		Plan                  AutomationPlan
-		Leads, Calls, Profile string
-	}{p, s.LeadRevision, s.CallRevision, profile})
+		Plan                           AutomationPlan
+		Leads, Calls, Profile, Context string
+	}{p, s.LeadRevision, s.CallRevision, profile, s.ContextRevision})
 }
 
 func AutomationPrompt(workspace, profile string, s Snapshot, p AutomationPlan, now time.Time) (string, error) {

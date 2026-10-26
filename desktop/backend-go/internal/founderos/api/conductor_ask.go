@@ -25,6 +25,7 @@ import (
 	"github.com/rhl/businessos-backend/internal/founderos/pages/conductor"
 	"github.com/rhl/businessos-backend/internal/founderos/pages/shared"
 	"github.com/rhl/businessos-backend/internal/founderos/people"
+	"github.com/rhl/businessos-backend/internal/founderos/saleskit"
 )
 
 type askTurn struct {
@@ -285,8 +286,10 @@ func registerConductorAsk(s gin.IRoutes, d *Deps) {
 			return
 		}
 		var body struct {
-			Message string `json:"message"`
-			Path    string `json:"path"`
+			Message     string `json:"message"`
+			Path        string `json:"path"`
+			WorkspaceID string `json:"workspaceId"`
+			RequestID   string `json:"requestId"`
 		}
 		if err := c.ShouldBindJSON(&body); err != nil || strings.TrimSpace(body.Message) == "" {
 			c.JSON(http.StatusBadRequest, gin.H{"error": "message required"})
@@ -327,8 +330,22 @@ func registerConductorAsk(s gin.IRoutes, d *Deps) {
 			name = p.Email
 		}
 		system := fmt.Sprintf(conductorBrief, name, strings.Join(delegableSeats, ", "), title, screen, askFacts(ctx, d, now))
+		var commandWorkspace string
+		if p.Owner && d.Pool != nil {
+			cfg, cfgErr := commandConfig(ctx, d, p, body.WorkspaceID)
+			if cfgErr != nil {
+				c.JSON(400, gin.H{"error": cfgErr.Error()})
+				return
+			}
+			commandWorkspace = cfg.WorkspaceID
+			system += commandInstructions(ctx, d, cfg)
+		}
 		prompt := "The conversation so far:\n" + convo.String() + "They: " + strings.TrimSpace(body.Message) + "\nYou:"
 
+		if err := salesKitAIAllowed(); err != nil {
+			c.JSON(http.StatusLocked, gin.H{"error": err.Error()})
+			return
+		}
 		reply, err := askClaude(ctx, system, prompt)
 		if err != nil {
 			status := http.StatusBadGateway
@@ -338,9 +355,44 @@ func registerConductorAsk(s gin.IRoutes, d *Deps) {
 			c.JSON(status, gin.H{"error": err.Error()})
 			return
 		}
-		text, dg := splitDelegation(reply)
+		text, plan := splitExecution(reply)
+		text, dg := splitDelegation(text)
+		if plan != nil {
+			dg = nil
+		}
 		user := askTurn{ID: fmt.Sprintf("u-%d", now.UnixNano()), Role: "user", Content: strings.TrimSpace(body.Message), CreatedAt: now.UTC().Format(time.RFC3339Nano)}
 		answer := askTurn{ID: fmt.Sprintf("a-%d", time.Now().UnixNano()), Role: "assistant", Content: text, CreatedAt: time.Now().UTC().Format(time.RFC3339Nano)}
+		if plan != nil {
+			cmd, cmdErr := enqueueCommand(ctx, d, p, commandWorkspace, body.RequestID, strings.TrimSpace(body.Message), *plan)
+			answer.Receipt = &struct {
+				Text string `json:"text"`
+				Href string `json:"href,omitempty"`
+			}{Href: "/os/skills?command=" + cmd.ID}
+			if cmdErr != nil {
+				answer.Content = "I could not start that work."
+				answer.Receipt.Text = cmdErr.Error()
+			} else {
+				answer.Content = "Your command is queued. The OS will run the selected agents and workflows and save the results."
+				answer.Receipt.Text = fmt.Sprintf("Command %s · %d workers · %d workflows · %d team tasks", cmd.ID[:8], len(plan.Agents), len(plan.Skills), len(plan.Tasks))
+			}
+		}
+		if dg != nil && p.Owner && d.Pool != nil {
+			// Older models can still emit DELEGATE. Route it through the same
+			// durable command path so the agent receives the profile and workflows.
+			cmd, cmdErr := enqueueCommand(ctx, d, p, commandWorkspace, body.RequestID, strings.TrimSpace(body.Message), saleskit.CommandPlan{Skills: []string{"research-prospect", "draft-outreach"}, Tasks: []saleskit.CommandTask{{Agent: dg.Agent, Title: dg.Title, Description: dg.Description}}})
+			answer.Receipt = &struct {
+				Text string `json:"text"`
+				Href string `json:"href,omitempty"`
+			}{Href: "/os/skills?command=" + cmd.ID}
+			if cmdErr != nil {
+				answer.Content = "I could not start that work."
+				answer.Receipt.Text = cmdErr.Error()
+			} else {
+				answer.Content = "Your task is queued with the saved workspace profile and sales workflows."
+				answer.Receipt.Text = "Track the task and resulting report in Skills."
+			}
+			dg = nil
+		}
 		if dg != nil {
 			is, seat, err := fileDelegation(ctx, askBoardFor(d), *dg, name)
 			answer.Receipt = &struct {

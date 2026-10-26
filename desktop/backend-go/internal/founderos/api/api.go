@@ -9,6 +9,7 @@ import (
 	"crypto/subtle"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -104,6 +105,10 @@ func NewDeps(pool *pgxpool.Pool) *Deps {
 		}
 	}
 	startSalesAutomation(d)
+	startCommands(d)
+	if err := installSalesWorkflows(); err != nil {
+		slog.Warn("sales workflow installation failed", "error", err)
+	}
 	return d
 }
 

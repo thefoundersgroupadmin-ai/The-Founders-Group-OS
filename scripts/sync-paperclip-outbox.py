@@ -70,9 +70,9 @@ def slug(s):
     return re.sub(r"[^a-z0-9]+", "-", s.lower()).strip("-")
 
 
-def contact_id(it):
+def contact_id(it, workspace=PIPELINE_SLUG):
     """The pipeline id sync-paperclip-pipeline.py gives this company (or the address's domain)."""
-    return "fc-pc-" + slug(it.get("company") or it["to"].rsplit("@", 1)[1])
+    return "fc-pc-" + (slug(workspace) + "-" if workspace != PIPELINE_SLUG else "") + slug(it.get("company") or it["to"].rsplit("@", 1)[1])
 
 
 def is_own(addr, own):
@@ -127,8 +127,16 @@ def main():
 
     issues = paperclip(pc, "GET", f"/api/companies/{company}/issues")
     issues = issues.get("issues", issues) if isinstance(issues, dict) else issues
+    # Route task output to the durable command's workspace, never a workspace
+    # named by model-generated document text.
+    bindings = psql_rows(db, "SELECT step->>'taskId' AS task_id,w.id::text AS workspace_id,w.slug FROM founderos_commands c JOIN workspaces w ON w.id=c.workspace_id CROSS JOIN LATERAL jsonb_array_elements(c.steps) step WHERE step->>'taskId' IS NOT NULL")
+    task_workspaces = {b["task_id"]: b for b in bindings}
+    default_pipeline_ws = pipeline_ws
     imported = 0
     for issue in issues:
+        binding = task_workspaces.get(issue["id"])
+        pipeline_ws = binding["workspace_id"] if binding else default_pipeline_ws
+        pipeline_slug = binding["slug"] if binding else PIPELINE_SLUG
         docs = paperclip(pc, "GET", f"/api/issues/{issue['id']}/documents")
         docs = docs.get("documents", docs) if isinstance(docs, dict) else docs
         doc = next((d for d in docs if d.get("key") == "outbox"), None)
@@ -141,21 +149,29 @@ def main():
             print(f"  {ident}: skipped ({e})")
             continue
         for it in items:
+            if not binding:
+                matches = psql_rows(db, "SELECT DISTINCT c.workspace_id::text AS workspace_id,w.slug FROM founderos_funnel_contacts c JOIN workspaces w ON w.id=c.workspace_id "
+                                    f"WHERE lower(c.email)=lower({sql(it['to'])})")
+                if len(matches) > 1:
+                    print(f"  {ident}: skipped draft with ambiguous recipient workspace")
+                    continue
+                pipeline_ws = matches[0]["workspace_id"] if matches else default_pipeline_ws
+                pipeline_slug = matches[0]["slug"] if matches else PIPELINE_SLUG
             oid = "pc-" + ident.lower() + "-" + hashlib.sha1((it["to"].lower() + "\n" + it["subject"]).encode()).hexdigest()[:10]
             if dry:
                 print(f"  {ident}: {it['to']} | {it['subject']}")
                 continue
-            to, cid = sql(it["to"]), sql(contact_id(it))
+            to, cid = sql(it["to"]), sql(contact_id(it, pipeline_slug))
             if not is_own(it["to"], own):
                 # A new recipient becomes a pipeline contact; a known company keeps its row.
                 psql(db, "INSERT INTO founderos_funnel_contacts (id, workspace_id, name, venture, status, product, relationship, "
                          "email, person, company, created_at) "
-                         f"SELECT {cid}, {sql(pipeline_ws)}, {sql(it['toName'] or it['company'] or it['to'])}, {sql(PIPELINE_SLUG)}, "
+                         f"SELECT {cid}, {sql(pipeline_ws)}, {sql(it['toName'] or it['company'] or it['to'])}, {sql(pipeline_slug)}, "
                          f"'first_touch', 'Sales System Build', 'cold', {to}, {sql(it['toName'])}, {sql(it['company'])}, now() "
-                         f"WHERE NOT EXISTS (SELECT 1 FROM founderos_funnel_contacts WHERE lower(email) = lower({to})) "
+                         f"WHERE NOT EXISTS (SELECT 1 FROM founderos_funnel_contacts WHERE workspace_id = {sql(pipeline_ws)} AND lower(email) = lower({to})) "
                          "ON CONFLICT (id) DO UPDATE SET email = COALESCE(founderos_funnel_contacts.email, EXCLUDED.email)")
-            link = (f"COALESCE((SELECT id FROM founderos_funnel_contacts WHERE lower(email) = lower({to}) ORDER BY id LIMIT 1), "
-                    f"(SELECT id FROM founderos_funnel_contacts WHERE id = {cid}))")
+            link = (f"COALESCE((SELECT id FROM founderos_funnel_contacts WHERE workspace_id = {sql(pipeline_ws)} AND lower(email) = lower({to}) ORDER BY id LIMIT 1), "
+                    f"(SELECT id FROM founderos_funnel_contacts WHERE workspace_id = {sql(pipeline_ws)} AND id = {cid}))")
             # A pending row follows the agent's latest wording; decided rows keep theirs.
             psql(db, "INSERT INTO founderos_outbox (id, workspace_id, source, source_ref, contact_id, to_address, to_name, company, subject, body) "
                      f"SELECT {sql(oid)}, {sql(ws)}, 'paperclip', {sql(ident)}, {link}, "

@@ -11,7 +11,7 @@ it('configures a workspace once instead of asking to execute separate skills',as
  await screen.findByLabelText('Sales workspace');
  await fireEvent.click(screen.getByLabelText('Automatically analyse this workspace'));
  await fireEvent.click(screen.getByRole('button',{name:'Save automation settings'}));
- await waitFor(()=>expect(api.request).toHaveBeenCalledWith('/pages/sales-kit/automation',expect.objectContaining({method:'PUT',json:{workspaceId:'ws-a',profile:'Approved inventory offer',timezone:'Europe/London',enabled:true}})));
+ await waitFor(()=>expect(api.request).toHaveBeenCalledWith('/pages/sales-kit/automation',expect.objectContaining({method:'PUT',json:{workspaceId:'ws-a',profile:'Approved inventory offer',timezone:'Europe/London',enabled:true,sourceWorkspaceIds:[]}})));
  expect(screen.queryByRole('button',{name:/execute|generate|run/i})).toBeNull();
 });
 it('shows saved consolidated outputs and source coverage',async()=>{

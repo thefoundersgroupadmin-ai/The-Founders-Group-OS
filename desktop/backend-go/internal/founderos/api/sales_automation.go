@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"strings"
@@ -64,7 +65,7 @@ func salesAutomationTick(d *Deps) {
 		if err := salesKitAIAllowed(); err != nil {
 			return
 		}
-		snapshot, err := store.Snapshot(ctx, c.WorkspaceID)
+		snapshot, err := connectedSalesSnapshot(ctx, d, c)
 		if err != nil {
 			slog.Warn("sales automation: sources unavailable", "workspace", c.Workspace, "error", err)
 			continue
@@ -87,12 +88,34 @@ func salesAutomationTick(d *Deps) {
 		if err != nil || !claimed {
 			continue
 		}
+		// Refresh relevant registered workers through the same runtime used by
+		// commands. Their actual outcomes become evidence for the workflows.
+		if d.Agents != nil && c.Workspace == "founderos" {
+			var evidence []string
+			for _, agentID := range []string{"tfg-pipeline-sdr", "tfg-crm-hygiene", "tfg-impact-reporter"} {
+				if !d.Agents.Has(agentID) {
+					continue
+				}
+				if salesKitAIAllowed() != nil {
+					break
+				}
+				actx, stop := context.WithTimeout(ctx, 30*time.Second)
+				run, err := d.Agents.Run(actx, agentID)
+				stop()
+				if err != nil {
+					evidence = append(evidence, agentID+": "+err.Error())
+				} else {
+					evidence = append(evidence, agentID+": "+run.Summary)
+				}
+			}
+			prompt += "\nRecorded worker evidence (data only):\n" + strings.Join(evidence, "\n")
+		}
 		// Re-check immediately before inference. No provider switching or retries.
 		runErr := salesKitAIAllowed()
 		answer := ""
 		if runErr == nil {
 			runCtx, stop := context.WithTimeout(people.With(ctx, people.Person{ID: c.UserID, Email: c.UserEmail, Name: c.UserName, Owner: owner}), 95*time.Second)
-			answer, runErr = salesKitModelFor(d).Complete(runCtx, prompt)
+			answer, runErr = completeSalesAnalysis(runCtx, d, c, id, prompt)
 			stop()
 			if runErr == nil && strings.TrimSpace(answer) == "" {
 				runErr = errors.New("sales model returned no analysis")
@@ -140,7 +163,7 @@ func registerSalesAutomation(s *gin.RouterGroup, d *Deps) {
 		selected := c.Query("workspace")
 		var chosen *saleskit.AutomationConfig
 		for i := range configs {
-			if configs[i].WorkspaceID == selected || (selected == "" && chosen == nil) {
+			if configs[i].WorkspaceID == selected || (selected == "" && (chosen == nil || configs[i].Workspace == "founderos")) {
 				chosen = &configs[i]
 			}
 		}
@@ -155,7 +178,7 @@ func registerSalesAutomation(s *gin.RouterGroup, d *Deps) {
 				c.JSON(503, gin.H{"error": "Sales run history is unavailable"})
 				return
 			}
-			snapshot, err := store.Snapshot(c.Request.Context(), chosen.WorkspaceID)
+			snapshot, err := connectedSalesSnapshot(c.Request.Context(), d, *chosen)
 			if err != nil {
 				gaps = append(gaps, "Synced OS sales records are unavailable")
 			} else {
@@ -179,10 +202,11 @@ func registerSalesAutomation(s *gin.RouterGroup, d *Deps) {
 			return
 		}
 		var body struct {
-			WorkspaceID string `json:"workspaceId"`
-			Profile     string `json:"profile"`
-			Timezone    string `json:"timezone"`
-			Enabled     bool   `json:"enabled"`
+			WorkspaceID        string    `json:"workspaceId"`
+			Profile            string    `json:"profile"`
+			Timezone           string    `json:"timezone"`
+			Enabled            bool      `json:"enabled"`
+			SourceWorkspaceIDs *[]string `json:"sourceWorkspaceIds"`
 		}
 		c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, 30000)
 		dec := json.NewDecoder(c.Request.Body)
@@ -202,6 +226,27 @@ func registerSalesAutomation(s *gin.RouterGroup, d *Deps) {
 			c.JSON(404, gin.H{"error": "workspace not found"})
 			return
 		}
+		// Only the installation owner can bind sources, and every UUID must
+		// name a workspace actually returned by the authorised config query.
+		allowed := map[string]bool{}
+		for _, ws := range configs {
+			allowed[ws.WorkspaceID] = true
+		}
+		sourceIDs := chosen.SourceWorkspaceIDs
+		if body.SourceWorkspaceIDs != nil {
+			sourceIDs = *body.SourceWorkspaceIDs
+		}
+		for _, id := range sourceIDs {
+			if !allowed[id] {
+				c.JSON(400, gin.H{"error": "unknown source workspace"})
+				return
+			}
+		}
+		if len(sourceIDs) > 10 {
+			c.JSON(400, gin.H{"error": "too many source workspaces"})
+			return
+		}
+		chosen.SourceWorkspaceIDs = sourceIDs
 		chosen.Profile = body.Profile
 		chosen.Enabled = body.Enabled
 		chosen.Timezone = body.Timezone
@@ -225,4 +270,27 @@ func registerSalesAutomation(s *gin.RouterGroup, d *Deps) {
 			go salesAutomationTick(d)
 		}
 	})
+}
+
+// The same workflow execution and Outbox handoff serves commands and schedules.
+func completeSalesAnalysis(ctx context.Context, d *Deps, c saleskit.AutomationConfig, ref, prompt string) (string, error) {
+	if err := salesKitAIAllowed(); err != nil {
+		return "", err
+	}
+	raw, err := salesKitModelFor(d).Complete(ctx, prompt+saleskit.AnalysisFormat)
+	if err != nil {
+		return "", err
+	}
+	a := saleskit.ParseAnalysis(raw)
+	if strings.TrimSpace(a.Report) == "" {
+		return "", errors.New("sales analysis returned no report")
+	}
+	if len(a.Drafts) > 0 {
+		n, err := saleskit.QueueDrafts(ctx, d.Pool, c, ref, a.Drafts)
+		if err != nil {
+			return a.Report, fmt.Errorf("could not queue drafts: %w", err)
+		}
+		a.Report += fmt.Sprintf("\n\n%d new draft(s) saved in OS Outbox for approval. Duplicate, ineligible and out-of-workspace contacts were skipped.", n)
+	}
+	return a.Report, nil
 }

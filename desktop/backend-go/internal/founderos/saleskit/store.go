@@ -13,16 +13,17 @@ import (
 )
 
 type AutomationConfig struct {
-	WorkspaceID string     `json:"workspaceId"`
-	Workspace   string     `json:"workspace"`
-	Name        string     `json:"name"`
-	UserID      string     `json:"-"`
-	UserEmail   string     `json:"-"`
-	UserName    string     `json:"-"`
-	Profile     string     `json:"profile"`
-	Enabled     bool       `json:"enabled"`
-	Timezone    string     `json:"timezone"`
-	Checkpoint  Checkpoint `json:"-"`
+	WorkspaceID        string     `json:"workspaceId"`
+	Workspace          string     `json:"workspace"`
+	Name               string     `json:"name"`
+	UserID             string     `json:"-"`
+	UserEmail          string     `json:"-"`
+	UserName           string     `json:"-"`
+	Profile            string     `json:"profile"`
+	Enabled            bool       `json:"enabled"`
+	Timezone           string     `json:"timezone"`
+	Checkpoint         Checkpoint `json:"-"`
+	SourceWorkspaceIDs []string   `json:"sourceWorkspaceIds"`
 }
 type AutomationRun struct {
 	ID          string     `json:"id"`
@@ -42,7 +43,7 @@ func (s AutomationStore) Workspaces(ctx context.Context, userID string, owner bo
 	if s.Pool == nil {
 		return nil, errors.New("sales automation needs the OS database")
 	}
-	rows, err := s.Pool.Query(ctx, `SELECT w.id::text,w.slug,w.name,COALESCE(a.user_id,''),COALESCE(a.user_email,''),COALESCE(a.user_name,''),COALESCE(a.profile,''),COALESCE(a.enabled,false),COALESCE(a.timezone,'Europe/London'),COALESCE(a.checkpoint,'{}'::jsonb)
+	rows, err := s.Pool.Query(ctx, `SELECT w.id::text,w.slug,w.name,COALESCE(a.user_id,''),COALESCE(a.user_email,''),COALESCE(a.user_name,''),COALESCE(a.profile,''),COALESCE(a.enabled,false),COALESCE(a.timezone,'Europe/London'),COALESCE(a.checkpoint,'{}'::jsonb),COALESCE(a.source_workspace_ids,'{}'::uuid[])::text[]
  FROM workspaces w LEFT JOIN founderos_sales_automation a ON a.workspace_id=w.id
  WHERE ($2 OR w.owner_id=$1 OR EXISTS(SELECT 1 FROM workspace_members m WHERE m.workspace_id=w.id AND m.user_id=$1 AND m.status='active'))
  ORDER BY w.name`, userID, owner)
@@ -54,7 +55,7 @@ func (s AutomationStore) Workspaces(ctx context.Context, userID string, owner bo
 	for rows.Next() {
 		var c AutomationConfig
 		var raw []byte
-		if err := rows.Scan(&c.WorkspaceID, &c.Workspace, &c.Name, &c.UserID, &c.UserEmail, &c.UserName, &c.Profile, &c.Enabled, &c.Timezone, &raw); err != nil {
+		if err := rows.Scan(&c.WorkspaceID, &c.Workspace, &c.Name, &c.UserID, &c.UserEmail, &c.UserName, &c.Profile, &c.Enabled, &c.Timezone, &raw, &c.SourceWorkspaceIDs); err != nil {
 			return nil, err
 		}
 		if err := json.Unmarshal(raw, &c.Checkpoint); err != nil {
@@ -65,24 +66,36 @@ func (s AutomationStore) Workspaces(ctx context.Context, userID string, owner bo
 	return out, rows.Err()
 }
 func (s AutomationStore) Save(ctx context.Context, c AutomationConfig) error {
+	if c.SourceWorkspaceIDs == nil {
+		c.SourceWorkspaceIDs = []string{}
+	}
 	if strings.TrimSpace(c.Profile) == "" || len(c.Profile) > 24000 {
 		return errors.New("configure the client sales profile once before enabling automation")
 	}
 	if _, err := time.LoadLocation(c.Timezone); err != nil {
 		return errors.New("invalid timezone")
 	}
-	_, err := s.Pool.Exec(ctx, `INSERT INTO founderos_sales_automation(workspace_id,user_id,user_email,user_name,profile,enabled,timezone) VALUES($1::uuid,$2,$3,$4,$5,$6,$7)
+	_, err := s.Pool.Exec(ctx, `INSERT INTO founderos_sales_automation(workspace_id,user_id,user_email,user_name,profile,enabled,timezone,source_workspace_ids) VALUES($1::uuid,$2,$3,$4,$5,$6,$7,$8::uuid[])
  ON CONFLICT(workspace_id) DO UPDATE SET user_id=EXCLUDED.user_id,user_email=EXCLUDED.user_email,user_name=EXCLUDED.user_name,
- checkpoint=CASE WHEN founderos_sales_automation.profile IS DISTINCT FROM EXCLUDED.profile THEN '{}'::jsonb ELSE founderos_sales_automation.checkpoint END,
- profile=EXCLUDED.profile,enabled=EXCLUDED.enabled,timezone=EXCLUDED.timezone,updated_at=now()`, c.WorkspaceID, c.UserID, c.UserEmail, c.UserName, c.Profile, c.Enabled, c.Timezone)
+ checkpoint=CASE WHEN founderos_sales_automation.profile IS DISTINCT FROM EXCLUDED.profile OR founderos_sales_automation.source_workspace_ids IS DISTINCT FROM EXCLUDED.source_workspace_ids THEN '{}'::jsonb ELSE founderos_sales_automation.checkpoint END,
+ profile=EXCLUDED.profile,enabled=EXCLUDED.enabled,timezone=EXCLUDED.timezone,source_workspace_ids=EXCLUDED.source_workspace_ids,updated_at=now()`, c.WorkspaceID, c.UserID, c.UserEmail, c.UserName, c.Profile, c.Enabled, c.Timezone, c.SourceWorkspaceIDs)
 	return err
 }
 
 func (s AutomationStore) Snapshot(ctx context.Context, workspaceID string) (Snapshot, error) {
+	return s.snapshot(ctx, []string{workspaceID})
+}
+
+// SnapshotFor reads only source workspaces explicitly bound by the owner.
+func (s AutomationStore) SnapshotFor(ctx context.Context, c AutomationConfig) (Snapshot, error) {
+	ids := append([]string{c.WorkspaceID}, c.SourceWorkspaceIDs...)
+	return s.snapshot(ctx, ids)
+}
+func (s AutomationStore) snapshot(ctx context.Context, workspaceIDs []string) (Snapshot, error) {
 	snap := Snapshot{Sources: []Source{}, Gaps: []string{"Email, calendar availability, contracts and approved knowledge documents are not yet connected to this automation. Their workflows are not scheduled."}}
 	// Workspaces are constrained on BOTH sides of the activity join.
 	leads, err := s.Pool.Query(ctx, `SELECT to_jsonb(c)||jsonb_build_object('touches',COALESCE((SELECT jsonb_agg(to_jsonb(t) ORDER BY t.at,t.seq,t.id) FROM founderos_funnel_touches t WHERE t.contact_id=c.id AND t.workspace_id=c.workspace_id),'[]'::jsonb))
- FROM founderos_funnel_contacts c WHERE c.workspace_id=$1::uuid ORDER BY c.imported_at DESC,c.id LIMIT 201`, workspaceID)
+ FROM founderos_funnel_contacts c WHERE c.workspace_id=ANY($1::uuid[]) ORDER BY c.imported_at DESC,c.id LIMIT 201`, workspaceIDs)
 	if err != nil {
 		return snap, err
 	}
@@ -101,7 +114,7 @@ func (s AutomationStore) Snapshot(ctx context.Context, workspaceID string) (Snap
 		return snap, err
 	}
 	calls, err := s.Pool.Query(ctx, `SELECT jsonb_build_object('source',source,'external_id',external_id,'entry',entry,'archived_at',archived_at)
- FROM founderos_call_archive WHERE workspace_id=$1::uuid ORDER BY archived_at DESC,source,external_id LIMIT 21`, workspaceID)
+ FROM founderos_call_archive WHERE workspace_id=ANY($1::uuid[]) ORDER BY archived_at DESC,source,external_id LIMIT 21`, workspaceIDs)
 	if err != nil {
 		return snap, err
 	}

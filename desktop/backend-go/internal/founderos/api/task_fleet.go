@@ -327,7 +327,7 @@ func roleSourceBudget(d *Deps, role string, sources []saleskit.Source) []saleski
 		}
 	}
 	out := []saleskit.Source{}
-	remaining := 16000
+	remaining := 48000
 	for _, source := range sources {
 		// Business tasks use pipeline evidence. Technical/financial/creative tasks
 		// use their linked worker's real data and any prior task handoffs instead.

@@ -209,12 +209,12 @@ func TestTaskRoleHierarchyPreservesParentsAndRejectsCycles(t *testing.T) {
 
 func TestRoleSourceBudgetKeepsTasksFocused(t *testing.T) {
 	d := &Deps{Agents: agents.New(agents.NewMemStore(), AllAgents(&Deps{})...)}
-	input := []saleskit.Source{{ID: "pipeline", Text: strings.Repeat("a", 30000)}}
+	input := []saleskit.Source{{ID: "pipeline", Text: strings.Repeat("a", 70000)}}
 	if got := roleSourceBudget(d, "Payments Pulse", input); len(got) != 0 {
 		t.Fatal("unrelated pipeline sent to financial role")
 	}
 	got := roleSourceBudget(d, "Pipeline SDR", input)
-	if len(got) != 1 || len(got[0].Text) > 16100 {
+	if len(got) != 1 || len(got[0].Text) > 48100 {
 		t.Fatal("unbounded role packet")
 	}
 }

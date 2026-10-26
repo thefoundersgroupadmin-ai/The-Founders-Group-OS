@@ -139,6 +139,12 @@ def main():
         if usage.returncode:
             print("Reply retained: AI execution is paused or official usage is unavailable.")
             return
+        # These workers cannot read arbitrary Mac paths. Attach the same
+        # authorised OS context used by Conductor tasks before waking one.
+        packet = subprocess.run([sys.executable, str(REPO / "scripts/tfg-agent-context.py"), "--workspace", "founderos"], capture_output=True, text=True)
+        if packet.returncode:
+            print("Reply retained: the approved OS context packet is unavailable.")
+            return
         snippet = re.sub(r"\n{3,}", "\n\n", body.strip())[:3000]
         issue = paperclip(pc, "POST", f"/api/companies/{pc['PAPERCLIP_COMPANY_ID']}/issues", {
             "title": f"Prospect reply from {company}: {subject}"[:200],
@@ -149,7 +155,10 @@ def main():
                             "key \"outbox\" on this task: a JSON array of {\"to\", \"toName\", \"company\", \"subject\", "
                             "\"body\"}. The owner approves it in the TFG OS Outbox; never send any other way. Automatic "
                             "follow-ups to them have stopped. If they asked to opt out, do not reply and note it in the "
-                            "pipeline. If they want a call, propose times and note it in the pipeline."),
+                            "pipeline. If they want a call, propose times and note it in the pipeline."
+                            "\n\n# Verified OS execution context and attached owner handover\n"
+                            "Use this supplied profile, official usage snapshot, handover and workflow catalogue; no local filesystem reads are required. "
+                            "Save an internal report document. Unknown optional facts are report gaps, not permission to invent them.\n" + packet.stdout),
             "status": "todo", "priority": "high", "workMode": "standard", "assigneeAgentId": assignee})
         psql(db, f"update founderos_funnel_contacts set status='engaged', relationship='warm' "
                  f"where id={sql(cid)} and status in ('first_touch','nurtured')")

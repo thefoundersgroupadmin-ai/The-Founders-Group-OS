@@ -2,8 +2,10 @@ package agents
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"math"
+	"strings"
 	"testing"
 	"time"
 )
@@ -132,3 +134,20 @@ func TestCronMatchingAndDue(t *testing.T) {
 }
 
 func ptr[T any](v T) *T { return &v }
+
+func TestWorkerEvidenceIsUsefulBoundedAndRedactsNestedSecrets(t *testing.T) {
+	got := workerEvidence(map[string]any{"messages": []any{map[string]any{"subject": "Buyer requested a demo", "api_key": "sensitive", "accessToken": "sensitive", "env": map[string]any{"X": "sensitive"}}}})
+	if !strings.Contains(got, "Buyer requested a demo") || strings.Contains(got, "sensitive") {
+		t.Fatal(got)
+	}
+	if len(workerEvidence(map[string]any{"body": strings.Repeat("x", 50000)})) > 24100 {
+		t.Fatal("unbounded worker packet")
+	}
+}
+
+func TestWorkerEvidenceDoesNotLeakThroughLegacyRunJSON(t *testing.T) {
+	raw, err := json.Marshal(Run{Summary: "Status", Evidence: "private source records"})
+	if err != nil || strings.Contains(string(raw), "private source") {
+		t.Fatal(string(raw), err)
+	}
+}

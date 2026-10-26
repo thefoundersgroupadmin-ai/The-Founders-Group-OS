@@ -81,3 +81,14 @@ func aiGuardPass(ctx context.Context, b agentPauser, now time.Time) []notify.Eve
 	return []notify.Event{{ID: "ai-paused-" + now.Format("20060102T1504"), Kind: notify.KindHealth,
 		Title: "AI work paused at 50%", Body: why, URL: "/os/usage"}}
 }
+
+// The provider's rolling window is distinct from the owner's persistent weekly
+// cutoff. Do not launch more work into a known exhausted short-term window.
+var codexShortTerm = func(now time.Time) (float64, bool) {
+	home, _ := os.UserHomeDir()
+	seat := collect.CodexSeat([]string{filepath.Join(home, ".codex", "sessions")}, collect.PaperclipCodexHomes(filepath.Join(home, ".paperclip")), now, codexCache, collect.SeatInfo{ID: "guard"})
+	if seat == nil || seat.Official == nil || seat.Official.Session == nil {
+		return 0, false
+	}
+	return seat.Official.Session.UsedPercent, true
+}

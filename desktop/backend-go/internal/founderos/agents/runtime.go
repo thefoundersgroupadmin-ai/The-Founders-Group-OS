@@ -6,6 +6,7 @@ package agents
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"sort"
@@ -49,6 +50,9 @@ type Responder interface {
 
 // Run is one stored agent run (founderos_agent_runs).
 type Run struct {
+	// Evidence is bounded, redacted worker data for the current command handoff.
+	// Command steps persist it; legacy run history retains the summary only.
+	Evidence   string    `json:"-"`
 	ID         string    `json:"id"`
 	AgentID    string    `json:"agentId"`
 	StartedAt  time.Time `json:"startedAt"`
@@ -128,7 +132,7 @@ func (rt *Runtime) Run(ctx context.Context, id string) (Run, error) {
 	res := safely(func() (Result, error) { return a.Run(ctx) })
 	run := Run{
 		ID: uuid.NewString(), AgentID: id, StartedAt: started, FinishedAt: time.Now().UTC(),
-		OK: res.OK, Summary: res.Summary, TokensIn: res.TokensIn, TokensOut: res.TokensOut,
+		OK: res.OK, Summary: res.Summary, Evidence: workerEvidence(res.Data), TokensIn: res.TokensIn, TokensOut: res.TokensOut,
 	}
 	if res.Model != "" {
 		m := res.Model
@@ -268,4 +272,46 @@ func (m *MemStore) InsertBroadcast(_ context.Context, b Broadcast) error {
 	defer m.mu.Unlock()
 	m.broadcasts = append(m.broadcasts, b)
 	return nil
+}
+
+func workerEvidence(data any) string {
+	if data == nil {
+		return ""
+	}
+	raw, err := json.Marshal(data)
+	if err != nil {
+		return ""
+	}
+	var v any
+	if json.Unmarshal(raw, &v) != nil {
+		return ""
+	}
+	var redact func(any) any
+	redact = func(v any) any {
+		switch x := v.(type) {
+		case map[string]any:
+			for k, val := range x {
+				key := strings.ToLower(strings.ReplaceAll(strings.ReplaceAll(k, "_", ""), "-", ""))
+				if strings.Contains(key, "token") || strings.Contains(key, "secret") || strings.Contains(key, "password") || strings.Contains(key, "apikey") || key == "authorization" || key == "cookie" || key == "env" {
+					x[k] = "[redacted]"
+				} else {
+					x[k] = redact(val)
+				}
+			}
+		case []any:
+			for i, val := range x {
+				x[i] = redact(val)
+			}
+		}
+		return v
+	}
+	raw, err = json.Marshal(redact(v))
+	if err != nil {
+		return ""
+	}
+	text := string(raw)
+	if len(text) > 24000 {
+		text = strings.ToValidUTF8(text[:24000], "") + "\n[worker evidence excerpt]"
+	}
+	return text
 }

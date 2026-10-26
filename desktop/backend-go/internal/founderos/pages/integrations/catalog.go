@@ -99,7 +99,7 @@ var Catalog = []Integration{
 	{Slug: "mailchimp", Name: "Mailchimp", Tagline: "Email campaigns", Category: "Marketing"},
 	{Slug: "googleanalytics", Name: "Google Analytics", Tagline: "Traffic & conversions", Category: "Marketing"},
 	{Slug: "meta", Name: "Meta Ads", Tagline: "Campaigns & audiences", Category: "Marketing", ConnectorID: "meta-ads", EnvKeys: []string{"META_ADS_ACCESS_TOKEN"}},
-	{Slug: "beehiiv", Name: "beehiiv", Tagline: "Newsletter & subscribers", Category: "Marketing", ConnectorID: "beehiiv", EnvKeys: []string{"BEEHIIV_API_KEY"}},
+	{Slug: "beehiiv", Name: "beehiiv", Tagline: "Newsletter & subscribers", Category: "Marketing", ConnectorID: "beehiiv", EnvKeys: []string{"BEEHIIV_API_KEY", "BEEHIIV_PUBLICATION_ID"}},
 	{Slug: "buffer", Name: "Buffer", Tagline: "Schedule social posts", Category: "Marketing"},
 	{Slug: "hootsuite", Name: "Hootsuite", Tagline: "Social management", Category: "Marketing"},
 	{Slug: "zernio", Name: "Zernio", Tagline: "Cross-platform posting", Category: "Marketing", ConnectorID: "zernio", EnvKeys: []string{"ZERNIO_API_KEY"}},

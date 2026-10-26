@@ -130,7 +130,7 @@ func StateOfWorld(f PulseFacts) []Segment {
 	if f.ActiveAgents > 0 {
 		tone = "ok"
 	}
-	segs = append(segs, Segment{fmt.Sprintf("%d agents live", f.ActiveAgents), tone}, Segment{fmt.Sprintf("%d idle", idle), "dim"})
+	segs = append(segs, Segment{fmt.Sprintf("%d workers marked active", f.ActiveAgents), tone}, Segment{fmt.Sprintf("%d other worker profiles", idle), "dim"})
 
 	// Stated at every health, not only on failure (mock 3a).
 	if f.EnginesUp > 0 && f.Health != nil && *f.Health >= 70 {
@@ -207,10 +207,10 @@ func OperatingVolume(x VolumeInput) Volume {
 		Display: fmt.Sprintf("%d%%", int(frac(x.Connected, x.TotalConnections)*100+0.5)),
 		Hue:     "var(--bn-accent)",
 	}
-	roster := Meter{Label: "Agents live", Display: "unknown", Hue: "var(--bn-text-2)"}
+	roster := Meter{Label: "Worker profiles active", Display: "unknown", Hue: "var(--bn-text-2)"}
 	if x.ActiveAgents != nil && x.TotalAgents != nil {
 		fr := frac(*x.ActiveAgents, *x.TotalAgents)
-		roster = Meter{Label: fmt.Sprintf("Agents live (%d/%d)", *x.ActiveAgents, *x.TotalAgents), Frac: f64(fr), Display: fmt.Sprintf("%d%%", int(fr*100+0.5)), Hue: "var(--bn-text-2)"}
+		roster = Meter{Label: fmt.Sprintf("Worker profiles active (%d/%d)", *x.ActiveAgents, *x.TotalAgents), Frac: f64(fr), Display: fmt.Sprintf("%d%%", int(fr*100+0.5)), Hue: "var(--bn-text-2)"}
 	}
 	runs := Meter{Label: fmt.Sprintf("Runs OK today (%d/%d)", ok, len(today)), Frac: f64(frac(ok, len(today))), Display: "no runs yet", Hue: "var(--bn-ok)"}
 	if len(today) > 0 {

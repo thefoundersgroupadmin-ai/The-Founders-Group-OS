@@ -331,3 +331,17 @@ func TestOllamaLane(t *testing.T) {
 		t.Fatalf("down = %+v", down)
 	}
 }
+
+func TestCurrentRunnerDurableSessionsCountForOfficialUsage(t *testing.T) {
+	root := t.TempDir()
+	home := filepath.Join(root, "instances", "default", "runtime", "paperclip-runner", "durable-sessions", "session-a", "codex-home", "sessions")
+	write(t, filepath.Join(home, "rollout.jsonl"), codexLine("2026-09-05T14:30:00.000Z", 70, true))
+	homes := PaperclipCodexHomes(root)
+	if len(homes) != 1 || homes[0] != home {
+		t.Fatalf("durable homes missing: %v", homes)
+	}
+	seat := CodexSeat(nil, homes, usageNow, NewCodexCache(), SeatInfo{ID: "guard"})
+	if seat == nil || seat.Official == nil || seat.Official.Weekly == nil || seat.Official.Weekly.UsedPercent != 42 {
+		t.Fatalf("worker snapshot missing: %+v", seat)
+	}
+}

@@ -185,10 +185,10 @@ func Build(in Input) View {
 	}
 	v.Hero = StateOfWorld(facts)
 	if in.Roster == nil {
-		// "0 agents live · 0 idle" would be a lie; the roster is unknown.
+		// "0 workers marked active · 0 idle" would be a lie; the roster is unknown.
 		kept := v.Hero[:0]
 		for _, s := range v.Hero {
-			if strings.HasSuffix(s.Text, "agents live") || strings.HasSuffix(s.Text, " idle") {
+			if strings.HasSuffix(s.Text, "workers marked active") || strings.HasSuffix(s.Text, " other worker profiles") {
 				continue
 			}
 			kept = append(kept, s)

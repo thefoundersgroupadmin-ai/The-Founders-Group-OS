@@ -21,6 +21,7 @@ import (
 
 type sessionSummary struct {
 	ts         string
+	gaugeTS    string
 	in, out    float64
 	cacheRead  float64
 	rateLimits *CodexRateLimits
@@ -42,7 +43,7 @@ type CodexCache struct {
 func NewCodexCache() *CodexCache { return &CodexCache{files: map[string]codexEntry{}} }
 
 // PaperclipCodexHomes are the board seats' own CODEX_HOMEs:
-// <root>/instances/<instance>/companies/<company>/codex-home/sessions.
+// Includes legacy company homes and current runner durable-session homes.
 func PaperclipCodexHomes(root string) []string {
 	ls := func(d string) []string {
 		entries, err := os.ReadDir(d)
@@ -62,6 +63,12 @@ func PaperclipCodexHomes(root string) []string {
 		for _, co := range ls(filepath.Join(inst, "companies")) {
 			sessions := filepath.Join(co, "codex-home", "sessions")
 			if _, err := os.Stat(sessions); err == nil {
+				out = append(out, sessions)
+			}
+		}
+		for _, durable := range ls(filepath.Join(inst, "runtime", "paperclip-runner", "durable-sessions")) {
+			sessions := filepath.Join(durable, "codex-home", "sessions")
+			if info, err := os.Stat(sessions); err == nil && info.IsDir() {
 				out = append(out, sessions)
 			}
 		}
@@ -115,6 +122,7 @@ func (c *CodexCache) summarize(file string, board bool) *sessionSummary {
 		s.in, s.out, s.cacheRead = e.Cumulative.In, e.Cumulative.Out, e.Cumulative.CacheRead
 		if e.RateLimits != nil {
 			s.rateLimits = e.RateLimits
+			s.gaugeTS = e.TS
 		}
 		d := Tot4{
 			In:        math.Max(0, e.Cumulative.In-prev.In),
@@ -167,7 +175,7 @@ func CodexSeat(dirs, boardDirs []string, now time.Time, cache *CodexCache, info 
 			lastActivity = s.ts
 		}
 		slotMaps = append(slotMaps, s.slots)
-		if s.rateLimits != nil && (newest == nil || s.ts > newest.ts) {
+		if s.rateLimits != nil && (newest == nil || s.gaugeTS > newest.gaugeTS) {
 			newest = s
 		}
 		at, ok := parseTS(s.ts)
@@ -190,7 +198,7 @@ func CodexSeat(dirs, boardDirs []string, now time.Time, cache *CodexCache, info 
 	}
 	switch {
 	case newest != nil:
-		seat.CapturedAt = newest.ts
+		seat.CapturedAt = newest.gaugeTS
 	case lastActivity != "":
 		seat.CapturedAt = lastActivity
 	default:

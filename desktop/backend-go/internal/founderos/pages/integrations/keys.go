@@ -84,6 +84,7 @@ var KeySlots = []KeySlot{
 	{EnvVar: "FATHOM_API_KEY", Label: "Fathom API key", Group: "CRM", Hint: "Fathom → Settings → API; sent as X-Api-Key", ConnectorID: "fathom"},
 	{EnvVar: "VIDALYTICS_API_KEY", Label: "Vidalytics API key", Group: "Content", Hint: "Account Settings → Global Settings → API (Premium+); sent as X-API-Key", ConnectorID: "vidalytics"},
 	{EnvVar: "PLAUD_REFRESH_TOKEN", Label: "Plaud refresh token", Group: "Knowledge", Hint: "refresh_token from ~/.plaud/tokens-mcp.json after `claude mcp` signs in; the OS mints its own access tokens", ConnectorID: "plaud"},
+	{EnvVar: "BEEHIIV_PUBLICATION_ID", Label: "Beehiiv publication ID", Group: "Content", Hint: "The publication this OS reads; required alongside its API key", ConnectorID: "beehiiv"},
 }
 
 // SlotStatus is a slot plus whether a value resolves and production's last-4

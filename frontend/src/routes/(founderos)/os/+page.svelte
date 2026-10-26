@@ -89,7 +89,7 @@
 				{#snippet value()}<CountUp value={view.systems.connected} />{/snippet}
 				{#snippet foot()}<ConnectorBars states={view.systems.bars} />{/snippet}
 			</StatTile>
-			<StatTile href="/os/agents" label="Agents live" unit={view.agents.total != null ? `/ ${view.agents.total} roster` : 'roster unknown'}>
+			<StatTile href="/os/agents" label="Worker profiles active" unit={view.agents.total != null ? `/ ${view.agents.total} roster` : 'roster unknown'}>
 				{#snippet value()}{#if view.agents.active != null}<CountUp value={view.agents.active} />{:else}—{/if}{/snippet}
 				{#snippet foot()}{#if view.agents.spark}<SparkBars data={view.agents.spark} />{/if}{/snippet}
 			</StatTile>

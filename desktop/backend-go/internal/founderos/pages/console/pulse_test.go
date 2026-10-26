@@ -46,7 +46,7 @@ func TestStateOfWorldLeadsWithAllNominal(t *testing.T) {
 	if segs[0] != (Segment{"All nominal", "ok"}) {
 		t.Fatalf("first = %+v", segs[0])
 	}
-	for _, s := range []Segment{{"5 agents live", "ok"}, {"3 idle", "dim"}, {"brain 90/100", "ok"}} {
+	for _, s := range []Segment{{"5 workers marked active", "ok"}, {"3 other worker profiles", "dim"}, {"brain 90/100", "ok"}} {
 		if !has(segs, s) {
 			t.Fatalf("missing %+v in %+v", s, segs)
 		}
@@ -125,7 +125,7 @@ func TestOperatingVolumeHeadlineAndMeters(t *testing.T) {
 	for _, m := range v.Meters {
 		labels = append(labels, m.Label)
 	}
-	if want := []string{"Systems connected (19/24)", "Agents live (19/32)", "Runs OK today (2/3)", "Optimal Engine health"}; !reflect.DeepEqual(labels, want) {
+	if want := []string{"Systems connected (19/24)", "Worker profiles active (19/32)", "Runs OK today (2/3)", "Optimal Engine health"}; !reflect.DeepEqual(labels, want) {
 		t.Fatalf("labels = %v", labels)
 	}
 	if math.Abs(*v.Meters[0].Frac-19.0/24) > 1e-9 || math.Abs(*v.Meters[2].Frac-2.0/3) > 1e-9 {

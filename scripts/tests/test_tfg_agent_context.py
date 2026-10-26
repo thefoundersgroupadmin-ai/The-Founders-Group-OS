@@ -16,6 +16,13 @@ class UsageSnapshotTest(unittest.TestCase):
                 Path(root, filename).write_text(json.dumps({"timestamp": timestamp, "payload": {"rate_limits": {"secondary": {"used_percent": percent}}}}) + "\n")
             self.assertEqual(module.latest_weekly_usage(root), 52)
 
+    def test_discovers_current_native_runner_sessions(self):
+        with tempfile.TemporaryDirectory() as root:
+            sessions = Path(root, ".paperclip/instances/default/runtime/paperclip-runner/durable-sessions/a/codex-home/sessions")
+            sessions.mkdir(parents=True)
+            (sessions / "usage.jsonl").write_text(json.dumps({"timestamp": "2026-10-26T22:00:00Z", "payload": {"rate_limits": {"secondary": {"used_percent": 50}}}}) + "\n")
+            self.assertEqual(module.latest_weekly_usage(module.codex_session_roots(root)), 50)
+
     def test_missing_or_unofficial_usage_is_unknown(self):
         with tempfile.TemporaryDirectory() as root:
             Path(root, "usage.jsonl").write_text('{"used_percent": 4}\n')

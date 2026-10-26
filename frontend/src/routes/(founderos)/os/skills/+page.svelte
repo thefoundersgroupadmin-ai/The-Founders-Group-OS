@@ -11,6 +11,7 @@
 	import SkillsGrid from '$lib/founderos/pages/skills/SkillsGrid.svelte';
 	import SalesKit from '$lib/founderos/pages/skills/SalesKit.svelte';
 	import SalesAutomation from '$lib/founderos/pages/skills/SalesAutomation.svelte';
+	import TaskFleet from '$lib/founderos/pages/skills/TaskFleet.svelte';
 	import CommandHistory from '$lib/founderos/pages/skills/CommandHistory.svelte';
 	import type { SkillsBody } from '$lib/founderos/pages/skills/types';
 
@@ -51,6 +52,7 @@
 	</SlabTitle>
 
 	<CommandHistory />
+	<TaskFleet />
 	<SalesAutomation />
 	<details class="mt-6">
 		<summary class="bn-dim cursor-pointer font-mono text-[12px]">Individual workflow tools and client package</summary>

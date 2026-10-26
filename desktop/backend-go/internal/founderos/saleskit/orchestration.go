@@ -33,7 +33,7 @@ func (p CommandPlan) Validate(agentIDs, seats []string) error {
 		}
 		return false
 	}
-	if len(p.Agents) > 50 || len(p.Skills) > 50 || len(p.Tasks) > 8 {
+	if len(p.Agents) > 50 || len(p.Skills) > 50 || len(p.Tasks) > 50 {
 		return errors.New("command exceeds execution limits")
 	}
 	for _, id := range p.Agents {
@@ -84,11 +84,12 @@ Missing optional CRM fields are report gaps, not a reason to block a completed a
 }
 
 type CommandStep struct {
-	Kind   string `json:"kind"`
-	ID     string `json:"id"`
-	Status string `json:"status"`
-	Output string `json:"output,omitempty"`
-	TaskID string `json:"taskId,omitempty"`
+	EvidenceOnly bool   `json:"evidenceOnly,omitempty"`
+	Kind         string `json:"kind"`
+	ID           string `json:"id"`
+	Status       string `json:"status"`
+	Output       string `json:"output,omitempty"`
+	TaskID       string `json:"taskId,omitempty"`
 }
 type Command struct {
 	ID          string        `json:"id"`

@@ -37,6 +37,15 @@ def latest_weekly_usage(session_root):
     return latest[1] if latest else None
 
 
+def codex_session_roots(home):
+    home = Path(home)
+    roots = [home / ".codex/sessions"]
+    instances = home / ".paperclip/instances"
+    roots.extend(instances.glob("*/companies/*/codex-home/sessions"))
+    roots.extend(instances.glob("*/runtime/paperclip-runner/durable-sessions/*/codex-home/sessions"))
+    return roots
+
+
 def read_env(path):
     out = {}
     for line in Path(path).read_text().splitlines():
@@ -56,8 +65,7 @@ def main():
         sys.exit("Invalid workspace slug")
     if (Path.home() / ".founderos/ai-paused").exists():
         sys.exit("AI work is paused. Wait for the owner's explicit resume in TFG OS.")
-    roots = [Path.home() / ".codex/sessions"]
-    roots.extend((Path.home() / ".paperclip/instances").glob("*/companies/*/codex-home/sessions"))
+    roots = codex_session_roots(Path.home())
     usage = latest_weekly_usage(roots)
     if usage is None:
         sys.exit("Official weekly usage is unavailable. Do not execute AI work.")

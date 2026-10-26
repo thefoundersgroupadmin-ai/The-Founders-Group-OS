@@ -20,7 +20,7 @@ function view(over: Partial<ConsoleView> = {}): ConsoleView {
 		generatedAt: iso(0),
 		hero: [
 			{ text: '1 run failed', tone: 'err' },
-			{ text: '3 agents live', tone: 'ok' },
+			{ text: '3 workers marked active', tone: 'ok' },
 			{ text: '2 idle', tone: 'dim' }
 		],
 		systems: { connected: 19, total: 24, bars: ['connected', 'error', 'not_configured'] },
@@ -45,7 +45,7 @@ function view(over: Partial<ConsoleView> = {}): ConsoleView {
 			agentsToday: 4,
 			meters: [
 				{ label: 'Systems connected (19/24)', frac: 19 / 24, display: '79%', hue: 'var(--bn-accent)' },
-				{ label: 'Agents live (3/5)', frac: 0.6, display: '60%', hue: 'var(--bn-text-2)' },
+				{ label: 'Worker profiles active (3/5)', frac: 0.6, display: '60%', hue: 'var(--bn-text-2)' },
 				{ label: 'Runs OK today (11/12)', frac: 11 / 12, display: '11 ok · 1 failed', hue: 'var(--bn-warn)' },
 				{ label: 'Optimal Engine health', frac: 0.9, display: '90 / 100', hue: 'var(--bn-text)' }
 			]
@@ -148,10 +148,10 @@ describe('/os operator console', () => {
 		expect(tiles.length).toBe(4);
 		expect([...tiles].map((t) => t.getAttribute('href'))).toEqual(['/os/integrations', '/os/agents', '/os/comms', '/os/brain']);
 		expect(tiles[0].textContent).toContain('/ 24 connected');
-		// prod tiles read in title case: Systems · Agents live · Communications · G-Brain health
+		// prod tiles read in title case: Systems · Worker profiles active · Communications · G-Brain health
 		expect([...tiles].map((t) => t.querySelector('[data-part="label"]')?.textContent?.trim())).toEqual([
 			'Systems',
-			'Agents live',
+			'Worker profiles active',
 			'Communications',
 			'Optimal Engine health'
 		]);

@@ -17,7 +17,7 @@ type fakeDelegator struct {
 }
 
 func (f *fakeDelegator) Agents(context.Context) ([]paperclip.Agent, error) {
-	return []paperclip.Agent{{ID: "pr-1", Name: "Prospect Research"}, {ID: "ceo-1", Name: "CEO"}}, nil
+	return []paperclip.Agent{{ID: "pr-1", Name: "Prospect Research", Status: "idle"}, {ID: "ceo-1", Name: "CEO", Status: "idle"}}, nil
 }
 func (f *fakeDelegator) CreateIssue(_ context.Context, title, desc string) (*paperclip.Issue, error) {
 	f.created = append(f.created, title+"\n"+desc)

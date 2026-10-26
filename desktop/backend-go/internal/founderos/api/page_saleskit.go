@@ -67,6 +67,9 @@ func salesKitAIAllowed() error {
 		}
 		return errors.New(why)
 	}
+	if pct, known := codexShortTerm(time.Now()); known && pct >= 100 {
+		return errors.New("Codex short-term usage window is exhausted; downstream work is paused until capacity is verified. No retry or provider switching was performed")
+	}
 	return nil
 }
 

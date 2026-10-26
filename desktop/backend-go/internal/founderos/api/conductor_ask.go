@@ -383,7 +383,7 @@ func registerConductorAsk(s gin.IRoutes, d *Deps) {
 				answer.Receipt.Text = cmdErr.Error()
 			} else {
 				answer.Content = "Your command is queued. The OS will run the selected agents and workflows and save the results."
-				answer.Receipt.Text = fmt.Sprintf("Command %s · %d workers · %d workflows · %d team tasks", cmd.ID[:8], len(plan.Agents), len(plan.Skills), len(plan.Tasks))
+				answer.Receipt.Text = fmt.Sprintf("Command %s · %d workers · %d workflows · %d team tasks", cmd.ID[:8], len(cmd.Plan.Agents), len(cmd.Plan.Skills), len(cmd.Plan.Tasks))
 			}
 		}
 		if dg != nil && p.Owner && d.Pool != nil {

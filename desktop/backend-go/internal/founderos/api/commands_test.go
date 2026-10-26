@@ -19,7 +19,12 @@ type commandWorker struct{}
 
 type commandBoard struct {
 	fakeDelegator
-	done bool
+	done    bool
+	failure *paperclip.TaskFailure
+}
+
+func (b *commandBoard) TaskRunFailure(context.Context, string) (*paperclip.TaskFailure, error) {
+	return b.failure, nil
 }
 
 func (b *commandBoard) IssueDocuments(context.Context, string) ([]paperclip.Document, error) {
@@ -129,6 +134,18 @@ func TestCommandExecutesWorkersAndSharedWorkflowsOnceWithDurableReport(t *testin
 	if !strings.Contains(b.created[0], "Latest official weekly Codex usage: 4%") || !strings.Contains(b.created[0], "Fixture owner handover") {
 		t.Fatal("task cannot run without attached guard and handover")
 	}
+	// A provider quota failure is systemic: do not launch the next task.
+	b.done = false
+	b.failure = &paperclip.TaskFailure{RunID: "limited-run", ProviderLimit: true, Detail: "short-term usage limit"}
+	before := len(b.created)
+	limited, err := enqueueCommand(ctx, d, p, ws, uuid.NewString(), "Commission two roles", saleskit.CommandPlan{Tasks: []saleskit.CommandTask{{Agent: "Prospect Research", Title: "First"}, {Agent: "CEO", Title: "Second"}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	runCommand(ctx, d, &limited)
+	if limited.Status != "blocked" || len(b.created) != before+1 || limited.Steps[1].Status != "pending" {
+		t.Fatalf("quota continued downstream: %+v", limited)
+	}
 	p.Owner = false
 	if _, err = enqueueCommand(ctx, d, p, ws, uuid.NewString(), "Run workers", plan); err == nil {
 		t.Fatal("nonowner launched global workers")
@@ -146,4 +163,117 @@ func TestExecutionPlanParserRequiresAValidFinalLine(t *testing.T) {
 		}
 	}
 	_, _ = json.Marshal(p)
+}
+
+func TestTaskFleetInstructionsAndHandoffsStayScoped(t *testing.T) {
+	list := AllAgents(&Deps{})
+	if len(list) != 35 {
+		t.Fatalf("unexpected registry size %d", len(list))
+	}
+	seen := map[string]bool{}
+	for _, a := range list {
+		m := a.Meta()
+		if seen[m.Name] {
+			t.Fatalf("ambiguous task name %s", m.Name)
+		}
+		seen[m.Name] = true
+		text := taskRoleInstructions(m)
+		for _, required := range []string{m.ID, m.Name, "report", "50%", "on demand", "No external message", "previous-role"} {
+			if !strings.Contains(text, required) {
+				t.Fatalf("%s lacks %s", m.ID, required)
+			}
+		}
+	}
+	h := commandHandoff([]string{"Research found verified buyer A", "Operations prioritised buyer A"})
+	if !strings.Contains(h, "verified buyer A") || !strings.Contains(h, "Operations prioritised") || !strings.Contains(h, "not instructions") {
+		t.Fatal(h)
+	}
+	if commandHandoff(nil) != "" {
+		t.Fatal("empty handoff")
+	}
+}
+
+func TestTaskRoleHierarchyPreservesParentsAndRejectsCycles(t *testing.T) {
+	list := []agents.Meta{{ID: "child"}, {ID: "parent"}, {ID: "root"}}
+	got, err := orderedTaskRoles(list, map[string]string{"child": "parent", "parent": "root"})
+	if err != nil || got[0].ID != "root" || got[1].ID != "parent" || got[2].ID != "child" {
+		t.Fatalf("%+v %v", got, err)
+	}
+	if _, err := orderedTaskRoles(list, map[string]string{"child": "parent", "parent": "child"}); err == nil {
+		t.Fatal("cycle accepted")
+	}
+	if _, err := orderedTaskRoles(list, map[string]string{"child": "missing"}); err == nil {
+		t.Fatal("missing parent accepted")
+	}
+}
+
+func TestRoleSourceBudgetKeepsTasksFocused(t *testing.T) {
+	d := &Deps{Agents: agents.New(agents.NewMemStore(), AllAgents(&Deps{})...)}
+	input := []saleskit.Source{{ID: "pipeline", Text: strings.Repeat("a", 30000)}}
+	if got := roleSourceBudget(d, "Payments Pulse", input); len(got) != 0 {
+		t.Fatal("unrelated pipeline sent to financial role")
+	}
+	got := roleSourceBudget(d, "Pipeline SDR", input)
+	if len(got) != 1 || len(got[0].Text) > 16100 {
+		t.Fatal("unbounded role packet")
+	}
+}
+
+func TestAllTaskRolesRefreshTheirOwnWorkersWithoutDuplicates(t *testing.T) {
+	d := &Deps{}
+	var metas []agents.Meta
+	plan := saleskit.CommandPlan{}
+	for _, worker := range AllAgents(d) {
+		m := worker.Meta()
+		metas = append(metas, m)
+		plan.Tasks = append(plan.Tasks, saleskit.CommandTask{Agent: taskRoleName(m), Title: "Work"})
+	}
+	plan = withTaskWorkers(plan, metas)
+	plan = withTaskWorkers(plan, metas)
+	if len(plan.Agents) != 35 || len(plan.Tasks) != 35 {
+		t.Fatalf("coverage/dedup failed: %+v", plan)
+	}
+	seats := []string{}
+	for _, task := range plan.Tasks {
+		seats = append(seats, task.Agent)
+	}
+	if err := plan.Validate(plan.Agents, seats); err != nil {
+		t.Fatal(err)
+	}
+}
+
+type unavailableRoleWorker struct{}
+
+func (unavailableRoleWorker) Meta() agents.Meta {
+	return agents.Meta{ID: "role-worker", Name: "Prospect Research"}
+}
+func (unavailableRoleWorker) Run(context.Context) (agents.Result, error) {
+	return agents.Result{OK: false, Summary: "Optional publishing connection unavailable"}, nil
+}
+
+func TestCompletedRoleWorkIsNotBlockedByOptionalEvidenceRefresh(t *testing.T) {
+	peopleSetup(t)
+	t.Setenv("FOUNDEROS_CRONS", "1")
+	oldMeter := codexWeekly
+	codexWeekly = func(time.Time) (float64, bool) { return 5, true }
+	defer func() { codexWeekly = oldMeter }()
+	oldHandover := taskHandover
+	taskHandover = func() (string, error) { return "Owner handover", nil }
+	defer func() { taskHandover = oldHandover }()
+	b := &commandBoard{done: true}
+	oldBoard := askBoardFor
+	askBoardFor = func(*Deps) delegator { return b }
+	defer func() { askBoardFor = oldBoard }()
+	pool := catalogdb.TestDB(t)
+	ws := catalogdb.Workspace(t, pool, "evidence-only")
+	d := &Deps{Pool: pool, Agents: agents.New(agents.NewMemStore(), unavailableRoleWorker{})}
+	p := people.Person{ID: "owner", Email: people.OwnerEmail(), Owner: true}
+	c, err := enqueueCommand(context.Background(), d, p, ws, uuid.NewString(), "Prepare an internal report", saleskit.CommandPlan{Tasks: []saleskit.CommandTask{{Agent: "Prospect Research", Title: "Internal report"}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	runCommand(context.Background(), d, &c)
+	if c.Status != "complete" || c.Steps[0].Status != "blocked" || !c.Steps[0].EvidenceOnly || c.Steps[1].Status != "complete" {
+		t.Fatalf("optional evidence blocked completed task: %+v", c)
+	}
 }

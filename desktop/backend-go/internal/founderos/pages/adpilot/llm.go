@@ -7,7 +7,9 @@ import (
 	"errors"
 	"github.com/rhl/businessos-backend/internal/founderos/pages/shared"
 	"github.com/rhl/businessos-backend/internal/founderos/people"
+	"os"
 	"os/exec"
+	"path/filepath"
 	"regexp"
 	"sort"
 	"strings"
@@ -38,6 +40,18 @@ func (c ClaudeCLI) Complete(ctx context.Context, prompt string) (string, error) 
 		bin = "claude"
 	}
 	path, err := exec.LookPath(bin)
+	if err != nil && c.Bin == "" {
+		// LaunchAgents do not inherit the interactive shell's ~/.local/bin.
+		// Resolve the same owner installation used by the Conductor, without
+		// changing identities or falling back to another model/provider.
+		for _, candidate := range []string{filepath.Join(os.Getenv("HOME"), ".local/bin/claude"), "/opt/homebrew/bin/claude"} {
+			if info, e := os.Stat(candidate); e == nil && !info.IsDir() && info.Mode()&0111 != 0 {
+				path = candidate
+				err = nil
+				break
+			}
+		}
+	}
 	if err != nil {
 		return "", ErrLLMUnavailable
 	}

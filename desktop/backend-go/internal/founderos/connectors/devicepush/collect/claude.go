@@ -176,7 +176,10 @@ func ScanClaudeProjects(dir string, now time.Time, cache *ScanCache, info SeatIn
 			if b := st.perDay[days[i].Day]; b != nil {
 				addTot(&days[i].Tot, *b)
 			}
-			// the model split honors the same window as the day columns
+			// Model totals retain the weekly window while day history includes eight days.
+			if i < len(days)-7 {
+				continue
+			}
 			for m, t := range st.perDayModel[days[i].Day] {
 				if t.In+t.Out+t.CacheWrite+t.CacheRead == 0 {
 					continue

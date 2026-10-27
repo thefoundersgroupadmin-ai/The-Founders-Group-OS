@@ -46,6 +46,7 @@ export type PlanUsage = {
 	plan: string | null;
 	official: Official;
 	days: DayBucket[];
+ historyDays?: (DayBucket & {reported: boolean})[];
 	byModel: Record<string, Tot>;
 	breakdown?: Breakdown | null;
 	lastActivity: string | null;

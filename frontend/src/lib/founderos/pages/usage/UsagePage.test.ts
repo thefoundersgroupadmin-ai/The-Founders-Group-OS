@@ -31,6 +31,19 @@ beforeEach(() => {
 afterEach(() => vi.useRealTimers());
 
 describe('/os/usage', () => {
+ it('opens eight-day history without changing weekly plan gauges',async()=>{
+  fetchMock.mockResolvedValue({...full,claude:{...claude,historyDays:[{day:'2026-09-17',in:800,out:20,cacheWrite:0,cacheRead:100,reported:true},{day:'2026-09-18',in:0,out:0,cacheWrite:0,cacheRead:0,reported:false}]}});
+  render(UsagePage);
+  await screen.findByText('Token Burn');
+  expect(screen.queryByRole('table',{name:'Last 8 days of token usage'})).toBeNull();
+  await fireEvent.click(screen.getByRole('button',{name:'Last 8 days'}));
+  const table=screen.getByRole('table',{name:'Last 8 days of token usage'});
+  expect(within(table).getByText('2026-09-17')).toBeTruthy();
+  expect(within(table).getByText('820')).toBeTruthy();
+  expect(within(table).getAllByTitle('Not reported')).toHaveLength(5);
+  expect(screen.getByText('tokens burned, last 7 days')).toBeTruthy();
+ });
+
 	it('opens with the slab title row and a raw-reading pill to the bridge endpoint', async () => {
 		fetchMock.mockResolvedValue(full);
 		render(UsagePage);

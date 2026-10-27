@@ -15,6 +15,7 @@
 	import { founderosFetch } from '$lib/founderos/api';
 	import { BigStat, DotMatrix, InsightCard, MeterStack, SlabCard, StepLine } from '$lib/founderos/kit';
 	import OllamaCard from './OllamaCard.svelte';
+ import RecentHistory from './RecentHistory.svelte';
 	import OllamaDetail from './OllamaDetail.svelte';
 	import PlanCard from './PlanCard.svelte';
 	import PlanDetail from './PlanDetail.svelte';
@@ -35,6 +36,7 @@
 	let clock = $state(Date.now());
 	// "me": only the viewer's own machines (the default); "team": everyone's.
 	let who = $state<'me' | 'team'>('me');
+ let showHistory=$state(false);
 
 	async function load() {
 		try {
@@ -67,9 +69,10 @@
 	const errorLine = $derived(board?.errors ? Object.entries(board.errors).map(([k, v]) => `${k}: ${v}`).join(' · ') : null);
 </script>
 
-<div class="mb-4 flex items-center gap-2" data-part="who">
+<div class="mb-4 flex flex-wrap items-center gap-2" data-part="who">
 	<button type="button" class={chipClass(who === 'me')} onclick={() => pick('me')}>My usage</button>
 	<button type="button" class={chipClass(who === 'team')} onclick={() => pick('team')}>Whole team</button>
+	<button type="button" class={chipClass(showHistory)} aria-pressed={showHistory} onclick={()=>showHistory=!showHistory}>Last 8 days</button>
 	<span class="bn-dim font-mono text-[10.5px]">{who === 'me' ? 'your machines and your own AI logins only' : 'everyone, added together'}</span>
 </div>
 
@@ -78,6 +81,7 @@
 		{error ? `usage read failed: ${error}` : 'reading local transcripts…'}
 	</div>
 {:else}
+ {#if showHistory}<div class="mb-6"><RecentHistory {board}/></div>{/if}
 	<div>
 		<!-- Hero row: the week's burn line + the Deal Volume card worn by token burn -->
 		<div class="grid grid-cols-[2fr_1fr] gap-6 max-[1200px]:grid-cols-1">

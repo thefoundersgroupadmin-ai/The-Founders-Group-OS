@@ -18,7 +18,7 @@ import (
 )
 
 // UsageWindowDays is the seat's day window (USAGE_WINDOW_DAYS).
-const UsageWindowDays = 7
+const UsageWindowDays = 8
 
 // Tot4 is one in/out/cacheWrite/cacheRead total.
 type Tot4 = devicepush.Tot
@@ -52,7 +52,7 @@ func DayKey(t time.Time) string { return t.In(local).Format("2006-01-02") }
 func EmptyDays(now time.Time, n int) []devicepush.DayBucket {
 	out := make([]devicepush.DayBucket, 0, n)
 	for i := n - 1; i >= 0; i-- {
-		out = append(out, devicepush.DayBucket{Day: DayKey(now.Add(-time.Duration(i) * 24 * time.Hour))})
+		out = append(out, devicepush.DayBucket{Day: DayKey(now.In(local).AddDate(0, 0, -i))})
 	}
 	return out
 }
@@ -264,7 +264,7 @@ func BreakdownFromSlots(maps []SlotMap, now time.Time, days []devicepush.DayBuck
 	sessionFloor := floorDiv(now.UnixMilli()-5*3600_000, slotMS)
 	today := DayKey(now)
 	week := map[string]bool{}
-	for _, d := range days {
+	for _, d := range days[max(0, len(days)-7):] {
 		week[d.Day] = true
 	}
 	byKey := map[string]*Tot4{}
@@ -481,7 +481,7 @@ func CountOllamaRequests(lines []string, now time.Time) devicepush.RequestWindow
 			continue
 		}
 		age := now.Sub(when)
-		if age < 0 || age > UsageWindowDays*24*time.Hour {
+		if age < 0 || age > 7*24*time.Hour {
 			continue
 		}
 		bump := func(c *devicepush.RequestCounts) {

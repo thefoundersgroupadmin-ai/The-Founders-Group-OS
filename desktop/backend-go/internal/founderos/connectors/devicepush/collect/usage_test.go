@@ -191,7 +191,7 @@ func TestScanClaudeProjectsAggregatesIncrementally(t *testing.T) {
 	write(t, filepath.Join(dir, "ignore.txt"), "not a transcript")
 	cache := NewScanCache()
 	seat := ScanClaudeProjects(dir, usageNow, cache, SeatInfo{ID: "claude-mac", Label: "Claude · mac"})
-	if seat.Days[6].In != 100 || seat.Days[5].In != 200 || seat.ByModel["claude-opus-5"].Out != 20 || *seat.LastActivity != "2026-09-05T12:00:00.000Z" {
+	if seat.Days[UsageWindowDays-1].In != 100 || seat.Days[UsageWindowDays-2].In != 200 || seat.ByModel["claude-opus-5"].Out != 20 || *seat.LastActivity != "2026-09-05T12:00:00.000Z" {
 		t.Fatalf("seat = %+v", seat)
 	}
 	if seat.Kind != "claude" || seat.Source != "local" || seat.ID != "claude-mac" || seat.Official != nil {
@@ -200,12 +200,12 @@ func TestScanClaudeProjectsAggregatesIncrementally(t *testing.T) {
 	before := cache.files[f].offset
 	appendTo(t, f, aline("2026-09-05T14:00:00.000Z", 50))
 	seat = ScanClaudeProjects(dir, usageNow, cache, SeatInfo{ID: "claude-mac", Label: "x"})
-	if seat.Days[6].In != 150 || cache.files[f].offset <= before {
-		t.Fatalf("appended bytes: in=%v offset=%d", seat.Days[6].In, cache.files[f].offset)
+	if seat.Days[UsageWindowDays-1].In != 150 || cache.files[f].offset <= before {
+		t.Fatalf("appended bytes: in=%v offset=%d", seat.Days[UsageWindowDays-1].In, cache.files[f].offset)
 	}
 	write(t, f, aline("2026-09-05T12:00:00.000Z", 30)) // shorter rewrite
-	if seat = ScanClaudeProjects(dir, usageNow, cache, SeatInfo{ID: "x", Label: "x"}); seat.Days[6].In != 30 {
-		t.Fatalf("a rewritten file is rebuilt from zero: %v", seat.Days[6].In)
+	if seat = ScanClaudeProjects(dir, usageNow, cache, SeatInfo{ID: "x", Label: "x"}); seat.Days[UsageWindowDays-1].In != 30 {
+		t.Fatalf("a rewritten file is rebuilt from zero: %v", seat.Days[UsageWindowDays-1].In)
 	}
 }
 
@@ -215,12 +215,12 @@ func TestScanClaudeHoldsBackAPartialLine(t *testing.T) {
 	half := aline("2026-09-05T13:00:00.000Z", 40)
 	write(t, f, aline("2026-09-05T12:00:00.000Z", 100)+half[:50])
 	cache := NewScanCache()
-	if seat := ScanClaudeProjects(dir, usageNow, cache, SeatInfo{ID: "x", Label: "x"}); seat.Days[6].In != 100 {
-		t.Fatalf("in = %v", seat.Days[6].In)
+	if seat := ScanClaudeProjects(dir, usageNow, cache, SeatInfo{ID: "x", Label: "x"}); seat.Days[UsageWindowDays-1].In != 100 {
+		t.Fatalf("in = %v", seat.Days[UsageWindowDays-1].In)
 	}
 	appendTo(t, f, half[50:])
-	if seat := ScanClaudeProjects(dir, usageNow, cache, SeatInfo{ID: "x", Label: "x"}); seat.Days[6].In != 140 {
-		t.Fatalf("in = %v", seat.Days[6].In)
+	if seat := ScanClaudeProjects(dir, usageNow, cache, SeatInfo{ID: "x", Label: "x"}); seat.Days[UsageWindowDays-1].In != 140 {
+		t.Fatalf("in = %v", seat.Days[UsageWindowDays-1].In)
 	}
 }
 
@@ -266,7 +266,7 @@ func TestCodexSeat(t *testing.T) {
 		`{"type":"session_meta","payload":{"cwd":"/Users/b/.superset/worktrees/FounderOS-v1/x/wt","originator":"codex-tui"}}`+"\n"+
 			codexLine("2026-09-05T14:10:00.000Z", 100, false)+codexLine("2026-09-05T14:20:00.000Z", 300, true))
 	seat := CodexSeat([]string{dir}, nil, usageNow, NewCodexCache(), SeatInfo{ID: "codex-mac", Label: "Codex · mac"})
-	if seat == nil || seat.Days[6].In != 300 || seat.Official.Weekly.UsedPercent != 42 || seat.CapturedAt != "2026-09-05T14:20:00.000Z" {
+	if seat == nil || seat.Days[UsageWindowDays-1].In != 300 || seat.Official.Weekly.UsedPercent != 42 || seat.CapturedAt != "2026-09-05T14:20:00.000Z" {
 		t.Fatalf("seat = %+v", seat)
 	}
 	if seat.Plan == nil || *seat.Plan != "ChatGPT Pro" || seat.Note != "official plan gauge, as of the last codex run" {
@@ -285,7 +285,7 @@ func TestCodexSeat(t *testing.T) {
 		t.Fatalf("homes = %v", homes)
 	}
 	seat = CodexSeat([]string{dir}, homes, usageNow, NewCodexCache(), SeatInfo{ID: "codex-mac", Label: "Codex · mac"})
-	if seat.Breakdown.Windows.Hour.Board.In != 70 || seat.Days[6].In != 370 {
+	if seat.Breakdown.Windows.Hour.Board.In != 70 || seat.Days[UsageWindowDays-1].In != 370 {
 		t.Fatalf("board sessions: %+v", seat.Breakdown.Windows.Hour)
 	}
 	if CodexSeat([]string{filepath.Join(dir, "missing")}, nil, usageNow, NewCodexCache(), SeatInfo{ID: "c", Label: "c"}) != nil {
@@ -343,5 +343,15 @@ func TestCurrentRunnerDurableSessionsCountForOfficialUsage(t *testing.T) {
 	seat := CodexSeat(nil, homes, usageNow, NewCodexCache(), SeatInfo{ID: "guard"})
 	if seat == nil || seat.Official == nil || seat.Official.Weekly == nil || seat.Official.Weekly.UsedPercent != 42 {
 		t.Fatalf("worker snapshot missing: %+v", seat)
+	}
+}
+
+func TestEightDayHistoryDoesNotExpandWeeklyBreakdown(t *testing.T) {
+	slots := SlotMap{}
+	AddToSlots(slots, "2026-08-29T12:00:00Z", Lane{"board", "fixture"}, Tot4{In: 800})
+	AddToSlots(slots, "2026-09-05T12:00:00Z", Lane{"board", "fixture"}, Tot4{In: 10})
+	b := BreakdownFromSlots([]SlotMap{slots}, usageNow, EmptyDays(usageNow, 8))
+	if b.Windows.Week.Board.In != 10 {
+		t.Fatalf("eighth day leaked into weekly window: %+v", b.Windows.Week)
 	}
 }

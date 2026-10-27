@@ -47,8 +47,14 @@ type Machine struct {
 	Stale        bool    `json:"stale"`
 }
 
+type HistoryDay struct {
+	dp.DayBucket
+	Reported bool `json:"reported"`
+}
+
 // Plan is PlanUsage.
 type Plan struct {
+	HistoryDays  []HistoryDay      `json:"historyDays"`
 	Plan         *string           `json:"plan"`
 	Official     *dp.Official      `json:"official"`
 	Days         []dp.DayBucket    `json:"days"`
@@ -216,7 +222,7 @@ const windowDays = 7
 func dayWindow(now time.Time, n int) []dp.DayBucket {
 	out := make([]dp.DayBucket, 0, n)
 	for i := n - 1; i >= 0; i-- {
-		out = append(out, dp.DayBucket{Day: now.Add(-time.Duration(i) * 24 * time.Hour).In(time.Local).Format("2006-01-02")})
+		out = append(out, dp.DayBucket{Day: now.In(time.Local).AddDate(0, 0, -i).Format("2006-01-02")})
 	}
 	return out
 }
@@ -228,6 +234,11 @@ func CombineSeats(seats []Seat, now time.Time) *Plan {
 		return nil
 	}
 	p := &Plan{ByModel: map[string]dp.Tot{}, Machines: []Machine{}, Days: dayWindow(now, windowDays)}
+	historyIndex := map[string]int{}
+	for _, day := range dayWindow(now, 8) {
+		historyIndex[day.Day] = len(p.HistoryDays)
+		p.HistoryDays = append(p.HistoryDays, HistoryDay{DayBucket: day})
+	}
 	idx := map[string]int{}
 	for i, d := range p.Days {
 		idx[d.Day] = i
@@ -238,6 +249,10 @@ func CombineSeats(seats []Seat, now time.Time) *Plan {
 	planWho := map[string]string{}
 	for _, s := range seats {
 		for _, d := range s.Days {
+			if i, ok := historyIndex[d.Day]; ok {
+				addTot(&p.HistoryDays[i].Tot, d.Tot)
+				p.HistoryDays[i].Reported = true
+			}
 			if i, ok := idx[d.Day]; ok {
 				addTot(&p.Days[i].Tot, d.Tot)
 			}

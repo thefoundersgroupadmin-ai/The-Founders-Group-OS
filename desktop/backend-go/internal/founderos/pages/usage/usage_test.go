@@ -247,3 +247,14 @@ func TestStaleSeatsDoNotCountTowardTheLastHourOrSession(t *testing.T) {
 		t.Fatalf("week = %v, want 110 (history counts)", w.Week.Sessions.In)
 	}
 }
+
+func TestEightDayHistoryPreservesWeeklyWindowAndUnknownDays(t *testing.T) {
+	now := time.Date(2026, 10, 27, 12, 0, 0, 0, time.Local)
+	p := CombineSeats([]Seat{{SeatUsage: dp.SeatUsage{ID: "fixture", Days: []dp.DayBucket{{Day: "2026-10-20", Tot: tot(8, 0, 0, 0)}, {Day: "2026-10-27", Tot: tot(3, 0, 0, 0)}}}}}, now)
+	if len(p.Days) != 7 || p.Days[0].Day != "2026-10-21" {
+		t.Fatalf("weekly window changed: %+v", p.Days)
+	}
+	if len(p.HistoryDays) != 8 || p.HistoryDays[0].In != 8 || !p.HistoryDays[0].Reported || p.HistoryDays[1].Reported || p.HistoryDays[7].In != 3 {
+		t.Fatalf("history: %+v", p.HistoryDays)
+	}
+}

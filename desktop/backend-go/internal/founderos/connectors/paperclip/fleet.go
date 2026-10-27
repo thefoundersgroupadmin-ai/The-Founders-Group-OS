@@ -178,3 +178,28 @@ func (c *Connector) CreateCommandIssue(ctx context.Context, title, description, 
 	}
 	return first(MapIssues([]any{body})), nil
 }
+
+func (c *Connector) VerifyToolRun(ctx context.Context, runID, agentID, taskID string) error {
+	body, err := c.get(ctx, "/api/heartbeat-runs/"+runID, issueTimeout)
+	if err != nil {
+		return err
+	}
+	r := obj(body)
+	snap := obj(r["contextSnapshot"])
+	cr, ok := c.creds()
+	if !ok || r["companyId"] != cr.company || r["agentId"] != agentID || r["status"] != "running" || (snap["issueId"] != taskID && snap["taskId"] != taskID) {
+		return errors.New("native run is not the active assignee for this work order")
+	}
+	return nil
+}
+func (c *Connector) ReturnToolReceipt(ctx context.Context, taskID, agentID, id, body string) error {
+	_, err := c.send(ctx, "paperclip.document.write", http.MethodPut, "/api/issues/"+taskID+"/documents/tool-"+id, map[string]any{"title": "OS tool receipt " + id, "body": body, "format": "markdown"})
+	if err != nil {
+		return err
+	}
+	_, err = c.CommentOnIssue(ctx, taskID, "The owner decided OS tool action "+id+". Its exact result is saved in document tool-"+id+". Read it; do not repeat the external action. Continue the original task using the receipt.")
+	if err != nil {
+		return err
+	}
+	return c.AssignIssue(ctx, taskID, agentID)
+}

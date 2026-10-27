@@ -11,6 +11,7 @@ package api
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -27,8 +28,33 @@ const aiCutoffPercent = 50.0
 
 func aiPausedPath() string { return filepath.Join(filepath.Dir(people.Root()), "ai-paused") }
 
+// An explicit owner resume is bounded; the original pause file stays intact.
+type aiResumeGrant struct {
+	AuthorizedAt time.Time `json:"authorizedAt"`
+	ExpiresAt    time.Time `json:"expiresAt"`
+	Reason       string    `json:"reason"`
+}
+
+func aiResumeActive(now time.Time) bool {
+	raw, err := os.ReadFile(filepath.Join(filepath.Dir(aiPausedPath()), "ai-resume.json"))
+	if err != nil {
+		return false
+	}
+	var grant aiResumeGrant
+	if json.Unmarshal(raw, &grant) != nil || grant.Reason == "" || grant.AuthorizedAt.After(now) || !grant.ExpiresAt.After(now) || grant.ExpiresAt.Sub(grant.AuthorizedAt) > 4*time.Hour {
+		return false
+	}
+	if info, err := os.Stat(aiPausedPath()); err == nil && info.ModTime().After(grant.AuthorizedAt) {
+		return false
+	}
+	return true
+}
+
 // aiPaused says why AI work is paused, or "".
 func aiPaused() string {
+	if aiResumeActive(time.Now()) {
+		return ""
+	}
 	raw, err := os.ReadFile(aiPausedPath())
 	if err != nil {
 		return ""
@@ -60,6 +86,9 @@ type agentPauser interface {
 // aiGuardPass pauses the board at the cutoff; it returns the event to send
 // when it just paused.
 func aiGuardPass(ctx context.Context, b agentPauser, now time.Time) []notify.Event {
+	if aiResumeActive(now) {
+		return nil
+	}
 	pct, ok := codexWeekly(now)
 	if !ok || pct < aiCutoffPercent {
 		return nil

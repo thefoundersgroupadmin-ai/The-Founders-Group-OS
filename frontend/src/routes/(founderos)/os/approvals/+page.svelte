@@ -4,6 +4,7 @@
      documents and thread for context, and an instruction box on the task.
      Data: GET /api/founderos/pages/approvals; decisions are guarded writes. -->
 <script lang="ts">
+ import ToolApprovals from '$lib/founderos/pages/approvals/ToolApprovals.svelte';
 	import { onMount } from 'svelte';
 	import { founderosFetch } from '$lib/founderos/api';
 	import { Badge, PageHeader, Pressable, Rise, Slab } from '$lib/founderos/kit';
@@ -100,6 +101,7 @@
 		{/snippet}
 	</PageHeader>
 	<Rise i={1}>
+ <ToolApprovals />
 		{#if data}
 			{#if data.outboxPending > 0}
 				<Slab>

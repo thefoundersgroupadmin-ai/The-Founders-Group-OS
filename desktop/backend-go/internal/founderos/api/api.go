@@ -106,6 +106,7 @@ func NewDeps(pool *pgxpool.Pool) *Deps {
 	}
 	startSalesAutomation(d)
 	startCommands(d)
+	recoverAgentTools(d)
 	if err := installSalesWorkflows(); err != nil {
 		slog.Warn("sales workflow installation failed", "error", err)
 	}
@@ -229,6 +230,7 @@ func TopologyEngines() []optimalengine.Engine {
 // chain (session + RequireAuth).
 func Register(api *gin.RouterGroup, d *Deps, auth ...gin.HandlerFunc) {
 	b := api.Group("/founderos")
+	b.POST("/agent-tools/mcp", agentToolMCP(d))
 
 	// The device collector has no browser session; it presents its own token.
 	b.POST("/device/push", devicePush(d))
@@ -286,10 +288,12 @@ func devicePush(d *Deps) gin.HandlerFunc {
 // machineRoutes authenticate with a bearer token, not a browser session, so
 // double-submit CSRF does not apply (and would block every call).
 var machineRoutes = map[string]bool{
-	"/api/founderos/device/push":    true,
-	"/api/v1/founderos/device/push": true, // RegisterRoutes also mounts under /api/v1
-	"/api/founderos/laptop/push":    true,
-	"/api/v1/founderos/laptop/push": true,
+	"/api/founderos/agent-tools/mcp":    true,
+	"/api/v1/founderos/agent-tools/mcp": true,
+	"/api/founderos/device/push":        true,
+	"/api/v1/founderos/device/push":     true, // RegisterRoutes also mounts under /api/v1
+	"/api/founderos/laptop/push":        true,
+	"/api/v1/founderos/laptop/push":     true,
 	// Twilio and Apollo webhooks: signed, not a browser
 	"/api/founderos/hooks/twilio/voice":     true,
 	"/api/v1/founderos/hooks/twilio/voice":  true,

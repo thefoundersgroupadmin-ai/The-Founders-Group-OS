@@ -106,6 +106,7 @@ func TestOptimalEngineReplacesGBrain(t *testing.T) {
 // order, 10 categories, with the Optimal Engine where G-Brain sits, plus
 // TFG's Cloudflare (the team tunnel) and the Dialer's Twilio and Apollo.
 var prodSlugs = []string{
+	"lusha", "higgsfield", "remotion",
 	"slack", "gmail", "whatsapp", "discord", "telegram", "zoom", "manychat",
 	"airtable", "googlesheets", "googledocs", "clickup", "trello", "coda", "wispr",
 	"hubspot", "twilio", "apollo", "salesforce", "zendesk", "intercom",

@@ -59,6 +59,7 @@ func TestTheConductorSaysWhenNobodyCanAnswer(t *testing.T) {
 }
 
 func TestTheWatcherTellsOnceRetriesHourlyAndSaysWhenItIsBack(t *testing.T) {
+	peopleSetup(t)
 	w := &conductorWatch{}
 	now := time.Date(2026, 10, 22, 20, 0, 0, 0, time.UTC)
 	down := conductorHealth{Agent: "CEO", AgentID: "ceo", Problem: "Node too old"}

@@ -2,6 +2,9 @@ package api
 
 import (
 	"context"
+	"encoding/json"
+	"os"
+	"path/filepath"
 	"testing"
 	"time"
 
@@ -49,5 +52,25 @@ func TestAtFiftyPercentEveryAgentPausesAndStaysPaused(t *testing.T) {
 	w.step(down, now.Add(2*time.Hour), func() { retries++ })
 	if retries != 0 {
 		t.Fatal("woke an agent while AI work is paused")
+	}
+}
+
+func TestOwnerResumeExpiresAndCannotOverrideLaterPause(t *testing.T) {
+	peopleSetup(t)
+	now := time.Now().UTC()
+	os.WriteFile(aiPausedPath(), []byte("cutoff"), 0600)
+	os.Chtimes(aiPausedPath(), now.Add(-time.Minute), now.Add(-time.Minute))
+	grant := aiResumeGrant{AuthorizedAt: now.Add(-time.Second), ExpiresAt: now.Add(time.Hour), Reason: "owner explicitly resumed"}
+	raw, _ := json.Marshal(grant)
+	os.WriteFile(filepath.Join(filepath.Dir(aiPausedPath()), "ai-resume.json"), raw, 0600)
+	if !aiResumeActive(now) || aiPaused() != "" {
+		t.Fatal("explicit resume not honored")
+	}
+	if aiResumeActive(now.Add(2 * time.Hour)) {
+		t.Fatal("expired resume accepted")
+	}
+	os.Chtimes(aiPausedPath(), now, now)
+	if aiResumeActive(now) {
+		t.Fatal("later pause bypassed")
 	}
 }

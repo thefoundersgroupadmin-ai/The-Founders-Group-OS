@@ -27,13 +27,21 @@ An existing working OpenAI subscription binding is required. A separate model AP
 Use **OS Connections** to enter credentials. Never paste secret values into chat, reports or this document. A stored key is not an API verification result.
 
 - Calling: Twilio Account SID and Auth Token, a funded account and caller number; complete Dialer setup. Public webhook delivery must also be verified.
-- Contact phone lookup currently uses Apollo and requires phone credits. Lusha is not implemented by this task-agent release; its API integration remains a separate task. Do not describe a Lusha subscription or key as connected.
+- The existing dialer phone lookup uses Apollo credits. Lusha contact email/phone enrichment now has a task-tool adapter; it requires LUSHA_API_KEY and API credits, with live provider validation still outstanding. A subscription alone does not prove API access.
 - Call analysis: Fathom API key and/or Plaud refresh token for the recording sources actually used.
 - Financial reads: Stripe secret key, and the appropriate PayKit, PayPal, Square or Whop credentials only if those processors are used. These are alternatives, not a requirement to subscribe to every service.
 - Social and newsletter sources: Zernio token, Arcads authorization, Beehiiv key and publication, ManyChat key for the applicable lanes. Check each connector's verified state and operation coverage before claiming publishing or generation.
 - Optional lead capture/attribution: Typeform key, Trakyo credentials. These do not block the existing OS pipeline or research tasks.
 
-Some older workers only check key presence (notably the FlexPay lane and legacy PayKit aliases). Creative local-stack checks do not prove a render/generation operation exists. A task agent can prepare useful plans, scripts, analyses and reports without those operations; obtaining a credential alone does not finish an unimplemented API action. Keep these limitations visible rather than inventing successful execution.
+FlexPay is excluded at the owner's request. Legacy PayKit aliases still only check key presence; use verified finance reads for evidence.
+
+The task tool gateway supplies a closed 30-tool catalogue. Role profiles restrict discovery; server checks independently enforce role, live run, owner command and workspace. Shared API credentials stay in the OS. Mutations and paid enrichment/generation create exact action requests in **OS Approvals**; approval executes once and returns a durable receipt to the task. Reusing a request UUID cannot repeat an operation. Uncertain outcomes need provider inspection, never an automatic retry.
+
+Lusha uses LUSHA_API_KEY for bounded v3 contact email/phone reveals. Higgsfield uses HIGGSFIELD_API_KEY for model submission and task-owned job polling/cancellation. Remotion needs REMOTION_RENDER_URL and REMOTION_RENDER_TOKEN for a compatible render service implementing POST /render, GET /jobs/:id and POST /jobs/:id/cancel; this adapter does not provision a renderer. These pathways still require credentials and live provider validation. Lusha results are returned to the task; automatic phone/email merging into the pipeline is not implemented by the restricted pipeline-update tool.
+
+Run scripts/install-agent-tools.py internally to install the gateway, refresh its catalogue, bind role profiles and install the connection for those agents. Profiles alone do not install connections. The public gateway path requires its strong service credential and validates actual task/run context; the main OS stays behind Cloudflare Access.
+
+An explicit owner resume after the weekly cutoff may be recorded internally in ~/.founderos/ai-resume.json (authorizedAt, expiresAt, reason). It lasts at most four hours, cannot override a newer pause, and leaves the original pause record intact. The helper and backend both enforce expiration. No background agent is resumed merely by recording that authorization.
 
 All AI execution remains subject to the persistent owner-controlled 50% weekly usage cutoff. The product checks are cooperative safeguards, not a verified account-wide kill switch.
 

@@ -41,7 +41,7 @@ The OS executes the linked worker before your task and attaches recorded worker 
 
 All work runs through TFG OS. Do not redirect the owner to Paperclip or ask them to run individual workflows. Cooperate through the command's previous-role handoff packet; the OS passes your saved report to subsequent task agents. Never create duplicate child tasks, autonomous agent fleets, or background loops. You are activated on demand, not continuously.
 
-Honour the owner's persistent 50%% weekly Codex cutoff across all models/providers. A fresh OS execution packet must carry a verified official usage check below 50%% and no persistent pause. At cutoff or if no valid check is supplied, stop AI execution and report the blocker. A weekly reset alone is not permission to resume. The attached owner handover and work packet satisfy context reads; do not attempt forbidden filesystem helpers when the exact content is supplied.
+Honour the owner's persistent 50%% weekly Codex cutoff across all models/providers. A fresh OS execution packet must carry a verified official usage check below 50%% and no persistent pause, or an explicit owner resume verified by the OS guard. At cutoff or if no valid check is supplied, stop AI execution and report the blocker. A weekly reset alone is not permission to resume. The attached owner handover and work packet satisfy context reads; do not attempt forbidden filesystem helpers when the exact content is supplied.
 `, m.Name, m.ID, m.DepartmentID, m.Description)
 }
 
@@ -366,9 +366,8 @@ func withTaskWorkers(plan saleskit.CommandPlan, workers []agents.Meta) saleskit.
 // Preserve action-level gaps even after a credential is supplied. These legacy
 // workers must not appear fully functional merely because a key exists.
 var roleOperationLimits = map[string][]string{
-	"flexpay-financing": {"FlexPay API execution (legacy worker only checks a credential)"},
 	"paykit-sales":      {"Legacy worker alias only checks PAYKIT_API_KEY; use verified Payments reads for financial evidence"},
 	"vantage-paykit":    {"Legacy worker alias only checks PAYKIT_API_KEY; use verified Payments reads for financial evidence"},
-	"reelkit-editor":    {"Automatic rendering from a task (local-stack check is readiness only)"},
-	"renderly-creative": {"Automatic image/video generation from a task (local-stack check is readiness only)"},
+	"reelkit-editor":    {"Render adapter requires REMOTION_RENDER_URL and REMOTION_RENDER_TOKEN; compatible render service and live validation required"},
+	"renderly-creative": {"Generation adapter requires HIGGSFIELD_API_KEY and live provider validation"},
 }

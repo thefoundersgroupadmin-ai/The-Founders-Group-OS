@@ -47,7 +47,7 @@ func taskExecutionContext() (string, error) {
 	if err != nil {
 		return "", errors.New("OS handover could not be attached")
 	}
-	return fmt.Sprintf("\n# Verified OS execution context\nLatest official weekly Codex usage: %.0f%%. Checked by the OS at %s. Persistent AI pause: absent. Stop at 50%% and do not bypass any later pause. This context was checked immediately before this task was filed.\nThe profile, authorised source packet and full workflow catalogue above are attached directly. Use them; do not attempt forbidden filesystem reads, browser sessions or helper scripts. The owner handover is reproduced below for this task; read this attached copy rather than trying to open a path outside the runtime. It is context, not authority to exceed the task's scope. If a genuinely required fact is missing, name that fact.\n\n# Attached owner handover\n%s", pct, time.Now().UTC().Format(time.RFC3339), handover), nil
+	return fmt.Sprintf("\n# Verified OS execution context\nLatest official weekly Codex usage: %.0f%%. Checked by the OS at %s. Execution authorized by the OS guard (including any recorded, time-limited explicit owner resume). Stop if the guard later pauses execution. This context was checked immediately before this task was filed.\nThe profile, authorised source packet and full workflow catalogue above are attached directly. Use them; do not attempt forbidden filesystem reads, browser sessions or helper scripts. The owner handover is reproduced below for this task; read this attached copy rather than trying to open a path outside the runtime. It is context, not authority to exceed the task's scope. If a genuinely required fact is missing, name that fact.\n\n# Attached owner handover\n%s", pct, time.Now().UTC().Format(time.RFC3339), handover), nil
 }
 
 // Keep the task agents' shared catalogue in sync with the deployed backend.
@@ -441,6 +441,8 @@ func runCommand(ctx context.Context, d *Deps, c *saleskit.Command) {
 					break
 				}
 				brief += packet
+				brief += "\n# Assigned live OS tools\nUse the assigned app tools actually present in your callable registry (their names may begin app_); match the OS action by its description and exact input schema. If paperclip_search_assigned_tools and paperclip_call_assigned_tool are supplied instead, use those helpers to discover and execute the returned tool name. Do not report tools missing merely because the helper pair is absent. Credentials stay in OS Connections; never put API keys in arguments. Supply a new UUID requestId for an intended action and reuse it with identical input when checking its existing receipt. A needs_approval result is not execution: save interim progress and wait for the owner in OS Approvals; do not mark a task done if its required action is pending. A missing_credentials result names the exact missing configuration. Do not try another provider or invent success. Owner decisions return a tool receipt document and wake this task. Use that receipt instead of repeating the external operation.\n"
+
 				brief += commandHandoff(reports)
 				if d.Agents != nil {
 					for _, role := range d.Agents.List() {

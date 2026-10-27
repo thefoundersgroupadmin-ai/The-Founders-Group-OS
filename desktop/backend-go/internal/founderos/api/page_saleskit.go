@@ -57,7 +57,7 @@ func salesKitAIAllowed() error {
 	if !ok {
 		return errors.New("official weekly usage snapshot unavailable; use Prepare prompt until usage can be verified")
 	}
-	if pct >= aiCutoffPercent {
+	if pct >= aiCutoffPercent && !aiResumeActive(time.Now()) {
 		why := fmt.Sprintf("Codex weekly usage reached %.0f%%; AI paused until the owner explicitly resumes", pct)
 		if err := os.MkdirAll(filepath.Dir(aiPausedPath()), 0700); err != nil {
 			return fmt.Errorf("AI paused at usage cutoff; unable to persist pause: %w", err)

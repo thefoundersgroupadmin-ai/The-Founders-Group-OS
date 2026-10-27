@@ -3,6 +3,8 @@ import json
 from pathlib import Path
 import tempfile
 import unittest
+from datetime import datetime, timedelta, timezone
+import os
 
 spec = importlib.util.spec_from_file_location("agent_context", Path(__file__).resolve().parents[1] / "tfg-agent-context.py")
 module = importlib.util.module_from_spec(spec)
@@ -22,6 +24,19 @@ class UsageSnapshotTest(unittest.TestCase):
             sessions.mkdir(parents=True)
             (sessions / "usage.jsonl").write_text(json.dumps({"timestamp": "2026-10-26T22:00:00Z", "payload": {"rate_limits": {"secondary": {"used_percent": 50}}}}) + "\n")
             self.assertEqual(module.latest_weekly_usage(module.codex_session_roots(root)), 50)
+
+    def test_resume_is_explicit_bounded_and_later_pause_wins(self):
+        with tempfile.TemporaryDirectory() as root:
+            config=Path(root,'.founderos');config.mkdir()
+            now=datetime.now(timezone.utc)
+            pause=config/'ai-paused';pause.write_text('cutoff')
+            os.utime(pause,(now.timestamp()-60,now.timestamp()-60))
+            grant={'authorizedAt':(now-timedelta(seconds=1)).isoformat(),'expiresAt':(now+timedelta(hours=1)).isoformat(),'reason':'owner said keep going after cutoff'}
+            (config/'ai-resume.json').write_text(json.dumps(grant))
+            self.assertTrue(module.explicit_resume_active(root,now))
+            self.assertFalse(module.explicit_resume_active(root,now+timedelta(hours=2)))
+            os.utime(pause,(now.timestamp(),now.timestamp()))
+            self.assertFalse(module.explicit_resume_active(root,now))
 
     def test_missing_or_unofficial_usage_is_unknown(self):
         with tempfile.TemporaryDirectory() as root:

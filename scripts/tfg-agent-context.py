@@ -56,6 +56,18 @@ def read_env(path):
     return out
 
 
+def explicit_resume_active(home, now=None):
+    now = now or datetime.now(timezone.utc)
+    try:
+        grant = json.loads((Path(home) / ".founderos/ai-resume.json").read_text())
+        start = datetime.fromisoformat(grant["authorizedAt"].replace("Z", "+00:00"))
+        end = datetime.fromisoformat(grant["expiresAt"].replace("Z", "+00:00"))
+        pause = Path(home) / ".founderos/ai-paused"
+        return bool(grant.get("reason")) and start <= now < end and 0 < (end-start).total_seconds() <= 14400 and (not pause.exists() or pause.stat().st_mtime <= start.timestamp())
+    except (OSError, ValueError, KeyError, TypeError):
+        return False
+
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--workspace", default="founderos")
@@ -63,20 +75,21 @@ def main():
     args = parser.parse_args()
     if not re.fullmatch(r"[a-z0-9][a-z0-9-]{0,99}", args.workspace):
         sys.exit("Invalid workspace slug")
-    if (Path.home() / ".founderos/ai-paused").exists():
+    resumed = explicit_resume_active(Path.home())
+    if (Path.home() / ".founderos/ai-paused").exists() and not resumed:
         sys.exit("AI work is paused. Wait for the owner's explicit resume in TFG OS.")
     roots = codex_session_roots(Path.home())
     usage = latest_weekly_usage(roots)
     if usage is None:
         sys.exit("Official weekly usage is unavailable. Do not execute AI work.")
-    if usage >= 50:
+    if usage >= 50 and not resumed:
         pause = Path.home() / ".founderos/ai-paused"
         pause.parent.mkdir(parents=True, exist_ok=True)
         pause.write_text("Weekly usage reached 50%; wait for the owner's explicit resume.\n")
         pause.chmod(0o600)
         sys.exit("AI work paused at the weekly cutoff. Do not retry or change providers.")
     if args.check_usage_only:
-        print(json.dumps({"allowed": True, "weeklyUsagePercent": usage}))
+        print(json.dumps({"allowed": True, "weeklyUsagePercent": usage, "explicitOwnerResume": resumed}))
         return
     env = read_env(ROOT / "desktop/backend-go/.env")
     # No user value is interpolated into SQL without validation above.

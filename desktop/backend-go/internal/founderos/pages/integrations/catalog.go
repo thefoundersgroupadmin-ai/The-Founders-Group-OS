@@ -39,6 +39,10 @@ var none = []string{}
 // Catalog is FounderOS v1's INTEGRATIONS (2026-09-30), 70 tools, with the
 // Optimal Engine in G-Brain's place.
 var Catalog = []Integration{
+	{Slug: "lusha", Name: "Lusha", Tagline: "Task-agent contact email and phone enrichment", Category: "CRM & Sales", EnvKeys: []string{"LUSHA_API_KEY"}},
+	{Slug: "higgsfield", Name: "Higgsfield API", Tagline: "Task-agent image/video generation", Category: "Creative", EnvKeys: []string{"HIGGSFIELD_API_KEY"}},
+	{Slug: "remotion", Name: "Remotion render service", Tagline: "Owner-hosted render job service", Category: "Creative", EnvKeys: []string{"REMOTION_RENDER_URL", "REMOTION_RENDER_TOKEN"}},
+
 	// Communication
 	{Slug: "slack", Name: "Slack", Tagline: "Channels & DMs", Category: "Communication", ConnectorID: "slack", Popular: true, EnvKeys: []string{"SLACK_BOT_TOKEN"}},
 	{Slug: "gmail", Name: "Gmail", Tagline: "Send & read email", Category: "Communication", ConnectorID: "email", Popular: true, EnvKeys: none},

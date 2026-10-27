@@ -85,7 +85,7 @@
 	const CAT: Record<KGNodeKind, { color: string; label: string; r: number }> = {
 		self: { color: 'var(--bn-text)', label: 'Engine', r: 18 },
 		team: { color: 'var(--bn-brain-1)', label: 'Pillars', r: 15 },
-		board: { color: 'var(--bn-text)', label: 'Board agents', r: 10 },
+		board: { color: 'var(--bn-text)', label: 'Independent agents', r: 10 },
 		task: { color: 'var(--bn-text-2)', label: 'SOP tasks', r: 7 },
 		person: { color: 'var(--bn-kg-person, var(--bn-warn))', label: 'Humans', r: 10 },
 		employee: { color: 'var(--bn-kg-employee, var(--bn-accent))', label: 'AI agents', r: 10 },
@@ -1366,15 +1366,15 @@
 	{:else if detailKind === 'board' && boardNode}
 		<HeadDetailCard
 			title={boardNode.label}
-			deptName="Paperclip board"
-			roleLabel="board agent"
+			deptName="Task agents"
+			roleLabel="independent task agent"
 			showSops={false}
 			color={CAT.board.color}
 			boardLead={boardLive}
 			sops={[]}
 			onClose={() => (selectedBoardId = null)}
 		>
-			{#snippet blurb()}Live seat on the <span class="font-semibold">Paperclip board</span> — a real agent in the operator's company, reporting straight to the core.{/snippet}
+			{#snippet blurb()}A task agent with its own role, shown separately because it has no linked worker profile. Its current execution state is shown below.{/snippet}
 		</HeadDetailCard>
 	{:else if detailKind === 'task' && selectedTask}
 		{@const a = selectedTask.assigneeKind === 'agent' ? agents.find((x) => x.id === selectedTask.assigneeId) : null}

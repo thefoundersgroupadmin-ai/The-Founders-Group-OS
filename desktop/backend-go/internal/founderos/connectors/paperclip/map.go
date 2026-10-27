@@ -7,6 +7,7 @@ package paperclip
 var agentStatuses = map[string]bool{"running": true, "idle": true, "paused": true, "error": true}
 
 type Agent struct {
+	WorkerID        string  `json:"workerId,omitempty"`
 	ID              string  `json:"id"`
 	Name            string  `json:"name"`
 	Status          string  `json:"status"`
@@ -118,6 +119,7 @@ func MapAgents(raw []any) []Agent {
 		}
 		out = append(out, Agent{
 			ID: id, Name: *name, Status: asStatus(r["status"]),
+			WorkerID:    stringValue(obj(r["metadata"])["tfgWorkerId"]),
 			AdapterType: strAny(r["adapterType"]), Model: model, LastHeartbeatAt: strAny(r["lastHeartbeatAt"]),
 		})
 	}
@@ -267,3 +269,5 @@ func truthy(v any) bool {
 		return true
 	}
 }
+
+func stringValue(v any) string { s, _ := v.(string); return s }

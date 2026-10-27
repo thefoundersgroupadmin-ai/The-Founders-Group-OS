@@ -19,18 +19,29 @@ type Department struct {
 	Order   int    `json:"order"`
 }
 
+type TaskAgent struct {
+	ID        string   `json:"id"`
+	Name      string   `json:"name"`
+	Status    string   `json:"status"`
+	Model     *string  `json:"model"`
+	Tools     []string `json:"tools"`
+	ToolState string   `json:"toolState"`
+}
+
 type Agent struct {
-	ID           string   `json:"id"`
-	DepartmentID string   `json:"departmentId"`
-	Name         string   `json:"name"`
-	Role         string   `json:"role"`
-	Status       string   `json:"status"`
-	Tier         string   `json:"tier"`
-	Description  string   `json:"description"`
-	Model        string   `json:"model"`
-	Tools        []string `json:"tools"`
-	ParentID     *string  `json:"parentId"`
-	Instance     string   `json:"instance"`
+	TaskAgent      *TaskAgent `json:"taskAgent,omitempty"`
+	ConnectorTools []string   `json:"connectorTools,omitempty"`
+	ID             string     `json:"id"`
+	DepartmentID   string     `json:"departmentId"`
+	Name           string     `json:"name"`
+	Role           string     `json:"role"`
+	Status         string     `json:"status"`
+	Tier           string     `json:"tier"`
+	Description    string     `json:"description"`
+	Model          string     `json:"model"`
+	Tools          []string   `json:"tools"`
+	ParentID       *string    `json:"parentId"`
+	Instance       string     `json:"instance"`
 }
 
 type Person struct {

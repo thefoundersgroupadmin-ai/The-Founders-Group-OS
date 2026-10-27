@@ -65,6 +65,7 @@ type brainEnv struct {
 	Now        func() time.Time
 	Org        func(context.Context) (*brainOrg, error)
 	Board      func(context.Context) ([]paperclip.Agent, error)
+	ToolAccess func(context.Context) (map[string]paperclip.ToolAssignment, error)
 
 	mu      sync.Mutex
 	graphs  []brain.WorkspaceGraph
@@ -112,6 +113,9 @@ var newBrainEnv = func(d *Deps) *brainEnv {
 	}
 	env.Board = func(ctx context.Context) ([]paperclip.Agent, error) {
 		return paperclip.New(d.Resolver).Agents(ctx)
+	}
+	env.ToolAccess = func(ctx context.Context) (map[string]paperclip.ToolAssignment, error) {
+		return paperclip.New(d.Resolver).OSActionAssignments(ctx)
 	}
 	return env
 }
@@ -225,6 +229,17 @@ func registerBrain(s *gin.RouterGroup, d *Deps) {
 				err    error
 			}{a, err}
 		}()
+		access := make(chan brainToolAccess, 1)
+		go func() {
+			if env.ToolAccess == nil {
+				access <- brainToolAccess{Err: errors.New("Tool assignments unavailable")}
+				return
+			}
+			actx, stop := context.WithTimeout(ctx, brainBoardTimeout)
+			defer stop()
+			tools, err := env.ToolAccess(actx)
+			access <- brainToolAccess{Tools: tools, Err: err}
+		}()
 		org, err := env.Org(ctx)
 		if err != nil {
 			status := http.StatusBadGateway
@@ -235,7 +250,7 @@ func registerBrain(s *gin.RouterGroup, d *Deps) {
 			return
 		}
 		b := <-board
-		c.JSON(http.StatusOK, composeBrainPage(org, b.agents, b.err))
+		c.JSON(http.StatusOK, composeBrainPage(org, b.agents, b.err, <-access))
 	})
 
 	s.GET("/pages/brain/graph", func(c *gin.Context) {
@@ -380,21 +395,67 @@ var boardLeadNames = map[string]string{
 	"dept-comms":            "Communications",
 }
 
-type brainSeat struct {
-	ID     string  `json:"id"`
-	Name   string  `json:"name"`
-	Status string  `json:"status"`
-	Model  *string `json:"model"`
+type brainToolAccess struct {
+	Tools map[string]paperclip.ToolAssignment
+	Err   error
 }
 
-func composeBrainPage(org *brainOrg, live []paperclip.Agent, boardErr error) gin.H {
+type brainSeat struct {
+	Tools     []string `json:"tools,omitempty"`
+	ToolState string   `json:"toolState,omitempty"`
+	ID        string   `json:"id"`
+	Name      string   `json:"name"`
+	Status    string   `json:"status"`
+	Model     *string  `json:"model"`
+}
+
+func composeBrainPage(org *brainOrg, live []paperclip.Agent, boardErr error, access ...brainToolAccess) gin.H {
+	source := org
+	copyOrg := *source
+	copyOrg.Agents = append([]brain.Agent(nil), source.Agents...)
+	org = &copyOrg
+	assignment := func(id string) paperclip.ToolAssignment {
+		if len(access) == 0 || access[0].Err != nil {
+			return paperclip.ToolAssignment{Tools: []string{}, State: "unavailable"}
+		}
+		if a, ok := access[0].Tools[id]; ok {
+			return a
+		}
+		return paperclip.ToolAssignment{Tools: []string{}, State: "not_assigned"}
+	}
+	bindings := map[string][]paperclip.Agent{}
+	for _, a := range live {
+		if a.WorkerID != "" {
+			bindings[a.WorkerID] = append(bindings[a.WorkerID], a)
+		}
+	}
+	paired := map[string]bool{}
+	for i := range org.Agents {
+		a := &org.Agents[i]
+		matches := bindings[a.ID]
+		if len(matches) != 1 {
+			continue
+		}
+		linked := matches[0]
+		tools := assignment(linked.ID)
+		a.TaskAgent = &brain.TaskAgent{ID: linked.ID, Name: linked.Name, Status: linked.Status, Model: linked.Model, Tools: tools.Tools, ToolState: tools.State}
+		a.ConnectorTools = append([]string(nil), a.Tools...)
+		a.Tools = append(append([]string(nil), a.Tools...), tools.Tools...)
+		a.Status = linked.Status
+		paired[linked.ID] = true
+	}
+	seatOf := func(a paperclip.Agent) brainSeat {
+		tools := assignment(a.ID)
+		return brainSeat{ID: a.ID, Name: a.Name, Status: a.Status, Model: a.Model, Tools: tools.Tools, ToolState: tools.State}
+	}
+
 	leads := map[string]brainSeat{}
 	leadNames := map[string]bool{}
 	for dept, name := range boardLeadNames {
 		leadNames[strings.ToLower(name)] = true
 		for _, a := range live {
 			if strings.EqualFold(a.Name, name) {
-				leads[dept] = brainSeat{a.ID, a.Name, a.Status, a.Model}
+				leads[dept] = seatOf(a)
 				break
 			}
 		}
@@ -402,17 +463,36 @@ func composeBrainPage(org *brainOrg, live []paperclip.Agent, boardErr error) gin
 	seats := []brainSeat{}
 	var ring []brain.BoardAgent
 	for _, a := range live {
-		if leadNames[strings.ToLower(a.Name)] {
+		if paired[a.ID] || leadNames[strings.ToLower(a.Name)] {
 			continue
 		}
-		seats = append(seats, brainSeat{a.ID, a.Name, a.Status, a.Model})
+		seats = append(seats, seatOf(a))
 		ring = append(ring, brain.BoardAgent{ID: a.ID, Name: a.Name})
 	}
-	board := gin.H{"state": "connected", "detail": strconv.Itoa(len(live)) + " live seats"}
+	board := gin.H{"state": "connected", "detail": strconv.Itoa(len(live)) + " task agents · " + strconv.Itoa(len(paired)) + " linked roles"}
 	if boardErr != nil {
 		board = gin.H{"state": "error", "detail": boardErr.Error()}
 	}
 	graph := brain.BuildKnowledgeGraph(org.Agents, org.Departments, org.People, org.Tasks, ring)
+	// Unpaired task agents retain their own nodes and actual action links.
+	toolIDs := map[string]string{}
+	for _, n := range graph.Nodes {
+		if n.Kind == "tool" {
+			toolIDs[brain.ToolSlugOf(n.ID)] = n.ID
+		}
+	}
+	for _, seat := range seats {
+		for _, tool := range seat.Tools {
+			target := toolIDs[tool]
+			if target == "" {
+				target = "tool:" + tool
+				toolIDs[tool] = target
+				graph.Nodes = append(graph.Nodes, brain.KGNode{ID: target, Kind: "tool", Label: strings.ReplaceAll(tool, "_", " "), Ring: 4})
+			}
+			graph.Edges = append(graph.Edges, brain.KGEdge{Source: "board:" + seat.ID, Target: target, Kind: "uses"})
+		}
+	}
+
 	runs := org.Runs
 	if runs == nil {
 		runs = map[string]brainRun{}

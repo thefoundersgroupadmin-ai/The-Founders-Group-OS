@@ -222,7 +222,7 @@ describe('KnowledgeGraph (the FounderOS v1 radial wheel, ported)', () => {
 		const aside = container.querySelector('[data-part="graph-aside"]')!;
 		expect([...aside.querySelectorAll('select')].map((s) => s.getAttribute('aria-label'))).toEqual(['Entity lens', 'Function lens', 'Action lens']);
 		const legend = [...aside.querySelectorAll('[data-part="legend"] [data-kind]')].map((r) => r.textContent!.replace(/\s+/g, ' ').trim());
-		expect(legend).toEqual(['Pillars 2', 'Board agents 1', 'SOP tasks 2', 'Humans 1', 'AI agents 2', 'Tools 3']);
+		expect(legend).toEqual(['Pillars 2', 'Independent agents 1', 'SOP tasks 2', 'Humans 1', 'AI agents 2', 'Tools 3']);
 		expect(aside.querySelector('[data-part="directory"]')!.textContent).toContain('Openclaw');
 		await fireEvent.click(screen.getByRole('button', { name: 'Hide directory' }));
 		expect(screen.getByRole('button', { name: 'Show directory' })).toBeTruthy();

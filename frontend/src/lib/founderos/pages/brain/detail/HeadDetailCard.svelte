@@ -27,7 +27,7 @@
 		title: string;
 		deptName: string;
 		color: string;
-		boardLead: { id: string; name: string; status: string; model: string | null } | null;
+		boardLead: { id: string; name: string; status: string; model: string | null;tools?:string[];toolState?:string } | null;
 		sops: { id: string; title: string; skillName: string }[];
 		roleLabel?: string;
 		blurb?: Snippet;
@@ -80,6 +80,12 @@
 				<p class="bn-dim font-mono text-[10.5px]" data-part="board-seat">no board seat yet — hire this head on the Paperclip board</p>
 			{/if}
 		</div>
+
+        {#if boardLead?.toolState}
+        <SectionLabel icon={Server}>assigned OS actions ({boardLead.tools?.length??0})</SectionLabel>
+        <p class="bn-dim mb-2 text-[10.5px]">{boardLead.toolState==='assigned'?'Assignment saved; credentials and approvals still apply.':boardLead.toolState==='unavailable'?'Assignments could not be checked.':`Assignment status: ${boardLead.toolState.replaceAll('_',' ')}`}</p>
+        <div class="bn-muted mb-4 flex flex-wrap gap-2 font-mono text-[10.5px]">{#each boardLead.tools??[] as tool (tool)}<span>{tool.replaceAll('_',' ')}</span>{/each}</div>
+        {/if}
 
 		<button
 			type="button"

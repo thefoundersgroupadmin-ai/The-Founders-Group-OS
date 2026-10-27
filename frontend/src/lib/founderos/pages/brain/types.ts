@@ -7,7 +7,10 @@ export type KGEdge = { source: string; target: string; kind: KGEdgeKind };
 export type KnowledgeGraph = { nodes: KGNode[]; edges: KGEdge[] };
 
 export type Department = { id: string; name: string; slug: string; tagline: string; color: string; order: number };
+export type TaskAgent = {id:string;name:string;status:string;model:string|null;tools:string[];toolState:string};
 export type Agent = {
+ taskAgent?:TaskAgent;
+ connectorTools?:string[];
 	id: string;
 	departmentId: string;
 	name: string;
@@ -33,7 +36,7 @@ export type SopTask = {
 export type DirectoryRow = { id: string; label: string; sub: string; deptIds: string[] };
 export type DirectoryGroup = { kind: 'employee' | 'person' | 'task' | 'tool'; title: string; rows: DirectoryRow[] };
 export type AgentRun = { id: string; agentId: string; startedAt: string; finishedAt: string; ok: boolean; summary: string; model: string | null };
-export type Seat = { id: string; name: string; status: string; model: string | null };
+export type Seat = { id: string; name: string; status: string; model: string | null;tools?:string[];toolState?:string };
 
 export type BrainPage = {
 	graph: KnowledgeGraph;

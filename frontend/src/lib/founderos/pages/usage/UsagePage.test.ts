@@ -122,7 +122,7 @@ describe('/os/usage', () => {
 		vi.useFakeTimers();
 		fetchMock.mockResolvedValue(full);
 		render(UsagePage);
-		const usageReads = () => fetchMock.mock.calls.filter(([p]) => String(p).startsWith('/pages/usage')).length;
+		const usageReads = () => fetchMock.mock.calls.filter(([p]) => /^\/pages\/usage(\?|$)/.test(String(p))).length;
 		expect(usageReads()).toBe(1);
 		await vi.advanceTimersByTimeAsync(10_000);
 		expect(usageReads()).toBe(2);

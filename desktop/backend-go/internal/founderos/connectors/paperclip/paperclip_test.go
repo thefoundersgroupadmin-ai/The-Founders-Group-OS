@@ -111,6 +111,17 @@ func (b *board) handler(t *testing.T) http.HandlerFunc {
 			_, _ = fmt.Fprintf(w, `{"id":%q,"status":"in_progress","assigneeAgentId":"a9","assigneeUserId":"u1"}`, id)
 		case strings.HasPrefix(r.URL.Path, "/api/issues/") && r.Method == http.MethodPatch:
 			_, _ = io.WriteString(w, `{}`)
+		case r.URL.Path == "/api/companies/c1/activity":
+			if r.URL.Query().Get("entityType") != "agent" {
+				t.Errorf("activity query = %q", r.URL.RawQuery)
+			}
+			_, _ = io.WriteString(w, `[
+			  {"action":"agent.resumed","entityId":"a1","createdAt":"2026-10-27T05:00:00.000Z"},
+			  {"action":"agent.paused","entityId":"a1","createdAt":"2026-10-27T03:43:10.000Z"},
+			  {"action":"agent.paused","entityId":"a1","createdAt":"2026-10-20T09:00:00.000Z"},
+			  {"action":"agent.paused","entityId":"a2","createdAt":"2026-10-21T09:00:00Z"},
+			  {"action":"agent.paused","entityId":"","createdAt":"2026-10-21T09:00:00Z"},
+			  {"action":"agent.paused","entityId":"a3","createdAt":"not a date"}]`)
 		case strings.HasPrefix(r.URL.Path, "/api/agents/"):
 			_, _ = io.WriteString(w, `{}`)
 		default:
@@ -533,5 +544,31 @@ func TestCockpitRepairPatch(t *testing.T) {
 	p := CockpitRepairPatch("in_progress", "a1", "", "")
 	if len(p) != 1 || p["status"] != "backlog" {
 		t.Errorf("patch = %v", p)
+	}
+}
+
+func TestResumeAgentPostsToTheBoard(t *testing.T) {
+	t.Setenv("FOUNDEROS_WRITES", "1")
+	c, b, _ := newBoard(t)
+	if ok, err := c.ResumeAgent(context.Background(), "a1"); !ok || err != nil {
+		t.Fatalf("resume: %v %v", ok, err)
+	}
+	if b.hitCount("POST /api/agents/a1/resume") != 1 {
+		t.Fatalf("hits = %v", b.hits)
+	}
+}
+
+func TestAgentPausesIsTheLatestPausePerAgent(t *testing.T) {
+	c, _, _ := newBoard(t)
+	got, err := c.AgentPauses(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := map[string]time.Time{
+		"a1": time.Date(2026, 10, 27, 3, 43, 10, 0, time.UTC),
+		"a2": time.Date(2026, 10, 21, 9, 0, 0, 0, time.UTC),
+	}
+	if len(got) != len(want) || !got["a1"].Equal(want["a1"]) || !got["a2"].Equal(want["a2"]) {
+		t.Fatalf("pauses = %v", got)
 	}
 }

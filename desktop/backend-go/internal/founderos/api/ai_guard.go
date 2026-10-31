@@ -18,6 +18,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/rhl/businessos-backend/internal/founderos/connectors/devicepush"
 	"github.com/rhl/businessos-backend/internal/founderos/connectors/devicepush/collect"
 	"github.com/rhl/businessos-backend/internal/founderos/connectors/paperclip"
 	"github.com/rhl/businessos-backend/internal/founderos/notify"
@@ -70,12 +71,17 @@ var codexCache = collect.NewCodexCache()
 // codexWeekly is the official weekly percent used, and whether one was found.
 var codexWeekly = func(now time.Time) (float64, bool) {
 	home, _ := os.UserHomeDir()
-	seat := collect.CodexSeat([]string{filepath.Join(home, ".codex", "sessions")},
-		collect.PaperclipCodexHomes(filepath.Join(home, ".paperclip")), now, codexCache, collect.SeatInfo{ID: "guard"})
+	seat := codexSeatFor(home, now)
 	if seat == nil || seat.Official == nil || seat.Official.Weekly == nil {
 		return 0, false
 	}
 	return seat.Official.Weekly.UsedPercent, true
+}
+
+// codexSeatFor is the newest Codex reading of the owner or any board seat.
+func codexSeatFor(home string, now time.Time) *devicepush.SeatUsage {
+	return collect.CodexSeat([]string{filepath.Join(home, ".codex", "sessions")},
+		collect.PaperclipCodexHomes(filepath.Join(home, ".paperclip")), now, codexCache, collect.SeatInfo{ID: "guard"})
 }
 
 type agentPauser interface {
@@ -86,6 +92,10 @@ type agentPauser interface {
 // aiGuardPass pauses the board at the cutoff; it returns the event to send
 // when it just paused.
 func aiGuardPass(ctx context.Context, b agentPauser, now time.Time) []notify.Event {
+	// The owner's one go-ahead (ai_control.go) keeps the short lease renewed until the reset.
+	if g, ok := aiGoAheadActive(now); ok {
+		_ = renewAiLease(now, g)
+	}
 	if aiResumeActive(now) {
 		return nil
 	}

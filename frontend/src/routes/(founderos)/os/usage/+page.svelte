@@ -3,6 +3,7 @@
 <script lang="ts">
 	import { founderosUrl } from '$lib/founderos/api';
 	import { Slab, SlabTitle } from '$lib/founderos/kit';
+	import AiGuard from '$lib/founderos/pages/usage/AiGuard.svelte';
 	import MyAccounts from '$lib/founderos/pages/usage/MyAccounts.svelte';
 	import UsageBoard from '$lib/founderos/pages/usage/UsageBoard.svelte';
 	import { PILL } from '$lib/founderos/pages/usage/ui';
@@ -18,6 +19,7 @@
 			<a href={founderosUrl('/pages/usage')} target="_blank" rel="noreferrer" class={PILL}>Raw reading</a>
 		{/snippet}
 	</SlabTitle>
+	<div class="mb-6"><AiGuard /></div>
 	<div class="mb-6"><MyAccounts /></div>
 	<UsageBoard />
 </Slab>

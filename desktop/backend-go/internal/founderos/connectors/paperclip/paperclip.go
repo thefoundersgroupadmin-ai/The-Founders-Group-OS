@@ -700,6 +700,34 @@ func (c *Connector) PauseAgent(ctx context.Context, agentID string) (bool, error
 	return err == nil, err
 }
 
+// ResumeAgent lets a paused seat start runs again.
+func (c *Connector) ResumeAgent(ctx context.Context, agentID string) (bool, error) {
+	_, err := c.send(ctx, "paperclip.agent.resume", http.MethodPost, "/api/agents/"+agentID+"/resume", map[string]any{})
+	return err == nil, err
+}
+
+// AgentPauses is when each agent was last paused, from the board's activity
+// log (the newest 500 agent events).
+func (c *Connector) AgentPauses(ctx context.Context) (map[string]time.Time, error) {
+	body, err := c.companyGet(ctx, "/activity?entityType=agent&limit=500")
+	if err != nil {
+		return nil, err
+	}
+	out := map[string]time.Time{}
+	for _, rec := range listFrom(body, "activity") {
+		m := obj(rec)
+		id, _ := m["entityId"].(string)
+		at, err := time.Parse(time.RFC3339Nano, fmt.Sprint(m["createdAt"]))
+		if m["action"] != "agent.paused" || id == "" || err != nil {
+			continue
+		}
+		if at.After(out[id]) {
+			out[id] = at
+		}
+	}
+	return out, nil
+}
+
 // AssignIssue hands a task to a seat (which wakes it on demand).
 func (c *Connector) AssignIssue(ctx context.Context, issueID, agentID string) error {
 	_, err := c.send(ctx, "paperclip.issue.update", http.MethodPatch, "/api/issues/"+issueID,

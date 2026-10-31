@@ -45,13 +45,20 @@ export const handle: Handle = async ({ event, resolve }) => {
     const headers = new Headers(event.request.headers);
     headers.delete("host");
     headers.delete("connection");
+    // Hop-by-hop framing: fetch() frames the body itself and rejects a copied
+    // Transfer-Encoding (Cloudflare sends body-less POSTs chunked), which made
+    // every body-less POST through the tunnel a 500.
+    headers.delete("transfer-encoding");
+    headers.delete("content-length");
+    headers.delete("keep-alive");
+    const body =
+      event.request.method === "GET" || event.request.method === "HEAD"
+        ? undefined
+        : await event.request.arrayBuffer();
     const upstream = await fetch(target, {
       method: event.request.method,
       headers,
-      body:
-        event.request.method === "GET" || event.request.method === "HEAD"
-          ? undefined
-          : await event.request.arrayBuffer(),
+      body: body && body.byteLength > 0 ? body : undefined,
       redirect: "manual",
     });
     // Copy: headers on a fetch() Response are immutable.

@@ -277,3 +277,26 @@ func TestCompletedRoleWorkIsNotBlockedByOptionalEvidenceRefresh(t *testing.T) {
 		t.Fatalf("optional evidence blocked completed task: %+v", c)
 	}
 }
+
+// The model sees task agents as "Name (status)" and sometimes echoes that, or
+// changes the case. Both must resolve to the real seat, and a seat that cannot
+// take work must be named in the error instead of "invalid team task".
+func TestResolveTaskSeats(t *testing.T) {
+	board := []paperclip.Agent{{Name: "Prospect Research", Status: "idle"}, {Name: "Sales Operations", Status: "running"}, {Name: "CEO", Status: "paused"}}
+	plan, err := resolveTaskSeats(saleskit.CommandPlan{Tasks: []saleskit.CommandTask{
+		{Agent: "Prospect Research (idle)", Title: "US startups"},
+		{Agent: " sales operations ", Title: "UK websites"},
+	}}, board)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if plan.Tasks[0].Agent != "Prospect Research" || plan.Tasks[1].Agent != "Sales Operations" {
+		t.Fatalf("seats not resolved: %+v", plan.Tasks)
+	}
+	if _, err := resolveTaskSeats(saleskit.CommandPlan{Tasks: []saleskit.CommandTask{{Agent: "CEO", Title: "x"}}}, board); err == nil || !strings.Contains(err.Error(), "CEO is paused") {
+		t.Fatalf("paused seat: %v", err)
+	}
+	if _, err := resolveTaskSeats(saleskit.CommandPlan{Tasks: []saleskit.CommandTask{{Agent: "Growth Hacker", Title: "x"}}}, board); err == nil || !strings.Contains(err.Error(), `unknown task agent "Growth Hacker"`) {
+		t.Fatalf("unknown seat: %v", err)
+	}
+}

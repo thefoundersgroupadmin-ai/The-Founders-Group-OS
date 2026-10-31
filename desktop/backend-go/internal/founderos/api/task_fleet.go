@@ -62,12 +62,12 @@ func registerTaskFleet(s *gin.RouterGroup, d *Deps) {
 		board := paperclip.New(d.Resolver)
 		bindings, err := board.TaskRoleBindings(ctx)
 		if err != nil {
-			c.JSON(503, gin.H{"error": "Task fleet unavailable"})
+			c.JSON(503, gin.H{"error": "Task fleet unavailable: " + err.Error()})
 			return
 		}
 		seats, err := board.Agents(ctx)
 		if err != nil {
-			c.JSON(503, gin.H{"error": "Task agents unavailable"})
+			c.JSON(503, gin.H{"error": "Task agents unavailable: " + err.Error()})
 			return
 		}
 		statuses := d.Board.Statuses(ctx)

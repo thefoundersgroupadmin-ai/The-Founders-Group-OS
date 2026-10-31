@@ -162,8 +162,11 @@ func enqueueCommand(ctx context.Context, d *Deps, p people.Person, workspaceID, 
 		if err != nil {
 			return saleskit.Command{}, err
 		}
+		if plan, err = resolveTaskSeats(plan, as); err != nil {
+			return saleskit.Command{}, err
+		}
 		for _, a := range as {
-			if a.Status == "idle" || a.Status == "running" {
+			if seatAvailable(a) {
 				seats = append(seats, a.Name)
 			}
 		}
@@ -674,6 +677,38 @@ func mustTaskIndex(s string) int { var i int; fmt.Sscan(s, &i); return i }
 
 // splitExecution accepts a plan only on its own final line. JSON is decoded
 // into a closed schema; capability validation happens before anything runs.
+func seatAvailable(a paperclip.Agent) bool { return a.Status == "idle" || a.Status == "running" }
+
+// resolveTaskSeats maps each task's agent to its exact board name. The model is
+// shown seats as "Name (status)" and may echo that or change the case; a seat
+// that is unknown or cannot take work is named in the error.
+func resolveTaskSeats(plan saleskit.CommandPlan, board []paperclip.Agent) (saleskit.CommandPlan, error) {
+	byName := map[string]paperclip.Agent{}
+	for _, a := range board {
+		byName[strings.ToLower(strings.TrimSpace(a.Name))] = a
+	}
+	tasks := make([]saleskit.CommandTask, len(plan.Tasks))
+	for i, t := range plan.Tasks {
+		name := strings.TrimSpace(t.Agent)
+		if j := strings.LastIndex(name, " ("); j > 0 && strings.HasSuffix(name, ")") {
+			if _, ok := byName[strings.ToLower(name)]; !ok {
+				name = strings.TrimSpace(name[:j])
+			}
+		}
+		a, ok := byName[strings.ToLower(name)]
+		if !ok {
+			return plan, fmt.Errorf("unknown task agent %q", t.Agent)
+		}
+		if !seatAvailable(a) {
+			return plan, fmt.Errorf("%s is %s and cannot take work; resume it in Agents or pick another agent", a.Name, a.Status)
+		}
+		t.Agent = a.Name
+		tasks[i] = t
+	}
+	plan.Tasks = tasks
+	return plan, nil
+}
+
 func splitExecution(reply string) (string, *saleskit.CommandPlan) {
 	lines := strings.Split(strings.TrimSpace(reply), "\n")
 	if len(lines) == 0 {

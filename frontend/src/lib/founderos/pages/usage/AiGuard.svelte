@@ -1,8 +1,9 @@
 <!--
   Usage → AI pause: the 50% guard's state and the owner's two controls.
   Resume records the owner's one go-ahead until the weekly reset and wakes the
-  agents the guard paused; Pause now stops every agent. Teammates see the
-  state only. GET /pages/usage/ai, POST /pages/usage/ai/{resume,pause}.
+  agents the guard paused; Pause now stops every agent. Wake catches agents a
+  pause left paused after the owner resumed. Teammates see the state only.
+  GET /pages/usage/ai, POST /pages/usage/ai/{resume,pause,wake}.
 -->
 <script lang="ts">
 	import { onMount } from 'svelte';
@@ -17,6 +18,7 @@
 		usedPercent?: number;
 		resetsAt?: string;
 		goAheadUntil?: string;
+		stillPaused?: string[];
 	};
 	type Resumed = { until: string; resumed: string[]; kept: string[]; failed: string[]; warning?: string };
 
@@ -63,6 +65,13 @@
 			if (r.warning) parts.push(r.warning);
 			note = parts.join(' ');
 		});
+	const wake = () =>
+		act(async () => {
+			const r = await founderosFetch<Omit<Resumed, 'until'>>('/pages/usage/ai/wake', { method: 'POST' });
+			const parts = [r.resumed.length ? `Woke ${names(r.resumed)}.` : 'No agents to wake.'];
+			if (r.failed.length) parts.push(`Could not wake ${names(r.failed)}.`);
+			note = parts.join(' ');
+		});
 	const pause = () =>
 		act(async () => {
 			const r = await founderosFetch<{ paused: string[]; warning?: string }>('/pages/usage/ai/pause', { method: 'POST' });
@@ -89,6 +98,9 @@
 				<span class="opacity-70">on your go-ahead until {when(g.goAheadUntil)}</span>
 			{/if}
 		</div>
+		{#if !g.paused && g.stillPaused?.length}
+			<p class="mt-2 font-mono text-[11px] opacity-70">Still paused: {names(g.stillPaused)}</p>
+		{/if}
 		{#if g.paused && g.reason}
 			<p class="mt-2 font-mono text-[11px] opacity-70">{g.reason}</p>
 		{/if}
@@ -97,6 +109,9 @@
 				{#if g.paused}
 					<Pressable tone="primary" disabled={busy} onclick={resume}>Resume until {when(g.resetsAt)}</Pressable>
 				{:else}
+					{#if g.stillPaused?.length}
+						<Pressable tone="primary" disabled={busy} onclick={wake}>Wake {g.stillPaused.length} {g.stillPaused.length === 1 ? 'agent' : 'agents'}</Pressable>
+					{/if}
 					<Pressable tone="secondary" disabled={busy} onclick={pause}>Pause now</Pressable>
 				{/if}
 			</div>

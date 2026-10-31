@@ -137,3 +137,54 @@ func TestWithoutAKnownResetTheGoAheadLastsAWeek(t *testing.T) {
 		t.Fatalf("fallback: %d %s", w.Code, w.Body)
 	}
 }
+
+// Pause now pauses agents one by one; a Resume pressed meanwhile (31 Oct: ten
+// seconds later) must stop the loop instead of leaving the rest paused.
+type resumedMidPause struct{ *controlBoard }
+
+func (b resumedMidPause) PauseAgent(ctx context.Context, id string) (bool, error) {
+	ok, err := b.controlBoard.PauseAgent(ctx, id)
+	os.Remove(aiPausedPath()) // the owner's Resume clears the pause
+	return ok, err
+}
+
+func TestResumeDuringPauseNowStopsThePausing(t *testing.T) {
+	now := time.Now().UTC()
+	b := aiControlSetup(t, 67, now.Add(48*time.Hour))
+	b.agents = []paperclip.Agent{{ID: "a", Status: "idle"}, {ID: "b", Status: "idle"}, {ID: "c", Status: "running"}}
+	aiBoard = func(*Deps) aiBoardAPI { return resumedMidPause{b} }
+	r := asUser(t, &Deps{}, ownerUser)
+	if w := do(t, r, http.MethodPost, "/api/founderos/pages/usage/ai/pause", ""); w.Code != 200 {
+		t.Fatalf("pause: %d %s", w.Code, w.Body)
+	}
+	if len(b.paused) != 1 {
+		t.Fatalf("kept pausing after the owner resumed: %v", b.paused)
+	}
+}
+
+// Agents the last pause caught after the owner resumed are listed on the card
+// and woken by one press; agents paused before that pause stay paused.
+func TestWakeAgentsTheLastPauseLeftBehind(t *testing.T) {
+	now := time.Now().UTC()
+	b := aiControlSetup(t, 67, now.Add(48*time.Hour))
+	pausedAt := now.Add(-time.Hour)
+	os.WriteFile(aiPausedPath(), []byte("Paused by the owner"), 0600)
+	os.Chtimes(aiPausedPath(), pausedAt, pausedAt)
+	r := asUser(t, &Deps{}, ownerUser)
+	if w := do(t, r, http.MethodPost, "/api/founderos/pages/usage/ai/resume", ""); w.Code != 200 {
+		t.Fatalf("resume: %d %s", w.Code, w.Body)
+	}
+	// The pause loop finished after the resume.
+	b.agents = []paperclip.Agent{{ID: "pr", Name: "Prospect Research", Status: "paused"}, {ID: "old", Name: "Old", Status: "paused"}, {ID: "x", Name: "X", Status: "idle"}}
+	b.pauses = map[string]time.Time{"pr": pausedAt.Add(20 * time.Second), "old": pausedAt.Add(-72 * time.Hour)}
+	b.resumed = nil
+
+	w := do(t, r, http.MethodGet, "/api/founderos/pages/usage/ai", "")
+	if !strings.Contains(w.Body.String(), `"stillPaused":["Prospect Research"]`) {
+		t.Fatalf("status: %s", w.Body)
+	}
+	w = do(t, r, http.MethodPost, "/api/founderos/pages/usage/ai/wake", "")
+	if w.Code != 200 || len(b.resumed) != 1 || b.resumed[0] != "pr" {
+		t.Fatalf("wake: %d %s woke=%v", w.Code, w.Body, b.resumed)
+	}
+}

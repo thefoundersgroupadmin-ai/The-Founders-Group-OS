@@ -54,4 +54,15 @@ describe('AI pause controls', () => {
 		await fireEvent.click(btn);
 		await waitFor(() => expect(screen.getByText(/could not clear the pause/)).toBeTruthy());
 	});
+	it('lists agents a pause left behind after the go-ahead and wakes them in one press', async () => {
+		fetchMock.mockResolvedValueOnce({ cutoff: 50, paused: false, canControl: true, usedPercent: 67, goAheadUntil: reset, stillPaused: ['Prospect Research', 'Sales Agent'] });
+		render(AiGuard);
+		expect(await screen.findByText(/Still paused: Prospect Research, Sales Agent/)).toBeTruthy();
+		fetchMock.mockResolvedValueOnce({ ok: true, resumed: ['Prospect Research', 'Sales Agent'], kept: [], failed: [] });
+		fetchMock.mockResolvedValueOnce({ cutoff: 50, paused: false, canControl: true, usedPercent: 67, goAheadUntil: reset });
+		await fireEvent.click(screen.getByRole('button', { name: 'Wake 2 agents' }));
+		expect(fetchMock).toHaveBeenCalledWith('/pages/usage/ai/wake', { method: 'POST' });
+		await screen.findByText(/Woke Prospect Research, Sales Agent/);
+		await waitFor(() => expect(screen.queryByRole('button', { name: /Wake/ })).toBeNull());
+	});
 });

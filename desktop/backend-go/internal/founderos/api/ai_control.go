@@ -108,6 +108,47 @@ func agentName(a paperclip.Agent) string {
 	return a.ID
 }
 
+// lastPauseClearedSince is when the pause the owner last resumed began (the
+// cleared flag keeps its time), less the same two minutes Resume allows.
+func lastPauseClearedSince() (time.Time, bool) {
+	matches, _ := filepath.Glob(aiPausedPath() + ".cleared-*")
+	var newest time.Time
+	for _, m := range matches {
+		if info, err := os.Stat(m); err == nil && info.ModTime().After(newest) {
+			newest = info.ModTime()
+		}
+	}
+	return newest.Add(-2 * time.Minute), !newest.IsZero()
+}
+
+// wakePausedSince resumes (or with wake=false only lists) paused agents whose
+// last pause came at or after since; agents paused earlier are kept.
+func wakePausedSince(ctx context.Context, b aiBoardAPI, since time.Time, wake bool) (resumed, kept, failed []string, err error) {
+	resumed, kept, failed = []string{}, []string{}, []string{}
+	agents, err := b.Agents(ctx)
+	pauses, perr := b.AgentPauses(ctx)
+	if err = errors.Join(err, perr); err != nil {
+		return
+	}
+	for _, a := range agents {
+		if a.Status != "paused" {
+			continue
+		}
+		if at, ok := pauses[a.ID]; !ok || at.Before(since) {
+			kept = append(kept, agentName(a))
+			continue
+		}
+		if wake {
+			if _, err := b.ResumeAgent(ctx, a.ID); err != nil {
+				failed = append(failed, agentName(a))
+				continue
+			}
+		}
+		resumed = append(resumed, agentName(a))
+	}
+	return
+}
+
 func aiControlRegister(s *gin.RouterGroup, d *Deps) {
 	s.GET("/pages/usage/ai", func(c *gin.Context) {
 		now := time.Now()
@@ -122,8 +163,36 @@ func aiControlRegister(s *gin.RouterGroup, d *Deps) {
 		}
 		if g, ok := aiGoAheadActive(now); ok {
 			out["goAheadUntil"] = g.Until
+			if since, ok := lastPauseClearedSince(); ok && p.Owner {
+				ctx, cancel := context.WithTimeout(c.Request.Context(), 10*time.Second)
+				defer cancel()
+				if left, _, _, err := wakePausedSince(ctx, aiBoard(d), since, false); err == nil && len(left) > 0 {
+					out["stillPaused"] = left
+				}
+			}
 		}
 		c.JSON(http.StatusOK, out)
+	})
+
+	// Wakes the agents the last pause caught after the owner resumed (Pause
+	// now pauses one agent at a time, so a quick Resume can overtake it).
+	s.POST("/pages/usage/ai/wake", func(c *gin.Context) {
+		if _, ok := aiOwner(c); !ok {
+			return
+		}
+		since, ok := lastPauseClearedSince()
+		if _, active := aiGoAheadActive(time.Now()); !active || !ok {
+			c.JSON(http.StatusConflict, gin.H{"ok": false, "error": "AI work is not resumed; press Resume first"})
+			return
+		}
+		ctx, cancel := context.WithTimeout(c.Request.Context(), 30*time.Second)
+		defer cancel()
+		resumed, kept, failed, err := wakePausedSince(ctx, aiBoard(d), since, true)
+		if err != nil {
+			c.JSON(http.StatusBadGateway, gin.H{"ok": false, "error": "the agent board could not be read: " + err.Error()})
+			return
+		}
+		c.JSON(http.StatusOK, gin.H{"ok": true, "resumed": resumed, "kept": kept, "failed": failed})
 	})
 
 	s.POST("/pages/usage/ai/resume", func(c *gin.Context) {
@@ -161,26 +230,7 @@ func aiControlRegister(s *gin.RouterGroup, d *Deps) {
 		if !pausedSince.IsZero() {
 			ctx, cancel := context.WithTimeout(c.Request.Context(), 30*time.Second)
 			defer cancel()
-			b := aiBoard(d)
-			agents, err := b.Agents(ctx)
-			pauses, perr := b.AgentPauses(ctx)
-			boardErr = errors.Join(err, perr)
-			if boardErr == nil {
-				for _, a := range agents {
-					if a.Status != "paused" {
-						continue
-					}
-					if at, ok := pauses[a.ID]; !ok || at.Before(pausedSince) {
-						kept = append(kept, agentName(a))
-						continue
-					}
-					if _, err := b.ResumeAgent(ctx, a.ID); err != nil {
-						failed = append(failed, agentName(a))
-						continue
-					}
-					resumed = append(resumed, agentName(a))
-				}
-			}
+			resumed, kept, failed, boardErr = wakePausedSince(ctx, aiBoard(d), pausedSince, true)
 		}
 		out := gin.H{"ok": true, "until": until, "resumed": resumed, "kept": kept, "failed": failed}
 		if boardErr != nil {
@@ -208,6 +258,11 @@ func aiControlRegister(s *gin.RouterGroup, d *Deps) {
 		paused := []string{}
 		agents, err := b.Agents(ctx)
 		for _, a := range agents {
+			// A Resume pressed while this loop runs clears the flag: stop
+			// rather than pause agents behind the owner's go-ahead.
+			if _, err := os.Stat(aiPausedPath()); err != nil {
+				break
+			}
 			if a.Status != "paused" {
 				if _, perr := b.PauseAgent(ctx, a.ID); perr == nil {
 					paused = append(paused, agentName(a))

@@ -49,6 +49,9 @@ describe('skills logic', () => {
 
 const json = (body: unknown, status = 200) =>
 	new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json' } });
+// The page also loads the task fleet and command history; a Response body
+// reads once, so each call needs its own.
+const serve = (body: unknown, status = 200) => () => Promise.resolve(json(body, status));
 
 let fetchMock: ReturnType<typeof vi.fn<(...args: unknown[]) => Promise<Response>>>;
 beforeEach(() => {
@@ -173,11 +176,11 @@ const body: SkillsBody = {
 
 describe('/os/skills page', () => {
 	it('wears the v1 slab: header chip, Skill Library + Skill Volume, Categories / Owners / Drafts, then the wall', async () => {
-		fetchMock.mockResolvedValue(json(body));
+		fetchMock.mockImplementation(serve(body));
 		const { container } = render(SkillsPage);
 		expect(screen.getByRole('heading', { level: 1 }).textContent).toBe('Skills');
 		await waitFor(() => expect(screen.getByText('All 4')).toBeTruthy());
-		expect(fetchMock.mock.calls[0][0]).toBe('/api/founderos/pages/skills');
+		expect(fetchMock.mock.calls.map((c) => c[0])).toContain('/api/founderos/pages/skills');
 		expect(container.textContent).toContain('2 Claude Code skills on disk · 2 operator skills · 4 groups');
 		// the header chip: live count · drafts (the insight value)
 		expect(screen.getByText('3 live · 1 drafts')).toBeTruthy();
@@ -221,7 +224,7 @@ describe('/os/skills page', () => {
 			sourceNote: '2 operator skills (no ~/.claude/skills on this machine) · open any card to read or download its SKILL.md.',
 			volume: { ...body.volume, headline: 2, counts: { claude: 0, user: 0, plugin: 0, operator: 2, live: 1, learning: 1, planned: 0 }, groups: [{ label: 'Operator', count: 2 }], groupCount: 1 }
 		};
-		fetchMock.mockResolvedValue(json(noDisk));
+		fetchMock.mockImplementation(serve(noDisk));
 		const { container } = render(SkillsPage);
 		await waitFor(() => expect(container.textContent).toContain('0 Claude Code skills on disk · 2 operator skills · 1 groups'));
 		expect(screen.getByText('0 from plugins')).toBeTruthy();
@@ -229,7 +232,7 @@ describe('/os/skills page', () => {
 	});
 
 	it('operator skills unreachable: the chip and the cards say so, disk skills still show', async () => {
-		fetchMock.mockResolvedValue(json({ ...body, cards: cards.slice(0, 2), operatorError: 'operator skills unavailable: no Postgres' }));
+		fetchMock.mockImplementation(serve({ ...body, cards: cards.slice(0, 2), operatorError: 'operator skills unavailable: no Postgres' }));
 		const { container } = render(SkillsPage);
 		await waitFor(() => expect(container.textContent).toContain('operator skills unavailable: no Postgres'));
 		expect(screen.getByText('All 2')).toBeTruthy();

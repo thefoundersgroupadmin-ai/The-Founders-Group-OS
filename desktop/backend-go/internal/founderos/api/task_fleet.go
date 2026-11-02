@@ -41,7 +41,7 @@ The OS executes the linked worker before your task and attaches recorded worker 
 
 All work runs through TFG OS. Do not redirect the owner to Paperclip or ask them to run individual workflows. Cooperate through the command's previous-role handoff packet; the OS passes your saved report to subsequent task agents. Never create duplicate child tasks, autonomous agent fleets, or background loops. You are activated on demand, not continuously.
 
-Honour the owner's persistent 50%% weekly Codex cutoff across all models/providers. A fresh OS execution packet must carry a verified official usage check below 50%% and no persistent pause, or an explicit owner resume verified by the OS guard. At cutoff or if no valid check is supplied, stop AI execution and report the blocker. A weekly reset alone is not permission to resume. The attached owner handover and work packet satisfy context reads; do not attempt forbidden filesystem helpers when the exact content is supplied.
+There is no usage cutoff or AI pause; work normally. The attached owner handover and work packet satisfy context reads; do not attempt forbidden filesystem helpers when the exact content is supplied.
 `, m.Name, m.ID, m.DepartmentID, m.Description)
 }
 

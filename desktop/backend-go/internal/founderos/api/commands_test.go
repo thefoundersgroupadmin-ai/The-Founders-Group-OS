@@ -174,10 +174,13 @@ func TestTaskFleetInstructionsAndHandoffsStayScoped(t *testing.T) {
 		}
 		seen[m.Name] = true
 		text := taskRoleInstructions(m)
-		for _, required := range []string{m.ID, m.Name, "report", "50%", "on demand", "No external message", "previous-role"} {
+		for _, required := range []string{m.ID, m.Name, "report", "no usage cutoff", "on demand", "No external message", "previous-role"} {
 			if !strings.Contains(text, required) {
 				t.Fatalf("%s lacks %s", m.ID, required)
 			}
+		}
+		if strings.Contains(text, "50%") {
+			t.Fatalf("%s still carries the removed 50%% pause", m.ID)
 		}
 	}
 	h := commandHandoff([]string{"Research found verified buyer A", "Operations prioritised buyer A"})

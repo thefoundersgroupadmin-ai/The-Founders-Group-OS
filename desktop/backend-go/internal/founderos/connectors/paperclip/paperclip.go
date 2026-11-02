@@ -259,8 +259,27 @@ func (c *Connector) companyGet(ctx context.Context, path string) (any, error) {
 	return c.get(ctx, "/api/companies/"+cr.company+path, listTimeout)
 }
 
+// BoardError is the board refusing a write: its status and (clipped) words.
+type BoardError struct {
+	Status int
+	Body   string
+}
+
+func (e *BoardError) Error() string { return fmt.Sprintf("HTTP %d: %s", e.Status, e.Body) }
+
+// Message is the board's own reason: its JSON "error" field, else the body.
+func (e *BoardError) Message() string {
+	var b struct {
+		Error string `json:"error"`
+	}
+	if json.Unmarshal([]byte(e.Body), &b) == nil && strings.TrimSpace(b.Error) != "" {
+		return strings.TrimSpace(b.Error)
+	}
+	return e.Body
+}
+
 // send is a guarded write. The response body is returned decoded when the
-// board answered 2xx; a non-2xx is an error carrying the board's words.
+// board answered 2xx; a non-2xx is a *BoardError carrying the board's words.
 func (c *Connector) send(ctx context.Context, action, method, path string, body any) (any, error) {
 	cr, has := c.creds()
 	if !has {
@@ -275,7 +294,7 @@ func (c *Connector) send(ctx context.Context, action, method, path string, body 
 		if !ok(res) {
 			raw, _ := io.ReadAll(io.LimitReader(res.Body, 200))
 			res.Body.Close()
-			return fmt.Errorf("HTTP %d: %s", res.StatusCode, strings.TrimSpace(string(raw)))
+			return &BoardError{Status: res.StatusCode, Body: strings.TrimSpace(string(raw))}
 		}
 		out, _ = decode(res)
 		return nil

@@ -281,7 +281,7 @@ func TestClientsWorkLaunchRecordsAnUncertainLaunchWithoutLeaking(t *testing.T) {
 	h := clientsHarness(t, store, &clientsFakeLauncher{err: errors.New("sensitive subprocess output")}, clientsToken)
 	code, body := clientsDo(t, h, http.MethodPost, "/api/founderos/pages/clients/work", map[string]any{"action": "launch", "id": clientsTestID}, clientsToken)
 	raw, _ := json.Marshal(body)
-	if code != http.StatusBadGateway || strings.Contains(string(raw), "sensitive") {
+	if code != http.StatusFailedDependency || strings.Contains(string(raw), "sensitive") {
 		t.Fatalf("%d %s", code, raw)
 	}
 	if ws, ok := store.finished[clientsTestID]; !ok || ws != nil {

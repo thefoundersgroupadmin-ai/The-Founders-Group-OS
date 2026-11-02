@@ -3,8 +3,10 @@ package api
 import (
 	"context"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/rhl/businessos-backend/internal/founderos/connectors/paperclip"
@@ -136,5 +138,25 @@ func TestApprovalsReportGuardedWritesAsConflict(t *testing.T) {
 	code, body := commsDo(t, h, http.MethodPost, "/api/founderos/pages/approvals/issues/i1/interactions/x1/accept", "{}")
 	if code != http.StatusConflict || body["guarded"] != true {
 		t.Fatalf("guarded: %d %v", code, body)
+	}
+}
+
+// 2 Nov 2026: a board refusal came back as 502, which Cloudflare replaced with
+// its own HTML error page, so the owner saw HTML instead of the reason.
+func TestApprovalsNeverAnswerBoardFailuresWith502(t *testing.T) {
+	for _, tc := range []struct {
+		err    error
+		code   int
+		detail string
+	}{
+		{paperclip.ErrNeedsConnection, http.StatusConflict, "connect"},
+		{&paperclip.BoardError{Status: 422, Body: `{"error":"Interaction is already resolved"}`}, http.StatusConflict, "Interaction is already resolved"},
+		{errors.New("dial tcp 127.0.0.1:3101: connection refused"), http.StatusFailedDependency, "connection refused"},
+	} {
+		h := approvalsRouter(t, &fakeApprovals{writeErr: tc.err})
+		code, body := commsDo(t, h, http.MethodPost, "/api/founderos/pages/approvals/issues/i1/interactions/x1/accept", "{}")
+		if code != tc.code || !strings.Contains(fmt.Sprint(body["detail"]), tc.detail) {
+			t.Errorf("%v: %d %v", tc.err, code, body)
+		}
 	}
 }

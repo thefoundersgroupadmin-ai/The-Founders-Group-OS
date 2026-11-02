@@ -92,7 +92,7 @@ func TestBoardTasksReadAndGuardedCreate(t *testing.T) {
 		t.Fatalf("create %d %+v", code, created)
 	}
 	fb.down = true
-	if code := getJSON(t, d, http.MethodGet, "/api/founderos/pages/board/tasks", nil, &out); code != http.StatusBadGateway || out["error"] == nil {
+	if code := getJSON(t, d, http.MethodGet, "/api/founderos/pages/board/tasks", nil, &out); code != http.StatusFailedDependency || out["error"] == nil {
 		t.Fatalf("down list %d %v", code, out)
 	}
 }

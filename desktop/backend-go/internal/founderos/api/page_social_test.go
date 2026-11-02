@@ -267,10 +267,10 @@ func TestSocialStaticRoutesBeatThePlatformParam(t *testing.T) {
 	}
 }
 
-func TestSocialHistoryUnreachableIs502(t *testing.T) {
+func TestSocialHistoryUnreachableIsAFailedDependency(t *testing.T) {
 	h := newSocialHarness(t)
 	h.z.postsErr = errors.New("zernio down")
-	if code, body := h.get("/api/founderos/pages/social/history"); code != 502 || body["posts"] != nil {
+	if code, body := h.get("/api/founderos/pages/social/history"); code != http.StatusFailedDependency || body["posts"] != nil {
 		t.Fatalf("%d %v", code, body)
 	}
 }
@@ -279,7 +279,7 @@ func TestSocialPostIsRefusedWhileWritesAreOffAndRecordedFailed(t *testing.T) {
 	t.Setenv("FOUNDEROS_WRITES", "0")
 	h := newSocialHarness(t)
 	code, body := h.post("/api/founderos/pages/social/posts", map[string]any{"caption": "hello", "platforms": []string{"instagram"}})
-	if code != 502 || body["post"].(map[string]any)["status"] != "failed" || body["error"] == nil {
+	if code != http.StatusFailedDependency || body["post"].(map[string]any)["status"] != "failed" || body["error"] == nil {
 		t.Fatalf("%d %v", code, body)
 	}
 	if len(h.z.published) != 0 {
@@ -310,7 +310,7 @@ func TestSocialDMReplyRefusedStoresNothing(t *testing.T) {
 	t.Setenv("FOUNDEROS_WRITES", "0")
 	h := newSocialHarness(t)
 	code, body := h.post("/api/founderos/pages/social/dm/reply", map[string]any{"subscriberId": "s1", "text": "hi"})
-	if code != 502 || body["ok"] != false {
+	if code != http.StatusFailedDependency || body["ok"] != false {
 		t.Fatalf("%d %v", code, body)
 	}
 	var n int
@@ -341,7 +341,7 @@ func TestSocialUploadRefusedWhileWritesAreOff(t *testing.T) {
 	fw, _ := mw.CreateFormFile("file", "clip.mp4")
 	_, _ = fw.Write([]byte("bytes"))
 	_ = mw.Close()
-	if code, body := h.do(http.MethodPost, "/api/founderos/pages/social/upload", buf.Bytes(), mw.FormDataContentType()); code != 502 || body["error"] == nil {
+	if code, body := h.do(http.MethodPost, "/api/founderos/pages/social/upload", buf.Bytes(), mw.FormDataContentType()); code != http.StatusFailedDependency || body["error"] == nil {
 		t.Fatalf("%d %v", code, body)
 	}
 	if code, _ := h.do(http.MethodPost, "/api/founderos/pages/social/upload", nil, "multipart/form-data; boundary=x"); code != 400 {

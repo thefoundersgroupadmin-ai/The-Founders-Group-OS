@@ -40,8 +40,17 @@ func approvalsWriteErr(c *gin.Context, err error) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 	case errors.Is(err, guard.ErrWritesDisabled):
 		c.JSON(http.StatusConflict, gin.H{"ok": false, "guarded": true, "detail": err.Error()})
+	case errors.Is(err, paperclip.ErrNeedsConnection):
+		c.JSON(http.StatusConflict, gin.H{"ok": false, "needsConnection": true, "detail": err.Error()})
 	default:
-		c.JSON(http.StatusBadGateway, gin.H{"ok": false, "detail": err.Error()})
+		// Never 502: Cloudflare swaps an origin 502 for its own HTML page, so
+		// the owner saw HTML instead of the reason (2 Nov 2026).
+		var be *paperclip.BoardError
+		if errors.As(err, &be) && be.Status >= 400 && be.Status < 500 {
+			c.JSON(http.StatusConflict, gin.H{"ok": false, "detail": be.Message()})
+			return
+		}
+		c.JSON(http.StatusFailedDependency, gin.H{"ok": false, "detail": err.Error()})
 	}
 }
 

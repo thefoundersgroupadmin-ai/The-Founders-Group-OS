@@ -240,6 +240,7 @@ func Register(api *gin.RouterGroup, d *Deps, auth ...gin.HandlerFunc) {
 	registerDialerHooks(b, d)
 
 	s := b.Group("")
+	s.Use(noBadGateway)
 	s.Use(auth...)
 	s.Use(withPerson)
 	s.GET("/connections", func(c *gin.Context) {

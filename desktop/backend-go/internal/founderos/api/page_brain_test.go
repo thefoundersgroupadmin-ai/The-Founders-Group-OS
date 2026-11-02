@@ -219,7 +219,7 @@ func TestBrainQueryRetrievesThroughTheRouter(t *testing.T) {
 	oe.down = true
 	oe.mu.Unlock()
 	code, body = brainCall(t, h, http.MethodGet, "/api/founderos/pages/brain/query?q=hermes", nil)
-	if code != http.StatusBadGateway || body["error"] == nil {
+	if code != http.StatusFailedDependency || body["error"] == nil {
 		t.Fatalf("an unreachable engine is an error, never zero hits: %d %v", code, body)
 	}
 }
@@ -249,7 +249,7 @@ func TestBrainDumpCapturesIntoTheHomeEngine(t *testing.T) {
 	oe.down = true
 	oe.mu.Unlock()
 	code, body = brainCall(t, h, http.MethodPost, "/api/founderos/pages/brain/dump", map[string]any{"text": "x", "folder": "inbox"})
-	if code != http.StatusBadGateway || body["embedded"] != false || body["error"] == nil {
+	if code != http.StatusFailedDependency || body["embedded"] != false || body["error"] == nil {
 		t.Fatalf("failed capture must say nothing was saved: %d %v", code, body)
 	}
 }

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { answersOf, canReject, checkboxesValid, choose, labelsOf, toggleIn, verdictsOf } from './approvals';
+import { answersOf, canReject, checkboxesValid, choose, isConnectionRequest, labelsOf, toggleIn, verdictsOf } from './approvals';
 
 describe('approvals helpers', () => {
 	it('uses the agent labels, or plain fallbacks', () => {
@@ -13,6 +13,13 @@ describe('approvals helpers', () => {
 			accept: 'Approve',
 			reject: 'Send back'
 		});
+	});
+
+	it('offers only Decline on a connect-an-account request', () => {
+		// THE-20 "Connect Supabase": Approve cannot connect an account.
+		expect(isConnectionRequest({ kind: 'connection_intent' })).toBe(true);
+		expect(isConnectionRequest({ kind: 'request_confirmation' })).toBe(false);
+		expect(labelsOf({ kind: 'connection_intent', acceptLabel: '', rejectLabel: '' }).reject).toBe('Decline request');
 	});
 
 	it('requires a reason only when the agent asked for one', () => {

@@ -81,6 +81,16 @@ describe('founderosFetch', () => {
 		expect(err.status).toBe(502);
 	});
 
+	it('an HTML error page (Cloudflare) becomes a plain sentence, not markup', async () => {
+		// 2 Nov 2026: the owner saw "<!DOCTYPE html> <!--[if lt IE 7]>… (HTTP 502)".
+		const { founderosFetch, FounderosApiError } = await load();
+		fetchMock.mockResolvedValueOnce(new Response('<!DOCTYPE html>\n<!--[if lt IE 7]> <html class="no-js ie6 oldie" lang="en-US"> <![endif]-->', { status: 502 }));
+		const err = (await founderosFetch('/x').catch((e: unknown) => e)) as InstanceType<typeof FounderosApiError>;
+		expect(err).toBeInstanceOf(FounderosApiError);
+		expect(err.message).not.toContain('<');
+		expect(err.message).toContain("couldn't reach");
+	});
+
 	it('204 resolves to undefined', async () => {
 		document.cookie = 'csrf_token=t; path=/';
 		const { founderosFetch } = await load();

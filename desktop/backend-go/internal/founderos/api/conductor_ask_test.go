@@ -99,7 +99,7 @@ func TestTheConductorSaysWhyItCannotAnswer(t *testing.T) {
 	askClaude = func(context.Context, string, string) (string, error) { return "", errors.New("Invalid API key") }
 	defer func() { askClaude = old }()
 	w := do(t, asUser(t, &Deps{}, karim), http.MethodPost, "/api/founderos/pages/conductor/ask", `{"message":"hi"}`)
-	if w.Code != http.StatusBadGateway || !strings.Contains(w.Body.String(), "Invalid API key") {
+	if w.Code != http.StatusFailedDependency || !strings.Contains(w.Body.String(), "Invalid API key") {
 		t.Fatalf("%d %s", w.Code, w.Body)
 	}
 }

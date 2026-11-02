@@ -368,14 +368,14 @@ func TestCommsReplyIsGuarded(t *testing.T) {
 	}
 	guard.Reset()
 	code, body := commsDo(t, h, http.MethodPost, "/api/founderos/pages/comms/reply", `{"source":"slack","channel":"general","text":"hi"}`)
-	if code != http.StatusBadGateway || body["ok"] != false || body["guarded"] != true || !strings.Contains(fmt.Sprint(body["detail"]), "FOUNDEROS_WRITES") {
+	if code != http.StatusFailedDependency || body["ok"] != false || body["guarded"] != true || !strings.Contains(fmt.Sprint(body["detail"]), "FOUNDEROS_WRITES") {
 		t.Fatalf("slack reply with writes off: %d %v", code, body)
 	}
 	if r := guard.Refused(); len(r) == 0 || r[len(r)-1].Action != "slack.chat.postMessage" {
 		t.Fatalf("refusal not logged: %v", r)
 	}
 	code, body = commsDo(t, h, http.MethodPost, "/api/founderos/pages/comms/reply", `{"source":"email","account":"inbox-1","to":"ceo@acme.com","subject":"Re: renewal","text":"yes"}`)
-	if code != http.StatusBadGateway || body["ok"] != false || body["guarded"] != true || !strings.Contains(fmt.Sprint(body["error"]), "FOUNDEROS_WRITES") {
+	if code != http.StatusFailedDependency || body["ok"] != false || body["guarded"] != true || !strings.Contains(fmt.Sprint(body["error"]), "FOUNDEROS_WRITES") {
 		t.Fatalf("email reply with writes off: %d %v", code, body)
 	}
 }

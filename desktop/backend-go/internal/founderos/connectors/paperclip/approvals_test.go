@@ -241,3 +241,41 @@ func TestTheTaskScanWarnsWhenItHitsThePageCap(t *testing.T) {
 		t.Fatalf("warnings = %v", box.Warnings)
 	}
 }
+
+// Paperclip answers a connection request only through its connection-intent
+// endpoints; the generic accept/reject return 422 (THE-20 "Connect Supabase").
+func TestConnectionRequestsAreDeclinedThroughTheirOwnEndpoint(t *testing.T) {
+	t.Setenv("FOUNDEROS_WRITES", "1")
+	guard.Reset()
+	var declined string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/issues/i1/interactions/x9/accept", "/api/issues/i1/interactions/x9/reject":
+			w.WriteHeader(422)
+			io.WriteString(w, `{"error":"Connection intents must be resolved through the connection intent endpoints"}`)
+		case "/api/connection-intents/x9/decline":
+			b, _ := io.ReadAll(r.Body)
+			declined = string(b)
+			io.WriteString(w, `{"id":"x9","status":"rejected"}`)
+		default:
+			w.WriteHeader(404)
+		}
+	}))
+	defer srv.Close()
+	c := New(resolver(t, "PAPERCLIP_API_URL="+srv.URL, "PAPERCLIP_BOARD_KEY=board-key", "PAPERCLIP_COMPANY_ID=c1"))
+	ctx := context.Background()
+	if err := c.AcceptInteraction(ctx, "i1", "x9", AcceptChoice{}); !errors.Is(err, ErrNeedsConnection) {
+		t.Fatalf("accept: %v", err)
+	}
+	if err := c.RejectInteraction(ctx, "i1", "x9", " not needed "); err != nil {
+		t.Fatalf("reject: %v", err)
+	}
+	if declined != `{"reason":"not needed"}` {
+		t.Fatalf("decline body = %q", declined)
+	}
+	var be *BoardError
+	err := c.AcceptInteraction(ctx, "i1", "zz", AcceptChoice{})
+	if !errors.As(err, &be) || be.Status != 404 {
+		t.Fatalf("other refusals keep their status: %v", err)
+	}
+}

@@ -119,7 +119,7 @@ func TestChatsHubConfigured(t *testing.T) {
 	}
 	// a configured model that fails is the upstream's failure, not a fake reply
 	llm.err = errors.New("gateway 500: boom")
-	if code := getJSON(t, d, http.MethodPost, "/api/founderos/pages/chats/sales-agent", []byte(`{"message":"again"}`), &p); code != http.StatusBadGateway || !strings.Contains(p.Error, "boom") {
+	if code := getJSON(t, d, http.MethodPost, "/api/founderos/pages/chats/sales-agent", []byte(`{"message":"again"}`), &p); code != http.StatusFailedDependency || !strings.Contains(p.Error, "boom") {
 		t.Fatalf("upstream failure %d %+v", code, p)
 	}
 }

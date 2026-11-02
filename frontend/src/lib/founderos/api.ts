@@ -23,7 +23,7 @@ export class FounderosApiError extends Error {
 }
 
 /** True when the bridge guard (FOUNDEROS_WRITES=0) refused a write. Routes keep
- *  their FounderOS v1 status codes (403, 409 or 502), so match the body's
+ *  their FounderOS v1 status codes (403, 409 or 424), so match the body's
  *  guarded/refused flag, or the guard's reason in its error text. */
 export function isGuardRefusal(err: unknown): boolean {
 	if (!(err instanceof FounderosApiError)) return false;
@@ -70,7 +70,12 @@ function messageOf(body: unknown, fallback: string): string {
 		const b = body as Record<string, unknown>;
 		for (const k of ['error', 'message', 'detail']) if (typeof b[k] === 'string' && b[k]) return b[k] as string;
 	}
-	if (typeof body === 'string' && body.trim()) return body.trim().slice(0, 200);
+	if (typeof body === 'string' && body.trim()) {
+		// A gateway's HTML error page (Cloudflare, when the tunnel can't reach
+		// the Mac) says nothing useful as text; say what happened instead.
+		if (/^\s*<(!doctype|html)/i.test(body)) return "The OS couldn't reach its server just now. Try again in a moment.";
+		return body.trim().slice(0, 200);
+	}
 	return fallback;
 }
 

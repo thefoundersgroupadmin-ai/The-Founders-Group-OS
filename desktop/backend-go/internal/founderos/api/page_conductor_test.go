@@ -90,7 +90,7 @@ func TestConductorChat(t *testing.T) {
 	board.postErr = errors.New("board unreachable")
 	w = httptest.NewRecorder()
 	r.ServeHTTP(w, authed(http.MethodPost, "/api/founderos/pages/conductor/chat", []byte(`{"message":"ship it"}`)))
-	if w.Code != http.StatusBadGateway {
+	if w.Code != http.StatusFailedDependency {
 		t.Fatalf("upstream failure: %d", w.Code)
 	}
 }

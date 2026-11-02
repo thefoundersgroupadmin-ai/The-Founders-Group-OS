@@ -61,7 +61,7 @@ func TestOutboxFailedSendIsReportedAndRejectWorks(t *testing.T) {
 	seed("ob-1")
 	seed("ob-2")
 	code, body := commsDo(t, h, http.MethodPost, "/api/founderos/pages/outbox/ob-1/approve", `{"subject":"Hello Eren","body":"Body"}`)
-	if code != http.StatusBadGateway || body["ok"] != false || body["item"].(map[string]any)["status"] != "failed" {
+	if code != http.StatusFailedDependency || body["ok"] != false || body["item"].(map[string]any)["status"] != "failed" {
 		t.Fatalf("failed send: %d %v", code, body)
 	}
 	if code, body := commsDo(t, h, http.MethodPost, "/api/founderos/pages/outbox/ob-2/reject", ""); code != http.StatusOK || body["item"].(map[string]any)["status"] != "rejected" {
@@ -84,7 +84,7 @@ func TestOutboxMapsAnUncertainSMTPDeliveryToUncertain(t *testing.T) {
 	})
 	seed("ob-1")
 	code, body := commsDo(t, h, http.MethodPost, "/api/founderos/pages/outbox/ob-1/approve", `{"subject":"Hello Eren","body":"Body"}`)
-	if code != http.StatusBadGateway || body["item"].(map[string]any)["status"] != "uncertain" {
+	if code != http.StatusFailedDependency || body["item"].(map[string]any)["status"] != "uncertain" {
 		t.Fatalf("uncertain: %d %v", code, body)
 	}
 }

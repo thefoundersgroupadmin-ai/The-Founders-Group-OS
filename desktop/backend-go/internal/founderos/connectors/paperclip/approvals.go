@@ -345,7 +345,22 @@ func (c *Connector) AcceptInteraction(ctx context.Context, issueID, interactionI
 	}
 	_, err := c.send(ctx, "paperclip.interaction.accept", http.MethodPost,
 		"/api/issues/"+issueID+"/interactions/"+interactionID+"/accept", body)
+	if isConnectionRequest(err) {
+		return ErrNeedsConnection
+	}
 	return err
+}
+
+// ErrNeedsConnection: the request asks the owner to connect an account (an
+// agent's "Connect Supabase"), which a plain approve cannot do.
+var ErrNeedsConnection = errors.New("this request asks you to connect an account, which Approve can't do: connect the service in Paperclip's Connections first, or decline the request")
+
+// isConnectionRequest: Paperclip answers connection requests only through its
+// /api/connection-intents endpoints and refuses the generic ones with 422.
+func isConnectionRequest(err error) bool {
+	var be *BoardError
+	return errors.As(err, &be) && be.Status == http.StatusUnprocessableEntity &&
+		strings.Contains(be.Body, "connection intent endpoints")
 }
 
 // SubmitVerdicts records the operator's call on each item of a request_item_verdicts.
@@ -377,6 +392,10 @@ func (c *Connector) RejectInteraction(ctx context.Context, issueID, interactionI
 	}
 	_, err := c.send(ctx, "paperclip.interaction.reject", http.MethodPost,
 		"/api/issues/"+issueID+"/interactions/"+interactionID+"/reject", body)
+	if isConnectionRequest(err) {
+		_, err = c.send(ctx, "paperclip.connection_intent.decline", http.MethodPost,
+			"/api/connection-intents/"+interactionID+"/decline", body)
+	}
 	return err
 }
 

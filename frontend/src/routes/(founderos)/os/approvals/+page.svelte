@@ -9,7 +9,7 @@
 	import { founderosFetch } from '$lib/founderos/api';
 	import { Badge, PageHeader, Pressable, Rise, Slab } from '$lib/founderos/kit';
 	import Markdown from '$lib/founderos/pages/agents/Markdown.svelte';
-	import { answersOf, canReject, checkboxesValid, choose, labelsOf, toggleIn, verdictsOf } from '$lib/founderos/pages/approvals/approvals';
+	import { answersOf, canReject, checkboxesValid, choose, isConnectionRequest, labelsOf, toggleIn, verdictsOf } from '$lib/founderos/pages/approvals/approvals';
 	import type { ApprovalItem, ApprovalsBody, TaskContext, VerdictValue } from '$lib/founderos/pages/approvals/types';
 
 	let data = $state<ApprovalsBody | null>(null);
@@ -130,7 +130,7 @@
 						<div class="flex flex-wrap items-center justify-between gap-2">
 							<p class="font-mono text-[12px]">{it.issueIdentifier} · {it.issueTitle}</p>
 							<Badge tone={it.kind === 'ask_user_questions' ? 'warn' : 'accent'}
-								>{({ ask_user_questions: 'Question', suggest_tasks: 'Suggested tasks', request_checkbox_confirmation: 'Checklist', request_item_verdicts: 'Verdicts' } as Record<string, string>)[it.kind] ?? 'Review'}</Badge
+								>{({ ask_user_questions: 'Question', suggest_tasks: 'Suggested tasks', request_checkbox_confirmation: 'Checklist', request_item_verdicts: 'Verdicts', connection_intent: 'Connect account' } as Record<string, string>)[it.kind] ?? 'Review'}</Badge
 							>
 						</div>
 						<p class="mt-2 text-[13px] font-semibold">{it.title || 'Review requested'}</p>
@@ -269,6 +269,12 @@
 								class="pc-input mt-3 w-full resize-y rounded-[6px] px-2.5 py-2 text-[12px]"
 							></textarea>
 							<div class="mt-2 flex flex-wrap items-center gap-2">
+								{#if isConnectionRequest(it)}
+									<p class="bn-muted w-full text-[12px]">
+										An agent needs an account connected. Approving can't connect it: sign in to the service (or add its API key) in Paperclip's
+										Connections, and this request resolves itself. If the agent doesn't need it any more, decline it.
+									</p>
+								{:else}
 								<Pressable
 									tone="primary"
 									disabled={busy[it.id] ||
@@ -276,6 +282,7 @@
 										(it.kind === 'request_checkbox_confirmation' && !checkboxesValid(it, selections[it.id] ?? []))}
 									onclick={() => accept(it)}>{labels.accept}</Pressable
 								>
+								{/if}
 								<Pressable tone="secondary" disabled={busy[it.id] || !canReject(it, reasons[it.id] ?? '')} onclick={() => reject(it)}>{labels.reject}</Pressable>
 							</div>
 						{/if}

@@ -193,14 +193,14 @@ func TestInterjectRoutesAndValidates(t *testing.T) {
 	}
 }
 
-func TestInterjectThatCannotLandIsA502(t *testing.T) {
+func TestInterjectThatCannotLandIsAFailedDependency(t *testing.T) {
 	ij := &consoleFakeInterject{err: errors.New("board unreachable")}
 	consoleStub(t, consoleHealthySources(ij))
 	r := router(t, &Deps{})
 	w := consolePost(t, r, "/api/founderos/pages/interject", `{"text":"todo: x"}`)
 	var rc console.Receipt
 	_ = json.Unmarshal(w.Body.Bytes(), &rc)
-	if w.Code != http.StatusBadGateway || rc.OK || rc.Error == "" {
+	if w.Code != http.StatusFailedDependency || rc.OK || rc.Error == "" {
 		t.Fatalf("code %d receipt %+v", w.Code, rc)
 	}
 }

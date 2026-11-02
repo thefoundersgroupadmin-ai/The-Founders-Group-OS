@@ -130,7 +130,7 @@ func TestCronRunNow(t *testing.T) {
 	if code := getJSON(t, d, "POST", "/api/founderos/pages/cron/run", []byte(`{"cronId":"cron-a"}`), &out); code != 200 || out["ok"] != true || out["summary"] != "ran crm-pulse" {
 		t.Fatalf("run %d %v", code, out)
 	}
-	if code := getJSON(t, d, "POST", "/api/founderos/pages/cron/run", []byte(`{"cronId":"cron-b"}`), &out); code != http.StatusBadGateway || out["ok"] != false {
+	if code := getJSON(t, d, "POST", "/api/founderos/pages/cron/run", []byte(`{"cronId":"cron-b"}`), &out); code != http.StatusFailedDependency || out["ok"] != false {
 		t.Fatalf("ghost agent %d %v", code, out)
 	}
 	runs, _ := osdata.New(d.Pool).CronRunsByCron(context.Background(), "cron-b", 5)

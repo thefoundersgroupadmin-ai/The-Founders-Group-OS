@@ -2,11 +2,18 @@
 import type { ApprovalItem, ApprovalQuestion, VerdictValue } from './types';
 
 /** Button labels, falling back to plain words when the agent gave none. */
-export function labelsOf(it: Pick<ApprovalItem, 'acceptLabel' | 'rejectLabel'>): { accept: string; reject: string } {
+export function labelsOf(it: Pick<ApprovalItem, 'acceptLabel' | 'rejectLabel'> & { kind?: string }): { accept: string; reject: string } {
 	return {
 		accept: it.acceptLabel.trim() || 'Approve',
-		reject: it.rejectLabel.trim() || 'Send back'
+		reject: it.rejectLabel.trim() || (it.kind && isConnectionRequest({ kind: it.kind }) ? 'Decline request' : 'Send back')
 	};
+}
+
+/** An agent asking the owner to connect an account (e.g. "Connect Supabase").
+ *  Paperclip resolves these only by attaching a real connection or declining,
+ *  so the page offers Decline and explains where to connect. */
+export function isConnectionRequest(it: Pick<ApprovalItem, 'kind'>): boolean {
+	return it.kind === 'connection_intent';
 }
 
 /** A send-back may need a reason (the agent asked for one) and is capped at 4000. */

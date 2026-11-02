@@ -139,7 +139,7 @@ func TestPhonesSubscribeChoosePingsAndGetATest(t *testing.T) {
 	if w.Code != http.StatusOK || json.Unmarshal(w.Body.Bytes(), &st) != nil || st.PublicKey == "" || len(st.Devices) != 0 || st.BriefHour != 8 {
 		t.Fatalf("status %d %s", w.Code, w.Body)
 	}
-	if w := do(t, r, http.MethodPost, "/api/founderos/pages/notify/test", "{}"); w.Code != http.StatusBadGateway {
+	if w := do(t, r, http.MethodPost, "/api/founderos/pages/notify/test", "{}"); w.Code != http.StatusFailedDependency {
 		t.Fatalf("a test with no device must say so, got %d", w.Code)
 	}
 	if w := do(t, r, http.MethodPost, "/api/founderos/pages/notify/devices", `{"endpoint":"http://evil","keys":{"p256dh":"k","auth":"a"}}`); w.Code != http.StatusBadRequest {

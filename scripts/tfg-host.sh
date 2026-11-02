@@ -101,8 +101,8 @@ write_job() {
     tfg-os-web) plist "$1" keepalive "$NODE" "$REPO/frontend/build" ;;
     tfg-keep-awake) plist "$1" keepalive /usr/bin/caffeinate -s -i ;;
     tfg-backup) plist "$1" nightly /bin/bash "$REPO/scripts/tfg-backup.sh" ;;
-    paperclip-pipeline-sync) plist "$1" minute /usr/bin/python3 -I "$REPO/scripts/sync-paperclip-pipeline.py" ;;
-    paperclip-outbox) plist "$1" minute /usr/bin/python3 -I "$REPO/scripts/sync-paperclip-outbox.py" ;;
+    paperclip-pipeline-sync) plist "$1" five_minutes /usr/bin/python3 -I "$REPO/scripts/sync-paperclip-pipeline.py" ;;
+    paperclip-outbox) plist "$1" five_minutes /usr/bin/python3 -I "$REPO/scripts/sync-paperclip-outbox.py" ;;
     prospect-replies) plist "$1" five_minutes /usr/bin/python3 -I "$REPO/scripts/sync-prospect-replies.py" ;;
     tfg-paperclip)
       # The self-contained bundle (cd $PAPERCLIP_DIR/server && pnpm build:runtime)

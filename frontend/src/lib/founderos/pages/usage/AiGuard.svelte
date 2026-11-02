@@ -1,7 +1,7 @@
 <!--
   Usage → AI pause: the 50% guard's state and the owner's two controls.
-  Resume records the owner's one go-ahead until the weekly reset and wakes the
-  agents the guard paused; Pause now stops every agent. Wake catches agents a
+  Resume records the owner's one go-ahead (until usage next reaches the cutoff
+  after a weekly reset) and wakes the agents the guard paused; Pause now stops every agent. Wake catches agents a
   pause left paused after the owner resumed. Teammates see the state only.
   GET /pages/usage/ai, POST /pages/usage/ai/{resume,pause,wake}.
 -->
@@ -17,10 +17,10 @@
 		canControl: boolean;
 		usedPercent?: number;
 		resetsAt?: string;
-		goAheadUntil?: string;
+		goAhead?: boolean;
 		stillPaused?: string[];
 	};
-	type Resumed = { until: string; resumed: string[]; kept: string[]; failed: string[]; warning?: string };
+	type Resumed = { resumed: string[]; kept: string[]; failed: string[]; warning?: string };
 
 	let g = $state<Guard | null>(null);
 	let failure = $state<string | null>(null);
@@ -37,7 +37,10 @@
 	// after an action, not on every poll.
 	async function load(agents = false) {
 		try {
-			g = await founderosFetch<Guard>(agents ? '/pages/usage/ai?agents=1' : '/pages/usage/ai');
+			const next = await founderosFetch<Guard>(agents ? '/pages/usage/ai?agents=1' : '/pages/usage/ai');
+			// Light polls omit the agent list: keep the last one while still running.
+			if (!agents && g && !next.paused && next.goAhead) next.stillPaused = g.stillPaused;
+			g = next;
 			failure = null;
 		} catch (e) {
 			failure = e instanceof Error ? e.message : String(e);
@@ -60,7 +63,7 @@
 	const resume = () =>
 		act(async () => {
 			const r = await founderosFetch<Resumed>('/pages/usage/ai/resume', { method: 'POST' });
-			const parts = [`Resumed until ${when(r.until)}.`];
+			const parts = [`Resumed until usage next reaches ${g?.cutoff ?? 50}% after a weekly reset.`];
 			if (r.resumed.length) parts.push(`Woke ${names(r.resumed)}.`);
 			if (r.kept.length) parts.push(`${names(r.kept)} ${r.kept.length === 1 ? 'stays' : 'stay'} paused (paused before the cutoff).`);
 			if (r.failed.length) parts.push(`Could not wake ${names(r.failed)}.`);
@@ -69,15 +72,18 @@
 		});
 	const wake = () =>
 		act(async () => {
-			const r = await founderosFetch<Omit<Resumed, 'until'>>('/pages/usage/ai/wake', { method: 'POST' });
+			const r = await founderosFetch<Resumed>('/pages/usage/ai/wake', { method: 'POST' });
 			const parts = [r.resumed.length ? `Woke ${names(r.resumed)}.` : 'No agents to wake.'];
 			if (r.failed.length) parts.push(`Could not wake ${names(r.failed)}.`);
 			note = parts.join(' ');
 		});
 	const pause = () =>
 		act(async () => {
-			const r = await founderosFetch<{ paused: string[]; warning?: string }>('/pages/usage/ai/pause', { method: 'POST' });
-			note = `Paused${r.paused.length ? ' ' + names(r.paused) : ''}. ${r.warning ?? ''}`.trim();
+			const r = await founderosFetch<{ paused: string[]; failed?: string[]; warning?: string }>('/pages/usage/ai/pause', { method: 'POST' });
+			const parts = [`Paused${r.paused.length ? ' ' + names(r.paused) : ''}.`];
+			if (r.failed?.length) parts.push(`Could not stop ${names(r.failed)} yet; the guard keeps retrying.`);
+			if (r.warning) parts.push(r.warning);
+			note = parts.join(' ');
 		});
 
 	onMount(() => {
@@ -96,8 +102,8 @@
 			{#if g.usedPercent !== undefined}
 				<span>{Math.round(g.usedPercent)}% of the weekly limit used{g.resetsAt ? ` · resets ${when(g.resetsAt)}` : ''}</span>
 			{/if}
-			{#if !g.paused && g.goAheadUntil}
-				<span class="opacity-70">on your go-ahead until {when(g.goAheadUntil)}</span>
+			{#if !g.paused && g.goAhead}
+				<span class="opacity-70">on your go-ahead until usage next reaches {g.cutoff}% after a weekly reset</span>
 			{/if}
 		</div>
 		{#if !g.paused && g.stillPaused?.length}
@@ -109,7 +115,7 @@
 		{#if g.canControl}
 			<div class="mt-3 flex gap-2">
 				{#if g.paused}
-					<Pressable tone="primary" disabled={busy} onclick={resume}>Resume until {when(g.resetsAt)}</Pressable>
+					<Pressable tone="primary" disabled={busy} onclick={resume}>Resume</Pressable>
 				{:else}
 					{#if g.stillPaused?.length}
 						<Pressable tone="primary" disabled={busy} onclick={wake}>Wake {g.stillPaused.length} {g.stillPaused.length === 1 ? 'agent' : 'agents'}</Pressable>

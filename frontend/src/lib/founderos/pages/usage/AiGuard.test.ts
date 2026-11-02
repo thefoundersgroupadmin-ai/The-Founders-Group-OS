@@ -15,16 +15,16 @@ describe('AI pause controls', () => {
 	it('lets the owner resume once until the weekly reset and says which agents woke', async () => {
 		fetchMock.mockResolvedValueOnce({ cutoff: 50, paused: true, reason: 'Codex weekly usage reached 50%', canControl: true, usedPercent: 67, resetsAt: reset });
 		render(AiGuard);
-		const btn = await screen.findByRole('button', { name: /Resume until/ });
+		const btn = await screen.findByRole('button', { name: 'Resume' });
 		expect(screen.getByText(/67% of the weekly limit/)).toBeTruthy();
-		fetchMock.mockResolvedValueOnce({ ok: true, until: reset, resumed: ['CEO', 'Research'], kept: ['Old'], failed: [] });
-		fetchMock.mockResolvedValueOnce({ cutoff: 50, paused: false, canControl: true, usedPercent: 67, resetsAt: reset, goAheadUntil: reset });
+		fetchMock.mockResolvedValueOnce({ ok: true, resumed: ['CEO', 'Research'], kept: ['Old'], failed: [] });
+		fetchMock.mockResolvedValueOnce({ cutoff: 50, paused: false, canControl: true, usedPercent: 67, resetsAt: reset, goAhead: true });
 		await fireEvent.click(btn);
 		expect(fetchMock).toHaveBeenCalledWith('/pages/usage/ai/resume', { method: 'POST' });
 		await screen.findByText(/Woke CEO, Research/);
 		expect(screen.getByText(/Old stays paused/)).toBeTruthy();
 		await screen.findByRole('button', { name: 'Pause now' });
-		expect(screen.getByText(/on your go-ahead until/)).toBeTruthy();
+		expect(screen.getByText(/on your go-ahead until usage next reaches 50% after a weekly reset/)).toBeTruthy();
 	});
 
 	it('pauses everything when the owner presses Pause now', async () => {
@@ -48,19 +48,31 @@ describe('AI pause controls', () => {
 	it('reports a failed resume instead of pretending', async () => {
 		fetchMock.mockResolvedValueOnce({ cutoff: 50, paused: true, reason: 'cutoff', canControl: true, usedPercent: 67, resetsAt: reset });
 		render(AiGuard);
-		const btn = await screen.findByRole('button', { name: /Resume until/ });
+		const btn = await screen.findByRole('button', { name: 'Resume' });
 		fetchMock.mockRejectedValueOnce(new Error('could not clear the pause'));
 		fetchMock.mockResolvedValueOnce({ cutoff: 50, paused: true, reason: 'cutoff', canControl: true, usedPercent: 67, resetsAt: reset });
 		await fireEvent.click(btn);
 		await waitFor(() => expect(screen.getByText(/could not clear the pause/)).toBeTruthy());
 	});
+	it('keeps the Wake list through the light 30-second polls', async () => {
+		vi.useFakeTimers({ shouldAdvanceTime: true });
+		fetchMock.mockResolvedValueOnce({ cutoff: 50, paused: false, canControl: true, usedPercent: 30, goAhead: true, stillPaused: ['Prospect Research'] });
+		render(AiGuard);
+		await screen.findByRole('button', { name: 'Wake 1 agent' });
+		fetchMock.mockResolvedValue({ cutoff: 50, paused: false, canControl: true, usedPercent: 30, goAhead: true });
+		await vi.advanceTimersByTimeAsync(31_000);
+		expect(fetchMock).toHaveBeenLastCalledWith('/pages/usage/ai');
+		expect(screen.getByRole('button', { name: 'Wake 1 agent' })).toBeTruthy();
+		vi.useRealTimers();
+	});
+
 	it('lists agents a pause left behind after the go-ahead and wakes them in one press', async () => {
-		fetchMock.mockResolvedValueOnce({ cutoff: 50, paused: false, canControl: true, usedPercent: 67, goAheadUntil: reset, stillPaused: ['Prospect Research', 'Sales Agent'] });
+		fetchMock.mockResolvedValueOnce({ cutoff: 50, paused: false, canControl: true, usedPercent: 67, goAhead: true, stillPaused: ['Prospect Research', 'Sales Agent'] });
 		render(AiGuard);
 		expect(await screen.findByText(/Still paused: Prospect Research, Sales Agent/)).toBeTruthy();
 		expect(fetchMock).toHaveBeenCalledWith('/pages/usage/ai?agents=1');
 		fetchMock.mockResolvedValueOnce({ ok: true, resumed: ['Prospect Research', 'Sales Agent'], kept: [], failed: [] });
-		fetchMock.mockResolvedValueOnce({ cutoff: 50, paused: false, canControl: true, usedPercent: 67, goAheadUntil: reset });
+		fetchMock.mockResolvedValueOnce({ cutoff: 50, paused: false, canControl: true, usedPercent: 67, goAhead: true });
 		await fireEvent.click(screen.getByRole('button', { name: 'Wake 2 agents' }));
 		expect(fetchMock).toHaveBeenCalledWith('/pages/usage/ai/wake', { method: 'POST' });
 		await screen.findByText(/Woke Prospect Research, Sales Agent/);

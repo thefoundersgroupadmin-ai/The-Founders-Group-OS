@@ -37,9 +37,13 @@ type aiResumeGrant struct {
 }
 
 func aiResumeActive(now time.Time) bool {
-	// The owner's go-ahead holds until the reset even if the lease lapsed.
+	// The owner's go-ahead holds even if the lease lapsed; once it has ended
+	// (the next crossing), its lease no longer counts either.
 	if _, ok := aiGoAheadActive(now); ok {
 		return true
+	}
+	if aiGoAheadEnded(now) {
+		return false
 	}
 	raw, err := os.ReadFile(filepath.Join(filepath.Dir(aiPausedPath()), "ai-resume.json"))
 	if err != nil {
@@ -115,20 +119,33 @@ func aiGuardPass(ctx context.Context, b agentPauser, now time.Time) []notify.Eve
 	if aiResumeActive(now) {
 		return nil
 	}
+	// While paused, keep every agent paused whatever the meter says: a stop
+	// that failed (Pause now, a board timeout) is retried here.
+	paused := aiPaused() != ""
 	pct, ok := codexWeekly(now)
-	if !ok || pct < aiCutoffPercent {
+	if !paused && (!ok || pct < aiCutoffPercent) {
 		return nil
 	}
-	first := aiPaused() == ""
+	// The owner may resume while this pass waits on the board: recheck before
+	// each change so a stale pass never overrides the go-ahead.
+	resumed := func() bool { return aiResumeActive(time.Now()) }
 	agents, err := b.Agents(ctx)
 	if err == nil {
 		for _, a := range agents {
+			if resumed() {
+				return nil
+			}
 			if a.Status != "paused" {
 				_, _ = b.PauseAgent(ctx, a.ID)
 			}
 		}
 	}
-	if !first {
+	if paused {
+		return nil
+	}
+	aiStateMu.Lock()
+	defer aiStateMu.Unlock()
+	if resumed() || aiPaused() != "" {
 		return nil
 	}
 	why := fmt.Sprintf("Codex weekly usage reached %.0f%% at %s; all agents paused until you say resume.", pct, now.Format("Mon 15:04"))

@@ -1,12 +1,13 @@
 package api
 
 // The owner's controls for the 50% guard (/os/usage). The owner's rule
-// (2026-10-28): past the cutoff one go-ahead is enough. Resume records that
-// go-ahead until the weekly window resets, wakes only the agents the guard
-// paused, and from then on the guard renews its own short resume lease (the
-// one agent tasks check) every pass until the reset. After the reset a new
-// crossing of 50% pauses again. Pause now ends the go-ahead and pauses
-// everything. Only the owner can press either.
+// (2026-10-28): past the cutoff one go-ahead is enough, until the meter next
+// crosses 50% after a weekly reset. Resume records that go-ahead and wakes
+// only the agents the guard paused; the guard renews its short resume lease
+// (the one agent tasks check) every pass while the go-ahead holds. A reading
+// at or over 50% in a weekly window that began after the go-ahead ends it and
+// the guard pauses again. Pause now ends the go-ahead and pauses everything.
+// Only the owner can press either.
 
 import (
 	"context"
@@ -16,6 +17,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"sync"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -27,26 +29,41 @@ import (
 func init() { RegisterPage(aiControlRegister) }
 
 const (
-	aiLease       = 4 * time.Hour      // the resume lease agent tasks accept
-	aiGoAheadMax  = 8 * 24 * time.Hour // one weekly window, with slack
-	aiGoAheadWeek = 7 * 24 * time.Hour // when the reset time is unknown
+	aiLease = 4 * time.Hour      // the resume lease agent tasks accept
+	aiWeek  = 7 * 24 * time.Hour // Codex's weekly window (10080 minutes)
 )
 
 type aiGoAhead struct {
 	AuthorizedAt time.Time `json:"authorizedAt"`
-	Until        time.Time `json:"until"`
 	By           string    `json:"by"`
 }
+
+// aiStateMu orders the pause flag and go-ahead writes (Resume, Pause now, the
+// guard) within this process.
+var aiStateMu sync.Mutex
 
 func aiGoAheadPath() string { return filepath.Join(filepath.Dir(aiPausedPath()), "ai-goahead.json") }
 func aiResumePath() string  { return filepath.Join(filepath.Dir(aiPausedPath()), "ai-resume.json") }
 
-// aiGoAheadActive is the owner's go-ahead, when it still holds: before its
-// reset, and not overtaken by a later pause.
-func aiGoAheadActive(now time.Time) (aiGoAhead, bool) {
+func readAiGoAhead() (aiGoAhead, bool) {
 	var g aiGoAhead
 	raw, err := os.ReadFile(aiGoAheadPath())
-	if err != nil || json.Unmarshal(raw, &g) != nil || g.AuthorizedAt.After(now) || !g.Until.After(now) || g.Until.Sub(g.AuthorizedAt) > aiGoAheadMax {
+	return g, err == nil && json.Unmarshal(raw, &g) == nil && !g.AuthorizedAt.IsZero()
+}
+
+// aiCrossedSince: the current reading is at or over the cutoff in a weekly
+// window that began after at. A reading without a reset time cannot be placed
+// in a window and does not end a go-ahead (official snapshots carry one).
+func aiCrossedSince(at, now time.Time) bool {
+	pct, reset, ok := codexWeeklyWindow(now)
+	return ok && pct >= aiCutoffPercent && !reset.IsZero() && reset.Add(-aiWeek).After(at)
+}
+
+// aiGoAheadActive is the owner's go-ahead while it holds: not overtaken by a
+// later pause and no crossing of the cutoff in a later weekly window.
+func aiGoAheadActive(now time.Time) (aiGoAhead, bool) {
+	g, ok := readAiGoAhead()
+	if !ok || g.AuthorizedAt.After(now) || aiCrossedSince(g.AuthorizedAt, now) {
 		return g, false
 	}
 	if info, err := os.Stat(aiPausedPath()); err == nil && info.ModTime().After(g.AuthorizedAt) {
@@ -55,15 +72,17 @@ func aiGoAheadActive(now time.Time) (aiGoAhead, bool) {
 	return g, true
 }
 
-// renewAiLease writes the short lease the guard and agent tasks read, never
-// past the go-ahead's reset.
+// aiGoAheadEnded: a recorded go-ahead whose next crossing has come. Its lease
+// must not carry work past the cutoff.
+func aiGoAheadEnded(now time.Time) bool {
+	g, ok := readAiGoAhead()
+	return ok && !g.AuthorizedAt.After(now) && aiCrossedSince(g.AuthorizedAt, now)
+}
+
+// renewAiLease writes the short lease the guard and agent tasks read.
 func renewAiLease(now time.Time, g aiGoAhead) error {
-	exp := now.Add(aiLease)
-	if exp.After(g.Until) {
-		exp = g.Until
-	}
-	raw, _ := json.Marshal(aiResumeGrant{AuthorizedAt: now, ExpiresAt: exp,
-		Reason: fmt.Sprintf("Owner's go-ahead in TFG OS (%s, %s), until the weekly reset %s", g.By, g.AuthorizedAt.Format(time.RFC3339), g.Until.Format(time.RFC3339))})
+	raw, _ := json.Marshal(aiResumeGrant{AuthorizedAt: now, ExpiresAt: now.Add(aiLease),
+		Reason: fmt.Sprintf("Owner's go-ahead in TFG OS (%s, %s), until usage next reaches %d%% after a weekly reset", g.By, g.AuthorizedAt.Format(time.RFC3339), int(aiCutoffPercent))})
 	return os.WriteFile(aiResumePath(), raw, 0o600)
 }
 
@@ -156,8 +175,8 @@ func aiControlRegister(s *gin.RouterGroup, d *Deps) {
 				out["resetsAt"] = reset
 			}
 		}
-		if g, ok := aiGoAheadActive(now); ok {
-			out["goAheadUntil"] = g.Until
+		if _, ok := aiGoAheadActive(now); ok {
+			out["goAhead"] = true
 			// Board lookups only when asked (page open, after an action), not
 			// on every 30-second poll: Paperclip's database is small.
 			if since, ok := lastPauseClearedSince(); ok && p.Owner && c.Query("agents") == "1" {
@@ -198,26 +217,25 @@ func aiControlRegister(s *gin.RouterGroup, d *Deps) {
 			return
 		}
 		now := time.Now().UTC()
-		until := now.Add(aiGoAheadWeek)
-		if _, reset, ok := codexWeeklyWindow(now); ok && reset.After(now) && reset.Sub(now) <= aiGoAheadMax {
-			until = reset
-		}
+		aiStateMu.Lock()
 		// When the guard paused: agents it paused from then on are the ones to wake.
 		var pausedSince time.Time
 		if info, err := os.Stat(aiPausedPath()); err == nil {
 			pausedSince = info.ModTime().Add(-2 * time.Minute)
 			if err := os.Rename(aiPausedPath(), aiPausedPath()+".cleared-"+now.Format("20060102-150405")); err != nil {
+				aiStateMu.Unlock()
 				c.JSON(http.StatusInternalServerError, gin.H{"ok": false, "error": "could not clear the pause: " + err.Error()})
 				return
 			}
 		}
-		g := aiGoAhead{AuthorizedAt: now, Until: until, By: p.Email}
+		g := aiGoAhead{AuthorizedAt: now, By: p.Email}
 		raw, _ := json.Marshal(g)
-		if err := os.WriteFile(aiGoAheadPath(), raw, 0o600); err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"ok": false, "error": "could not record the go-ahead: " + err.Error()})
-			return
+		err := os.WriteFile(aiGoAheadPath(), raw, 0o600)
+		if err == nil {
+			err = renewAiLease(now, g)
 		}
-		if err := renewAiLease(now, g); err != nil {
+		aiStateMu.Unlock()
+		if err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"ok": false, "error": "could not record the go-ahead: " + err.Error()})
 			return
 		}
@@ -229,7 +247,7 @@ func aiControlRegister(s *gin.RouterGroup, d *Deps) {
 			defer cancel()
 			resumed, kept, failed, boardErr = wakePausedSince(ctx, aiBoard(d), pausedSince, true)
 		}
-		out := gin.H{"ok": true, "until": until, "resumed": resumed, "kept": kept, "failed": failed}
+		out := gin.H{"ok": true, "resumed": resumed, "kept": kept, "failed": failed}
 		if boardErr != nil {
 			out["warning"] = "AI work is resumed, but the agent board could not be read to wake agents: " + boardErr.Error()
 		}
@@ -242,17 +260,20 @@ func aiControlRegister(s *gin.RouterGroup, d *Deps) {
 			return
 		}
 		now := time.Now()
+		aiStateMu.Lock()
 		_ = os.Remove(aiGoAheadPath())
 		_ = os.Remove(aiResumePath())
 		why := fmt.Sprintf("Paused by %s in TFG OS at %s; all agents paused until you resume.", p.Email, now.Format("Mon 15:04"))
-		if err := os.WriteFile(aiPausedPath(), []byte(why+"\n"), 0o600); err != nil {
+		err := os.WriteFile(aiPausedPath(), []byte(why+"\n"), 0o600)
+		aiStateMu.Unlock()
+		if err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"ok": false, "error": "could not pause: " + err.Error()})
 			return
 		}
 		ctx, cancel := context.WithTimeout(c.Request.Context(), 30*time.Second)
 		defer cancel()
 		b := aiBoard(d)
-		paused := []string{}
+		paused, failed := []string{}, []string{}
 		agents, err := b.Agents(ctx)
 		for _, a := range agents {
 			// A Resume pressed while this loop runs clears the flag: stop
@@ -263,10 +284,13 @@ func aiControlRegister(s *gin.RouterGroup, d *Deps) {
 			if a.Status != "paused" {
 				if _, perr := b.PauseAgent(ctx, a.ID); perr == nil {
 					paused = append(paused, agentName(a))
+				} else {
+					failed = append(failed, agentName(a))
 				}
 			}
 		}
-		out := gin.H{"ok": true, "paused": paused}
+		// The guard keeps re-pausing any agent still running while paused.
+		out := gin.H{"ok": true, "paused": paused, "failed": failed}
 		if err != nil {
 			out["warning"] = "AI work is paused, but the agent board could not be read: " + err.Error()
 		}

@@ -38,6 +38,28 @@ class UsageSnapshotTest(unittest.TestCase):
             os.utime(pause,(now.timestamp(),now.timestamp()))
             self.assertFalse(module.explicit_resume_active(root,now))
 
+    def test_the_owners_go_ahead_holds_until_the_next_crossing(self):
+        # Codex review, 2 Nov: Python only knew the 4-hour lease.
+        with tempfile.TemporaryDirectory() as root:
+            config = Path(root, '.founderos'); config.mkdir()
+            sessions = Path(root, '.codex/sessions'); sessions.mkdir(parents=True)
+            at = datetime(2026, 11, 2, 18, tzinfo=timezone.utc)
+            (config / 'ai-goahead.json').write_text(json.dumps({'authorizedAt': at.isoformat(), 'by': 'owner'}))
+            def reading(pct, resets):
+                (sessions / 'u.jsonl').write_text(json.dumps({"timestamp": "2026-11-03T00:00:00Z", "payload": {"rate_limits": {"secondary": {"used_percent": pct, "resets_at": resets.timestamp()}}}}) + "\n")
+            reading(67, at + timedelta(days=1))  # the week it was given in
+            self.assertTrue(module.explicit_resume_active(root, at + timedelta(hours=10)))
+            reading(30, at + timedelta(days=8))  # next week, below the cutoff
+            self.assertTrue(module.explicit_resume_active(root, at + timedelta(days=3)))
+            reading(55, at + timedelta(days=8))  # next week crosses: ended, lease too
+            (config / 'ai-resume.json').write_text(json.dumps({'authorizedAt': (at + timedelta(days=3)).isoformat(), 'expiresAt': (at + timedelta(days=3, hours=4)).isoformat(), 'reason': 'lease'}))
+            self.assertFalse(module.explicit_resume_active(root, at + timedelta(days=3, hours=1)))
+            pause = config / 'ai-paused'; pause.write_text('later pause')
+            later = (at + timedelta(days=3, minutes=30)).timestamp()
+            os.utime(pause, (later, later))
+            reading(30, at + timedelta(days=8))
+            self.assertFalse(module.explicit_resume_active(root, at + timedelta(days=3, hours=1)))
+
     def test_a_finished_weekly_window_is_unknown(self):
         # 2 Nov: after the reset the newest snapshot still described last week.
         with tempfile.TemporaryDirectory() as root:

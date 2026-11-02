@@ -3,6 +3,7 @@ package api
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -59,10 +60,9 @@ func TestTheOwnersOneClickResumesUntilTheWeeklyResetAndOnlyWakesGuardPausedAgent
 	var out struct {
 		Resumed []string `json:"resumed"`
 		Kept    []string `json:"kept"`
-		Until   time.Time
 	}
 	_ = json.Unmarshal(w.Body.Bytes(), &out)
-	if w.Code != 200 || len(out.Resumed) != 1 || out.Resumed[0] != "CEO" || len(out.Kept) != 1 || out.Kept[0] != "Old" || !out.Until.Equal(reset) {
+	if w.Code != 200 || len(out.Resumed) != 1 || out.Resumed[0] != "CEO" || len(out.Kept) != 1 || out.Kept[0] != "Old" {
 		t.Fatalf("resume: %d %s", w.Code, w.Body)
 	}
 	if len(b.resumed) != 1 || b.resumed[0] != "ceo" {
@@ -83,8 +83,10 @@ func TestTheOwnersOneClickResumesUntilTheWeeklyResetAndOnlyWakesGuardPausedAgent
 	if evs := aiGuardPass(context.Background(), b, later); len(evs) != 0 || len(b.paused) != 0 || !aiResumeActive(later) {
 		t.Fatalf("the go-ahead must hold until the reset: %v paused=%v", evs, b.paused)
 	}
-	// After the reset, crossing 50% again pauses as before.
+	// After the reset, crossing 50% again in the new window pauses as before.
 	after := reset.Add(time.Hour)
+	codexWeekly = func(time.Time) (float64, bool) { return 67, true }
+	codexWeeklyWindow = func(time.Time) (float64, time.Time, bool) { return 67, reset.Add(aiWeek), true }
 	if evs := aiGuardPass(context.Background(), b, after); len(evs) != 1 || len(b.paused) != 1 || aiPaused() == "" {
 		t.Fatalf("after the reset the guard must pause again: %v paused=%v", evs, b.paused)
 	}
@@ -127,15 +129,16 @@ func TestOnlyTheOwnerCanResumeOrPause(t *testing.T) {
 	}
 }
 
-func TestWithoutAKnownResetTheGoAheadLastsAWeek(t *testing.T) {
-	now := time.Now().UTC()
+// A reading without a reset time cannot be placed in a weekly window, so it
+// neither ends a go-ahead nor substitutes a fixed expiry.
+func TestWithoutAKnownResetTheGoAheadHasNoFixedExpiry(t *testing.T) {
 	aiControlSetup(t, 67, time.Time{})
 	codexWeeklyWindow = func(time.Time) (float64, time.Time, bool) { return 67, time.Time{}, true }
-	w := do(t, asUser(t, &Deps{}, ownerUser), http.MethodPost, "/api/founderos/pages/usage/ai/resume", "")
-	var out struct{ Until time.Time }
-	_ = json.Unmarshal(w.Body.Bytes(), &out)
-	if w.Code != 200 || out.Until.Before(now.Add(7*24*time.Hour-time.Minute)) || out.Until.After(now.Add(7*24*time.Hour+time.Minute)) {
-		t.Fatalf("fallback: %d %s", w.Code, w.Body)
+	if w := do(t, asUser(t, &Deps{}, ownerUser), http.MethodPost, "/api/founderos/pages/usage/ai/resume", ""); w.Code != 200 || strings.Contains(w.Body.String(), "until") {
+		t.Fatalf("resume: %d %s", w.Code, w.Body)
+	}
+	if !aiResumeActive(time.Now().Add(10 * 24 * time.Hour)) {
+		t.Fatal("the go-ahead expired on a fixed timer")
 	}
 }
 
@@ -253,4 +256,96 @@ func TestAnUnknownMeterNeedsTheOwnersGoAhead(t *testing.T) {
 		t.Fatalf("task context blocked on the unknown meter: %v", err)
 	}
 	_ = now
+}
+
+// Codex review, 2 Nov. The owner's rule: one go-ahead lasts until the meter
+// next crosses 50% after a weekly reset, never a fixed time.
+func TestTheGoAheadEndsAtTheNextCrossingNotAtAFixedTime(t *testing.T) {
+	now := time.Now().UTC()
+	reset := now.Add(24 * time.Hour)
+	b := aiControlSetup(t, 67, reset)
+	os.WriteFile(aiPausedPath(), []byte("cutoff"), 0600)
+	os.Chtimes(aiPausedPath(), now.Add(-time.Hour), now.Add(-time.Hour))
+	r := asUser(t, &Deps{}, ownerUser)
+	if w := do(t, r, http.MethodPost, "/api/founderos/pages/usage/ai/resume", ""); w.Code != 200 {
+		t.Fatalf("resume: %d %s", w.Code, w.Body)
+	}
+	// Past the reset with no new reading yet: still the owner's go-ahead.
+	codexWeekly = func(time.Time) (float64, bool) { return 0, false }
+	codexWeeklyWindow = func(time.Time) (float64, time.Time, bool) { return 0, time.Time{}, false }
+	if !aiResumeActive(reset.Add(time.Hour)) || salesKitAIAllowed() != nil {
+		t.Fatal("the go-ahead ended at the reset instead of the next crossing")
+	}
+	// The new week below 50%: still running, nine days on.
+	next := reset.Add(7 * 24 * time.Hour)
+	codexWeekly = func(time.Time) (float64, bool) { return 30, true }
+	codexWeeklyWindow = func(time.Time) (float64, time.Time, bool) { return 30, next, true }
+	if !aiResumeActive(now.Add(9 * 24 * time.Hour)) {
+		t.Fatal("a fixed expiry ended the go-ahead before any new crossing")
+	}
+	// The new week crosses 50%: the go-ahead and its lease end; the guard pauses.
+	codexWeekly = func(time.Time) (float64, bool) { return 55, true }
+	codexWeeklyWindow = func(time.Time) (float64, time.Time, bool) { return 55, next, true }
+	if aiResumeActive(time.Now()) {
+		t.Fatal("work continued past the next crossing (go-ahead or its lease)")
+	}
+	b.agents = []paperclip.Agent{{ID: "x", Status: "idle"}}
+	b.paused = nil
+	if evs := aiGuardPass(context.Background(), b, time.Now()); len(evs) != 1 || len(b.paused) != 1 || aiPaused() == "" {
+		t.Fatalf("the next crossing must pause: %v paused=%v", evs, b.paused)
+	}
+}
+
+// While paused, agents that failed to stop are paused again on the next pass,
+// whatever the meter says.
+func TestAPauseIsReconciledBelowTheCutoff(t *testing.T) {
+	b := aiControlSetup(t, 20, time.Now().Add(48*time.Hour))
+	os.WriteFile(aiPausedPath(), []byte("Paused by the owner"), 0600)
+	b.agents = []paperclip.Agent{{ID: "still-running", Status: "running"}, {ID: "p", Status: "paused"}}
+	aiGuardPass(context.Background(), b, time.Now())
+	if len(b.paused) != 1 || b.paused[0] != "still-running" {
+		t.Fatalf("a running agent survived the pause: %v", b.paused)
+	}
+}
+
+// A guard pass that was already pausing when the owner resumed stops pausing
+// and does not write a pause over the go-ahead.
+type resumedMidGuard struct{ *controlBoard }
+
+func (b resumedMidGuard) PauseAgent(ctx context.Context, id string) (bool, error) {
+	ok, err := b.controlBoard.PauseAgent(ctx, id)
+	g := aiGoAhead{AuthorizedAt: time.Now().UTC(), By: "owner@example.test"}
+	raw, _ := json.Marshal(g)
+	os.WriteFile(aiGoAheadPath(), raw, 0o600)
+	return ok, err
+}
+
+func TestAGuardPassDoesNotOverrideAResumeMidway(t *testing.T) {
+	b := aiControlSetup(t, 67, time.Now().Add(48*time.Hour))
+	b.agents = []paperclip.Agent{{ID: "a", Status: "idle"}, {ID: "b", Status: "idle"}}
+	evs := aiGuardPass(context.Background(), resumedMidGuard{b}, time.Now())
+	if len(b.paused) != 1 || len(evs) != 0 || aiPaused() != "" {
+		t.Fatalf("stale guard pass overrode the resume: paused=%v evs=%v flag=%q", b.paused, evs, aiPaused())
+	}
+}
+
+// Pause now reports agents it could not stop.
+type failingPause struct{ *controlBoard }
+
+func (b failingPause) PauseAgent(ctx context.Context, id string) (bool, error) {
+	if id == "stuck" {
+		return false, errors.New("board timeout")
+	}
+	return b.controlBoard.PauseAgent(ctx, id)
+}
+
+func TestPauseNowReportsAgentsItCouldNotStop(t *testing.T) {
+	b := aiControlSetup(t, 20, time.Now().Add(48*time.Hour))
+	b.agents = []paperclip.Agent{{ID: "ok", Name: "OK", Status: "idle"}, {ID: "stuck", Name: "Stuck", Status: "running"}}
+	aiBoard = func(*Deps) aiBoardAPI { return failingPause{b} }
+	r := asUser(t, &Deps{}, ownerUser)
+	w := do(t, r, http.MethodPost, "/api/founderos/pages/usage/ai/pause", "")
+	if w.Code != 200 || !strings.Contains(w.Body.String(), `"failed":["Stuck"]`) {
+		t.Fatalf("pause: %d %s", w.Code, w.Body)
+	}
 }

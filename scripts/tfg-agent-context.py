@@ -16,8 +16,8 @@ import sys
 ROOT = Path(__file__).resolve().parent.parent
 
 
-def latest_weekly_usage(session_root, now=None):
-    now = now or datetime.now(timezone.utc)
+def latest_weekly_snapshot(session_root):
+    """(used_percent, resets_at epoch or None) of the newest official reading."""
     latest = None
     roots = session_root if isinstance(session_root, list) else [session_root]
     for path in (path for root in roots for path in Path(root).rglob("*.jsonl")):
@@ -35,12 +35,39 @@ def latest_weekly_usage(session_root, now=None):
                             latest = snapshot
         except (OSError, ValueError):
             continue
-    if not latest:
-        return None
+    return (latest[1], latest[2] if isinstance(latest[2], (int, float)) else None) if latest else None
+
+
+def latest_weekly_usage(session_root, now=None):
+    now = now or datetime.now(timezone.utc)
+    snapshot = latest_weekly_snapshot(session_root)
     # After the reset the old percent describes a finished week: unknown.
-    if isinstance(latest[2], (int, float)) and latest[2] <= now.timestamp():
+    if not snapshot or (snapshot[1] is not None and snapshot[1] <= now.timestamp()):
         return None
-    return latest[1]
+    return snapshot[0]
+
+
+WEEK_SECONDS = 7 * 24 * 3600
+
+
+def go_ahead_state(home, now):
+    """'active', 'ended' or None for the owner's go-ahead (ai-goahead.json), with
+    the backend's rule: it holds until a reading at or over 50% in a weekly
+    window that began after it, and a later pause overrides it."""
+    try:
+        g = json.loads((Path(home) / ".founderos/ai-goahead.json").read_text())
+        at = datetime.fromisoformat(g["authorizedAt"].replace("Z", "+00:00"))
+    except (OSError, ValueError, KeyError, TypeError):
+        return None
+    if at > now:
+        return None
+    snapshot = latest_weekly_snapshot(codex_session_roots(home))
+    if snapshot and snapshot[0] >= 50 and snapshot[1] is not None and snapshot[1] - WEEK_SECONDS > at.timestamp():
+        return "ended"
+    pause = Path(home) / ".founderos/ai-paused"
+    if pause.exists() and pause.stat().st_mtime > at.timestamp():
+        return None
+    return "active"
 
 
 def codex_session_roots(home):
@@ -64,6 +91,11 @@ def read_env(path):
 
 def explicit_resume_active(home, now=None):
     now = now or datetime.now(timezone.utc)
+    state = go_ahead_state(home, now)
+    if state == "active":
+        return True
+    if state == "ended":
+        return False  # its lease must not carry work past the next crossing
     try:
         grant = json.loads((Path(home) / ".founderos/ai-resume.json").read_text())
         start = datetime.fromisoformat(grant["authorizedAt"].replace("Z", "+00:00"))

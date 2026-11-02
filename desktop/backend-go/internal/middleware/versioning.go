@@ -78,7 +78,7 @@ func VersionRedirect(targetVersion string, permanent bool) gin.HandlerFunc {
 		c.Header("Link", "</api/"+targetVersion+">; rel=\"successor-version\"")
 		c.Header("Warning", "299 - \"Direct /api access is deprecated. Use /api/"+targetVersion+" instead\"")
 
-		slog.Warn("non_versioned_api_access",
+		slog.Debug("non_versioned_api_access",
 			"path", originalPath,
 			"redirecting_to_version", targetVersion,
 			"user_agent", c.Request.UserAgent(),

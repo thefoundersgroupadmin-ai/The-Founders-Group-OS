@@ -961,6 +961,10 @@ func bootstrap(ctx context.Context) (*AppServices, error) {
 	})
 	if err != nil {
 		slog.Warn("Homeostatic loop failed to initialize", "error", err)
+	} else if os.Getenv("ENABLE_HOMEOSTATIC_LOOP") != "true" {
+		// Off by default: TFG OS never feeds these signal metrics, so every
+		// 30s pass "failed" and wrote an algedonic row (102k rows by 2 Nov 2026).
+		slog.Info("Homeostatic feedback loop disabled (set ENABLE_HOMEOSTATIC_LOOP=true to run it)")
 	} else {
 		go func() {
 			if err := homeoLoop.Run(ctx); err != nil {

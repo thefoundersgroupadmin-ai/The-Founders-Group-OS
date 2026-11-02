@@ -60,6 +60,18 @@ def psql(db, query):
     return r.stdout
 
 
+def recipient_workspace(matches, existing):
+    """The pipeline a draft belongs to: the one its contact is in, or, when the
+    contact is in several, the one an earlier import already chose. None means
+    no contact yet (use the default); ambiguity with no earlier import is
+    returned as the string 'ambiguous'."""
+    if existing:
+        return existing[0]
+    if len(matches) > 1:
+        return "ambiguous"
+    return matches[0] if matches else None
+
+
 def psql_rows(db, query):
     """Rows as dicts: the query is wrapped in json_agg, so tabs or newlines in values are safe."""
     out = psql(db, f"SELECT coalesce(json_agg(q), '[]') FROM ({query}) q").strip()
@@ -149,15 +161,18 @@ def main():
             print(f"  {ident}: skipped ({e})")
             continue
         for it in items:
+            oid = "pc-" + ident.lower() + "-" + hashlib.sha1((it["to"].lower() + "\n" + it["subject"]).encode()).hexdigest()[:10]
             if not binding:
                 matches = psql_rows(db, "SELECT DISTINCT c.workspace_id::text AS workspace_id,w.slug FROM founderos_funnel_contacts c JOIN workspaces w ON w.id=c.workspace_id "
                                     f"WHERE lower(c.email)=lower({sql(it['to'])})")
-                if len(matches) > 1:
+                existing = psql_rows(db, "SELECT o.workspace_id::text AS workspace_id,w.slug FROM founderos_outbox o JOIN workspaces w ON w.id=o.workspace_id "
+                                     f"WHERE o.id={sql(oid)}") if len(matches) > 1 else []
+                chosen = recipient_workspace(matches, existing)
+                if chosen == "ambiguous":
                     print(f"  {ident}: skipped draft with ambiguous recipient workspace")
                     continue
-                pipeline_ws = matches[0]["workspace_id"] if matches else default_pipeline_ws
-                pipeline_slug = matches[0]["slug"] if matches else PIPELINE_SLUG
-            oid = "pc-" + ident.lower() + "-" + hashlib.sha1((it["to"].lower() + "\n" + it["subject"]).encode()).hexdigest()[:10]
+                pipeline_ws = chosen["workspace_id"] if chosen else default_pipeline_ws
+                pipeline_slug = chosen["slug"] if chosen else PIPELINE_SLUG
             if dry:
                 print(f"  {ident}: {it['to']} | {it['subject']}")
                 continue

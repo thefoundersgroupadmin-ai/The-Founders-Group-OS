@@ -41,6 +41,14 @@ class EntriesTest(unittest.TestCase):
 
 
 class ContactTest(unittest.TestCase):
+    def test_an_already_imported_draft_keeps_its_workspace(self):
+        hq = {"workspace_id": "w-hq", "slug": "founderos"}
+        vantage = {"workspace_id": "w-v", "slug": "vantage"}
+        self.assertEqual(sync.recipient_workspace([hq, vantage], [vantage]), vantage)
+        self.assertEqual(sync.recipient_workspace([hq, vantage], []), "ambiguous")
+        self.assertEqual(sync.recipient_workspace([hq], []), hq)
+        self.assertIsNone(sync.recipient_workspace([], []))  # caller uses the default pipeline
+
     def test_contact_id_matches_the_pipeline_sync(self):
         self.assertEqual(sync.contact_id({"company": "Basalt Health", "to": "ben@basalt.health"}), "fc-pc-basalt-health")
 

@@ -60,9 +60,18 @@ def psql(db, query):
     return r.stdout
 
 
+def imported_pipeline_query(oid):
+    """The pipeline of the contact an earlier import linked this draft to.
+    Outbox rows all live in HQ, so the row's own workspace says nothing."""
+    return ("SELECT c.workspace_id::text AS workspace_id,w.slug FROM founderos_outbox o "
+            "JOIN founderos_funnel_contacts c ON c.id=o.contact_id JOIN workspaces w ON w.id=c.workspace_id "
+            f"WHERE o.id={sql(oid)}")
+
+
 def recipient_workspace(matches, existing):
     """The pipeline a draft belongs to: the one its contact is in, or, when the
-    contact is in several, the one an earlier import already chose. None means
+    contact is in several, the pipeline of the contact an earlier import
+    linked the draft to (never the Outbox row's own workspace, which is HQ). None means
     no contact yet (use the default); ambiguity with no earlier import is
     returned as the string 'ambiguous'."""
     if existing:
@@ -165,8 +174,7 @@ def main():
             if not binding:
                 matches = psql_rows(db, "SELECT DISTINCT c.workspace_id::text AS workspace_id,w.slug FROM founderos_funnel_contacts c JOIN workspaces w ON w.id=c.workspace_id "
                                     f"WHERE lower(c.email)=lower({sql(it['to'])})")
-                existing = psql_rows(db, "SELECT o.workspace_id::text AS workspace_id,w.slug FROM founderos_outbox o JOIN workspaces w ON w.id=o.workspace_id "
-                                     f"WHERE o.id={sql(oid)}") if len(matches) > 1 else []
+                existing = psql_rows(db, imported_pipeline_query(oid)) if len(matches) > 1 else []
                 chosen = recipient_workspace(matches, existing)
                 if chosen == "ambiguous":
                     print(f"  {ident}: skipped draft with ambiguous recipient workspace")

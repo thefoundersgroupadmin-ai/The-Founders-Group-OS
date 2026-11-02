@@ -79,7 +79,7 @@
     <button type="button" class={PILL} disabled={!ready||busy} onclick={()=>run(true)}>Generate analysis / draft</button>
     <a class={PILL} href={founderosUrl(`/pages/sales-kit/skills/${selected}`)}>Download workflow</a>
    </div>
-   <p class="bn-dim">Prepare prompt uses no AI. Generate uses your Claude login and checks the OS usage pause. Results stay in this view until downloaded; a download is saved to your device. Review before sharing or applying changes.</p>
+   <p class="bn-dim">Prepare prompt uses no AI. Generate uses your Claude login. Results stay in this view until downloaded; a download is saved to your device. Review before sharing or applying changes.</p>
   {/if}
   {#if output}
    <div class="space-y-3 border-t pt-4 bn-border" aria-live="polite">

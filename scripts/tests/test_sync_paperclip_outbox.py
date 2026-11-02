@@ -49,6 +49,15 @@ class ContactTest(unittest.TestCase):
         self.assertEqual(sync.recipient_workspace([hq], []), hq)
         self.assertIsNone(sync.recipient_workspace([], []))  # caller uses the default pipeline
 
+    def test_the_earlier_pipeline_comes_from_the_linked_contact_not_the_outbox_row(self):
+        # Codex review, 2 Nov: every outbox row lives in HQ, so reading the
+        # row's own workspace sent Vantage drafts to HQ.
+        q = sync.imported_pipeline_query("pc-the-14-abc")
+        self.assertIn("JOIN founderos_funnel_contacts c ON c.id=o.contact_id", q)
+        self.assertIn("w.id=c.workspace_id", q)
+        self.assertNotIn("w.id=o.workspace_id", q)
+        self.assertIn("'pc-the-14-abc'", q)
+
     def test_contact_id_matches_the_pipeline_sync(self):
         self.assertEqual(sync.contact_id({"company": "Basalt Health", "to": "ben@basalt.health"}), "fc-pc-basalt-health")
 

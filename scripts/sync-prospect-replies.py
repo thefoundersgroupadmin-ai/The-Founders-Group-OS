@@ -151,7 +151,7 @@ def main():
                             "follow-ups to them have stopped. If they asked to opt out, do not reply and note it in the "
                             "pipeline. If they want a call, propose times and note it in the pipeline."
                             "\n\n# Verified OS execution context and attached owner handover\n"
-                            "Use this supplied profile, official usage snapshot, handover and workflow catalogue; no local filesystem reads are required. "
+                            "Use this supplied profile, handover and workflow catalogue; no local filesystem reads are required. "
                             "Save an internal report document. Unknown optional facts are report gaps, not permission to invent them.\n" + packet.stdout),
             "status": "todo", "priority": "high", "workMode": "standard", "assigneeAgentId": assignee})
         psql(db, f"update founderos_funnel_contacts set status='engaged', relationship='warm' "

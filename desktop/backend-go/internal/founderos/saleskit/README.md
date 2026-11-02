@@ -23,7 +23,7 @@ All 37 workflows are available to commands and task agents. Ongoing schedules se
 
 Workflow analysis uses a text-only Claude runner. The command executor separately runs registered workers and creates assigned team tasks. Eligible structured email drafts are validated against authorised pipeline contacts and queued in the OS Outbox. Sending requires the existing Outbox approval path; workflow execution does not book meetings, spend or apply CRM proposals.
 
-Automatic runs require FOUNDEROS_CRONS=1 plus enabled workspace configuration. Before inference the runner checks the persistent AI pause and latest official Codex weekly snapshot. At 50% it latches a pause; resets do not release it. Missing usage data blocks inference. No provider failover is attempted. This protects Sales Kit, not every account-wide AI execution surface.
+Automatic runs require FOUNDEROS_CRONS=1 plus enabled workspace configuration. There is no usage pause (removed 2 Nov 2026). No provider failover is attempted.
 
 ## Client installation and handoff
 

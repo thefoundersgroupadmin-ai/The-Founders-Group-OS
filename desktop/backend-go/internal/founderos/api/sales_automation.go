@@ -110,7 +110,7 @@ func salesAutomationTick(d *Deps) {
 		safeErr := runErr
 		if runErr != nil {
 			slog.Warn("sales automation: analysis failed", "workspace", c.Workspace, "error", runErr)
-			safeErr = errors.New("Automatic sales analysis did not complete. Check your AI account and usage pause. The same source packet is not automatically retried.")
+			safeErr = errors.New("Automatic sales analysis did not complete. Check that your Claude account is connected in My AI accounts. The same source packet is not automatically retried.")
 		}
 		finishCtx, finishCancel := context.WithTimeout(context.Background(), 10*time.Second)
 		err = store.Finish(finishCtx, c, id, plan.Next, answer, safeErr)

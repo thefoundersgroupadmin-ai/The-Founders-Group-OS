@@ -158,7 +158,9 @@ func aiControlRegister(s *gin.RouterGroup, d *Deps) {
 		}
 		if g, ok := aiGoAheadActive(now); ok {
 			out["goAheadUntil"] = g.Until
-			if since, ok := lastPauseClearedSince(); ok && p.Owner {
+			// Board lookups only when asked (page open, after an action), not
+			// on every 30-second poll: Paperclip's database is small.
+			if since, ok := lastPauseClearedSince(); ok && p.Owner && c.Query("agents") == "1" {
 				ctx, cancel := context.WithTimeout(c.Request.Context(), 10*time.Second)
 				defer cancel()
 				if left, _, _, err := wakePausedSince(ctx, aiBoard(d), since, false); err == nil && len(left) > 0 {

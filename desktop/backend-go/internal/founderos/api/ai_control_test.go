@@ -180,7 +180,10 @@ func TestWakeAgentsTheLastPauseLeftBehind(t *testing.T) {
 	b.pauses = map[string]time.Time{"pr": pausedAt.Add(20 * time.Second), "old": pausedAt.Add(-72 * time.Hour)}
 	b.resumed = nil
 
-	w := do(t, r, http.MethodGet, "/api/founderos/pages/usage/ai", "")
+	if w := do(t, r, http.MethodGet, "/api/founderos/pages/usage/ai", ""); strings.Contains(w.Body.String(), "stillPaused") {
+		t.Fatalf("the 30-second poll must not read the board: %s", w.Body)
+	}
+	w := do(t, r, http.MethodGet, "/api/founderos/pages/usage/ai?agents=1", "")
 	if !strings.Contains(w.Body.String(), `"stillPaused":["Prospect Research"]`) {
 		t.Fatalf("status: %s", w.Body)
 	}

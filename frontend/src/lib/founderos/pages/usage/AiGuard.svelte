@@ -33,9 +33,11 @@
 			: 'the weekly reset';
 	const names = (xs: string[]) => xs.join(', ');
 
-	async function load() {
+	// The paused-agent list reads the agent board; ask for it on open and
+	// after an action, not on every poll.
+	async function load(agents = false) {
 		try {
-			g = await founderosFetch<Guard>('/pages/usage/ai');
+			g = await founderosFetch<Guard>(agents ? '/pages/usage/ai?agents=1' : '/pages/usage/ai');
 			failure = null;
 		} catch (e) {
 			failure = e instanceof Error ? e.message : String(e);
@@ -51,7 +53,7 @@
 			note = e instanceof Error ? e.message : String(e);
 		} finally {
 			busy = false;
-			await load();
+			await load(true);
 		}
 	}
 
@@ -79,8 +81,8 @@
 		});
 
 	onMount(() => {
-		void load();
-		const t = setInterval(load, 30_000);
+		void load(true);
+		const t = setInterval(() => void load(), 30_000);
 		return () => clearInterval(t);
 	});
 </script>

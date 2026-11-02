@@ -58,6 +58,7 @@ describe('AI pause controls', () => {
 		fetchMock.mockResolvedValueOnce({ cutoff: 50, paused: false, canControl: true, usedPercent: 67, goAheadUntil: reset, stillPaused: ['Prospect Research', 'Sales Agent'] });
 		render(AiGuard);
 		expect(await screen.findByText(/Still paused: Prospect Research, Sales Agent/)).toBeTruthy();
+		expect(fetchMock).toHaveBeenCalledWith('/pages/usage/ai?agents=1');
 		fetchMock.mockResolvedValueOnce({ ok: true, resumed: ['Prospect Research', 'Sales Agent'], kept: [], failed: [] });
 		fetchMock.mockResolvedValueOnce({ cutoff: 50, paused: false, canControl: true, usedPercent: 67, goAheadUntil: reset });
 		await fireEvent.click(screen.getByRole('button', { name: 'Wake 2 agents' }));

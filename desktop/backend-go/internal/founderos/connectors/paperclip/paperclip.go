@@ -38,8 +38,10 @@ import (
 var Meta = connectors.Meta{ID: "paperclip", Name: "Paperclip (agent harness)", Kind: connectors.KindOrchestration}
 
 const (
-	breakerWindow   = 30 * time.Second
-	listTimeout     = 2500 * time.Millisecond
+	breakerWindow = 30 * time.Second
+	// 8s: with every agent running, the board's slowest list takes ~2.5s
+	// on its own and longer when a page asks for several at once (2 Nov 2026).
+	listTimeout     = 8 * time.Second
 	issueTimeout    = 4 * time.Second
 	writeTimeout    = 8 * time.Second
 	cockpitPageSize = 100
@@ -148,7 +150,8 @@ func (c *Connector) pinnedCockpit() string {
 
 // fetch is boardFetch: the first network-level failure opens a 30s breaker
 // and every board call inside the window fails at once. An HTTP error never
-// opens it (the board answered), and any success closes it.
+// opens it (the board answered), nor does a slow answer that hit the time
+// limit (the board is up), and any success closes it.
 func (c *Connector) fetch(ctx context.Context, method, url string, key string, body any, timeout time.Duration) (*http.Response, error) {
 	now := c.now()
 	c.mu.Lock()
@@ -186,6 +189,11 @@ func (c *Connector) fetch(ctx context.Context, method, url string, key string, b
 		if errors.Is(err, guard.ErrWritesDisabled) || ctx.Err() != nil {
 			// a guard refusal or the caller giving up says nothing about the board
 			return nil, err
+		}
+		if errors.Is(err, context.DeadlineExceeded) {
+			// The board is up but slow: fail this call only. Opening the
+			// breaker here made every page say "Board unreachable" for 30s.
+			return nil, fmt.Errorf("board slow to answer (%s)", err.Error())
 		}
 		c.mu.Lock()
 		c.downReason = err.Error()

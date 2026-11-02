@@ -5,7 +5,7 @@ const api=vi.hoisted(()=>({request:vi.fn()}));
 vi.mock('$lib/founderos/api',()=>({founderosFetch:api.request}));
 afterEach(()=>{cleanup();vi.resetAllMocks();});
 const workspace={workspaceId:'ws-a',workspace:'client-a',name:'Client A',profile:'Approved inventory offer',enabled:false,timezone:'Europe/London'};
-const state={configured:true,workspaces:[workspace],selected:workspace,canConfigure:true,schedulesEnabled:true,paused:false,hasSources:true,gaps:[],runs:[]};
+const state={configured:true,workspaces:[workspace],selected:workspace,canConfigure:true,schedulesEnabled:true,hasSources:true,gaps:[],runs:[]};
 it('configures a workspace once instead of asking to execute separate skills',async()=>{
  api.request.mockResolvedValue(state);render(SalesAutomation);
  await screen.findByLabelText('Sales workspace');

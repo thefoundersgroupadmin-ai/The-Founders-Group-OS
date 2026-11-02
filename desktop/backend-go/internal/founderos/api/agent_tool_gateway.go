@@ -222,9 +222,6 @@ func invokeAgentTool(ctx context.Context, d *Deps, a toolActor, name, requestID 
 	if !ok || !toolbridge.Allowed(a.Role, a.Department, t) {
 		return nil, errors.New("tool is not assigned to this role")
 	}
-	if err := salesKitAIAllowed(); err != nil {
-		return nil, err
-	}
 	if t.Global && a.Config.Workspace != "founderos" && a.Config.Workspace != "personal" {
 		return nil, errors.New("installation-wide tool requires an HQ/Personal work order")
 	}
@@ -425,10 +422,6 @@ func registerAgentTools(s *gin.RouterGroup, d *Deps) {
 		}
 		if !p.Owner {
 			c.Status(403)
-			return
-		}
-		if err := salesKitAIAllowed(); err != nil {
-			c.JSON(409, gin.H{"error": err.Error()})
 			return
 		}
 		if !toolApprovalMu.TryLock() {

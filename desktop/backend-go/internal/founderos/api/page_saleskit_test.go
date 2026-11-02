@@ -8,9 +8,9 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
-	"time"
 
 	"github.com/rhl/businessos-backend/internal/founderos/connectors"
+	"github.com/rhl/businessos-backend/internal/founderos/people"
 )
 
 type salesModel struct {
@@ -41,12 +41,17 @@ func TestSalesKitCatalogExportAndAuth(t *testing.T) {
 	}
 }
 
-func TestSalesKitPrepareAndRunRespectUsageLatch(t *testing.T) {
+func TestSalesKitRunsWithoutAUsagePause(t *testing.T) {
 	peopleSetup(t)
-	old := codexWeekly
-	defer func() { codexWeekly = old }()
-	pct, known := 10.0, true
-	codexWeekly = func(time.Time) (float64, bool) { return pct, known }
+	// The 50% pause was removed on 2 Nov 2026 at the owner's request; a
+	// leftover pause file from the old guard must not block anything.
+	stale := filepath.Join(filepath.Dir(people.Root()), "ai-paused")
+	if err := os.MkdirAll(filepath.Dir(stale), 0700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(stale, []byte("Codex weekly usage reached 67%"), 0600); err != nil {
+		t.Fatal(err)
+	}
 	model := &salesModel{}
 	d := &Deps{Board: connectors.NewRegistry()}
 	setSalesKitModel(d, model)
@@ -65,36 +70,6 @@ func TestSalesKitPrepareAndRunRespectUsageLatch(t *testing.T) {
 	}
 	if json.Unmarshal(w.Body.Bytes(), &body) != nil || body.Mode != "draft" || !strings.Contains(body.Markdown, "Jordan") {
 		t.Fatal(w.Body)
-	}
-	pct = 50
-	w = do(t, r, "POST", "/api/founderos/pages/sales-kit/run/draft-outreach", salesPacket)
-	if w.Code != 423 || model.calls != 1 {
-		t.Fatalf("cutoff %d %s", w.Code, w.Body)
-	}
-	pct = 0
-	w = do(t, r, "POST", "/api/founderos/pages/sales-kit/run/draft-outreach", salesPacket)
-	if w.Code != 423 || model.calls != 1 {
-		t.Fatal("reset resumed AI")
-	}
-	// Release here simulates the owner's explicit go-ahead in this isolated fixture.
-	if err := os.Remove(aiPausedPath()); err != nil {
-		t.Fatal(err)
-	}
-	known = false
-	w = do(t, r, "POST", "/api/founderos/pages/sales-kit/run/draft-outreach", salesPacket)
-	if w.Code != 503 || model.calls != 1 {
-		t.Fatal("unknown meter permitted a model call")
-	}
-	// Local prompt preparation remains available while AI is paused.
-	if err := os.MkdirAll(filepath.Dir(aiPausedPath()), 0700); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(aiPausedPath(), []byte("paused"), 0600); err != nil {
-		t.Fatal(err)
-	}
-	w = do(t, r, "POST", "/api/founderos/pages/sales-kit/prepare/draft-outreach", salesPacket)
-	if w.Code != 200 || model.calls != 1 {
-		t.Fatal("prepare unexpectedly used AI")
 	}
 }
 

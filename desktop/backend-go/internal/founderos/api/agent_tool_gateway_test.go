@@ -8,7 +8,6 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
-	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
@@ -19,9 +18,6 @@ import (
 
 func TestAgentToolRequestsRequireReviewAndStableIntent(t *testing.T) {
 	peopleSetup(t)
-	old := codexWeekly
-	codexWeekly = func(time.Time) (float64, bool) { return 5, true }
-	defer func() { codexWeekly = old }()
 	pool := catalogdb.TestDB(t)
 	ws := catalogdb.Workspace(t, pool, "tool-client")
 	ctx := context.Background()
@@ -87,10 +83,6 @@ func TestMCPToolsNeverExposeSecretsOrRunWithoutAuthentication(t *testing.T) {
 
 func TestOwnerApprovalExecutesOnceAndRejectNeverExecutes(t *testing.T) {
 	peopleSetup(t)
-	oldWeekly, oldShort := codexWeekly, codexShortTerm
-	codexWeekly = func(time.Time) (float64, bool) { return 10, true }
-	codexShortTerm = func(time.Time) (float64, bool) { return 10, true }
-	defer func() { codexWeekly = oldWeekly; codexShortTerm = oldShort }()
 	t.Setenv("PAPERCLIP_API_URL", "")
 	t.Setenv("PAPERCLIP_BOARD_KEY", "")
 	pool := catalogdb.TestDB(t)

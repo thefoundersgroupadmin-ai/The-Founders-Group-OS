@@ -60,7 +60,7 @@ beforeEach(() => {
  url.endsWith('/pages/conductor/commands') ? Promise.resolve(json({commands:[],configured:true})) : url.endsWith('/pages/sales-kit/automation')
 		? Promise.resolve(json({ configured: false, workspaces: [], runs: [] }))
 		: url.endsWith('/pages/sales-kit')
-		? Promise.resolve(json({ version: '0.1.0', skills: [], paused: false }))
+		? Promise.resolve(json({ version: '0.1.0', skills: [] }))
 		: fetchMock(url, ...args));
 });
 afterEach(() => vi.unstubAllGlobals());

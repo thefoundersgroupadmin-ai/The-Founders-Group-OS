@@ -872,20 +872,6 @@ func startNotifyWatch(d *Deps) {
 				<-t.C
 			}
 		}()
-		// The 50% guard runs on its own loop: a stalled notify pass must not
-		// stop it renewing the resume lease agent tasks check (31 Oct).
-		go func() {
-			t := time.NewTicker(2 * time.Minute)
-			defer t.Stop()
-			for {
-				ctx, cancel := context.WithTimeout(context.Background(), 90*time.Second)
-				for _, e := range aiGuardPass(ctx, paperclip.New(d.Resolver), time.Now()) {
-					notify.Publish(ctx, e)
-				}
-				cancel()
-				<-t.C
-			}
-		}()
 		slog.Info("founderos notify: watching approvals, outbox, replies and agents")
 	})
 }

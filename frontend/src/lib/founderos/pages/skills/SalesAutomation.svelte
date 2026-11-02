@@ -5,7 +5,7 @@
  import SkillMarkdown from './SkillMarkdown.svelte';
  type Workspace={workspaceId:string;workspace:string;name:string;profile:string;enabled:boolean;timezone:string;sourceWorkspaceIds?:string[]};
  type Run={id:string;routines:string[];skills:string[];status:string;markdown:string;error:string;startedAt:string;sourceIds:string[]};
- type State={configured:boolean;detail?:string;workspaces:Workspace[];selected?:Workspace;canConfigure?:boolean;schedulesEnabled?:boolean;paused?:boolean;hasSources?:boolean;gaps?:string[];runs:Run[]};
+ type State={configured:boolean;detail?:string;workspaces:Workspace[];selected?:Workspace;canConfigure?:boolean;schedulesEnabled?:boolean;hasSources?:boolean;gaps?:string[];runs:Run[]};
  let data=$state<State|null>(null);
  let workspaceId=$state('');
  let profile=$state('');
@@ -19,7 +19,7 @@
  let selectedRun=$state('');
  let sequence=0;
  const run=$derived(data?.runs.find(r=>r.id===selectedRun)??data?.runs[0]);
- const status=$derived(!data?'Loading automation…':!data.configured?'Not configured':data.paused?'Paused at usage cutoff':!data.schedulesEnabled?'OS schedules are off':!data.selected?.enabled?'Setup needed':!data.hasSources?'Waiting for synced sales records':'Automatic');
+ const status=$derived(!data?'Loading automation…':!data.configured?'Not configured':!data.schedulesEnabled?'OS schedules are off':!data.selected?.enabled?'Setup needed':!data.hasSources?'Waiting for synced sales records':'Automatic');
  async function load(reset=false){
   const ticket=++sequence;
   try{
@@ -61,7 +61,6 @@
     <div class="border p-3 bn-border"><strong>Every day</strong><p class="bn-dim mt-1">Sales briefing, pipeline review and CRM hygiene.</p></div>
     <div class="border p-3 bn-border"><strong>Every week</strong><p class="bn-dim mt-1">Sales review and win/loss analysis.</p></div>
    </div>
-   {#if data.paused}<p style="color:var(--bn-warn)">The usage pause blocks automatic AI work until the owner explicitly resumes it.</p>{/if}
    {#if !data.schedulesEnabled}<p style="color:var(--bn-warn)">Scheduled work is disabled by the OS. This workspace will not run until OS schedules are enabled.</p>{/if}
    {#if data.canConfigure && data.selected}
     <details open={!data.selected.enabled}>

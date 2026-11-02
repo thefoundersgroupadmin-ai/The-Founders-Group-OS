@@ -4,7 +4,7 @@
  import { SlabCard, PILL } from '$lib/founderos/kit';
  import SkillMarkdown from './SkillMarkdown.svelte';
  type Skill = { id:string; name:string; category:string; method:string; output:string };
- type Catalog = { version:string; skills:Skill[]; paused:boolean };
+ type Catalog = { version:string; skills:Skill[] };
  let catalog=$state<Catalog|null>(null);
  let failure=$state('');
  let selected=$state('lead-triage');
@@ -40,7 +40,6 @@
  {/snippet}
  <div class="space-y-5 px-6 py-5 text-[12px]">
   <p class="bn-dim">Research, qualify, prepare meetings and review your pipeline. Add your client profile and relevant records to produce an analysis or draft for review.</p>
-  {#if catalog?.paused}<p role="status" style="color:var(--bn-warn)">AI generation is paused. You can still prepare prompts and download the package.</p>{/if}
   {#if failure}<p role="alert" style="color:var(--bn-err)">{failure}</p>{/if}
   {#if catalog}
    <fieldset disabled={busy} class="space-y-4 disabled:opacity-60">
@@ -77,7 +76,7 @@
    </fieldset>
    <div class="flex flex-wrap items-center gap-3">
     <button type="button" class={PILL} disabled={!ready||busy} onclick={()=>run(false)}>{busy?'Working…':'Prepare prompt'}</button>
-    <button type="button" class={PILL} disabled={!ready||busy||catalog.paused} onclick={()=>run(true)}>Generate analysis / draft</button>
+    <button type="button" class={PILL} disabled={!ready||busy} onclick={()=>run(true)}>Generate analysis / draft</button>
     <a class={PILL} href={founderosUrl(`/pages/sales-kit/skills/${selected}`)}>Download workflow</a>
    </div>
    <p class="bn-dim">Prepare prompt uses no AI. Generate uses your Claude login and checks the OS usage pause. Results stay in this view until downloaded; a download is saved to your device. Review before sharing or applying changes.</p>

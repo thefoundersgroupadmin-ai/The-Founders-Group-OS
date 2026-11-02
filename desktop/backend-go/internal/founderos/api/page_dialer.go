@@ -248,10 +248,6 @@ func registerDialer(s *gin.RouterGroup, d *Deps) {
 		if !ok || !needPool(c, d) {
 			return
 		}
-		if why := aiPaused(); why != "" {
-			c.JSON(http.StatusConflict, gin.H{"error": "AI work is paused: " + why})
-			return
-		}
 		ctx := c.Request.Context()
 		call, err := dialer.Get(ctx, d.Pool, c.Param("id"))
 		if err != nil || call.Caller != p.Email {
@@ -391,9 +387,6 @@ var dialerBrief = func(ctx context.Context, d *Deps, p dialer.Prospect) string {
 		}
 	}
 	plain := strings.Join(facts, "\n")
-	if aiPaused() != "" {
-		return plain
-	}
 	system := "You prepare a caller at The Founders Group (B2B sales consultancy: diagnose sales bottlenecks, build sales processes, coach the team through handover) for a cold call. " +
 		"From the facts only, write three short lines: WHO (name, role, company), WHY NOW (the reason to call, from the facts), OPENER (one natural first sentence). " +
 		"Plain text, no markdown, no tool calls. Never invent facts; if there is no reason to call in the facts, say so."

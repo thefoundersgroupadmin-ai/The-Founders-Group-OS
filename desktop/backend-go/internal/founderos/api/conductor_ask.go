@@ -144,9 +144,6 @@ func askFacts(ctx context.Context, d *Deps, now time.Time) string {
 			}
 		}
 	}
-	if why := aiPaused(); why != "" {
-		lines = append(lines, "- AI work is PAUSED: "+why)
-	}
 	return strings.Join(lines, "\n")
 }
 
@@ -305,10 +302,6 @@ func registerConductorAsk(s gin.IRoutes, d *Deps) {
 			c.JSON(http.StatusBadRequest, gin.H{"error": "message required"})
 			return
 		}
-		if why := aiPaused(); why != "" {
-			c.JSON(http.StatusConflict, gin.H{"error": "AI work is paused: " + why})
-			return
-		}
 		ctx := c.Request.Context()
 		now := time.Now()
 		path := body.Path
@@ -352,10 +345,6 @@ func registerConductorAsk(s gin.IRoutes, d *Deps) {
 		}
 		prompt := "The conversation so far:\n" + convo.String() + "They: " + strings.TrimSpace(body.Message) + "\nYou:"
 
-		if err := salesKitAIAllowed(); err != nil {
-			c.JSON(http.StatusLocked, gin.H{"error": err.Error()})
-			return
-		}
 		reply, err := askClaude(ctx, system, prompt)
 		if err != nil {
 			status := http.StatusBadGateway

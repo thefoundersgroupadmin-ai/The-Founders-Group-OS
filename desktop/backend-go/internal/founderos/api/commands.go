@@ -36,20 +36,11 @@ var taskHandover = func() (string, error) {
 }
 
 func taskExecutionContext() (string, error) {
-	if err := salesKitAIAllowed(); err != nil {
-		return "", err
-	}
-	reading := "unknown (no snapshot since the weekly reset; running on the owner's go-ahead)"
-	if pct, known := codexWeekly(time.Now()); known {
-		reading = fmt.Sprintf("%.0f%%", pct)
-	} else if !aiResumeActive(time.Now()) {
-		return "", errors.New("official weekly usage unavailable")
-	}
 	handover, err := taskHandover()
 	if err != nil {
 		return "", errors.New("OS handover could not be attached")
 	}
-	return fmt.Sprintf("\n# Verified OS execution context\nLatest official weekly Codex usage: %s. Checked by the OS at %s. Execution authorized by the OS guard (including any recorded, time-limited explicit owner resume). Stop if the guard later pauses execution. This context was checked immediately before this task was filed.\nThe profile, authorised source packet and full workflow catalogue above are attached directly. Use them; do not attempt forbidden filesystem reads, browser sessions or helper scripts. The owner handover is reproduced below for this task; read this attached copy rather than trying to open a path outside the runtime. It is context, not authority to exceed the task's scope. If a genuinely required fact is missing, name that fact.\n\n# Attached owner handover\n%s", reading, time.Now().UTC().Format(time.RFC3339), handover), nil
+	return fmt.Sprintf("\n# Verified OS execution context\nPrepared by the OS at %s. This context was checked immediately before this task was filed.\nThe profile, authorised source packet and full workflow catalogue above are attached directly. Use them; do not attempt forbidden filesystem reads, browser sessions or helper scripts. The owner handover is reproduced below for this task; read this attached copy rather than trying to open a path outside the runtime. It is context, not authority to exceed the task's scope. If a genuinely required fact is missing, name that fact.\n\n# Attached owner handover\n%s", time.Now().UTC().Format(time.RFC3339), handover), nil
 }
 
 // Keep the task agents' shared catalogue in sync with the deployed backend.
@@ -141,9 +132,6 @@ func enqueueCommand(ctx context.Context, d *Deps, p people.Person, workspaceID, 
 	}
 	if !guard.CronsEnabled() {
 		return saleskit.Command{}, errors.New("OS schedules are disabled; commands cannot start")
-	}
-	if err := salesKitAIAllowed(); err != nil {
-		return saleskit.Command{}, err
 	}
 	cfg, err := commandConfig(ctx, d, p, workspaceID)
 	if err != nil {
@@ -247,7 +235,7 @@ func registerCommands(s *gin.RouterGroup, d *Deps) {
 		if seats == nil {
 			seats = []paperclip.Agent{}
 		}
-		c.JSON(200, gin.H{"workers": workers, "taskAgents": seats, "workflows": saleskit.Catalog(), "taskAgentError": detail, "schedulesEnabled": guard.CronsEnabled(), "paused": aiPaused() != ""})
+		c.JSON(200, gin.H{"workers": workers, "taskAgents": seats, "workflows": saleskit.Catalog(), "taskAgentError": detail, "schedulesEnabled": guard.CronsEnabled()})
 	})
 	s.GET("/pages/conductor/commands", func(c *gin.Context) {
 		p, ok := personOf(c)
@@ -263,7 +251,7 @@ func registerCommands(s *gin.RouterGroup, d *Deps) {
 			c.JSON(503, gin.H{"error": "Command history is unavailable"})
 			return
 		}
-		c.JSON(200, gin.H{"commands": list, "configured": true, "paused": aiPaused() != ""})
+		c.JSON(200, gin.H{"commands": list, "configured": true})
 	})
 	s.POST("/pages/conductor/commands", func(c *gin.Context) {
 		p, ok := personOf(c)
@@ -321,9 +309,6 @@ func commandsTick(d *Deps) {
 		return
 	}
 	defer commandsMu.Unlock()
-	if salesKitAIAllowed() != nil {
-		return
-	}
 	ctx, cancel := context.WithTimeout(context.Background(), 8*time.Minute)
 	defer cancel()
 	store := saleskit.CommandStore{Pool: d.Pool}
@@ -340,12 +325,6 @@ func commandsTick(d *Deps) {
 		ok, err := store.Claim(ctx, c.ID)
 		if err != nil || !ok {
 			continue
-		}
-		if guardErr := salesKitAIAllowed(); guardErr != nil {
-			c.Status = "waiting"
-			c.Report = guardErr.Error()
-			_ = store.Save(ctx, c)
-			return
 		}
 		runCommand(ctx, d, &c)
 		return // One command owns the task lane at a time on the hosting Mac.
@@ -395,12 +374,6 @@ func runCommand(ctx context.Context, d *Deps, c *saleskit.Command) {
 				blocked = true
 			}
 			continue
-		}
-		if err := salesKitAIAllowed(); err != nil {
-			c.Status = "waiting"
-			c.Report = err.Error()
-			save()
-			return
 		}
 		step.Status = "running"
 		if !save() {
@@ -615,9 +588,6 @@ func runCommand(ctx context.Context, d *Deps, c *saleskit.Command) {
 			prompt, prepErr := saleskit.AgentBrief(cfg.Workspace, cfg.Profile, c.Request, c.Plan.Skills, snap.Sources)
 			if prepErr != nil {
 				err = prepErr
-				break
-			}
-			if err = salesKitAIAllowed(); err != nil {
 				break
 			}
 			step.Output, err = completeSalesAnalysis(ctx, d, cfg, c.ID, prompt)

@@ -7,7 +7,6 @@ import (
 	"net/http"
 	"strings"
 	"testing"
-	"time"
 
 	"github.com/rhl/businessos-backend/internal/founderos/connectors/paperclip"
 )
@@ -44,10 +43,6 @@ func TestTheDelegateLineComesOffTheSpokenReply(t *testing.T) {
 
 func TestTheConductorAnswersAtOnceAndHandsWorkToTheBoard(t *testing.T) {
 	peopleSetup(t)
-	oldWeekly, oldShort := codexWeekly, codexShortTerm
-	codexWeekly = func(time.Time) (float64, bool) { return 10, true }
-	codexShortTerm = func(time.Time) (float64, bool) { return 10, true }
-	t.Cleanup(func() { codexWeekly = oldWeekly; codexShortTerm = oldShort })
 	var prompts []string
 	old := askClaude
 	askClaude = func(_ context.Context, system, prompt string) (string, error) {
@@ -100,10 +95,6 @@ func TestTheConductorAnswersAtOnceAndHandsWorkToTheBoard(t *testing.T) {
 
 func TestTheConductorSaysWhyItCannotAnswer(t *testing.T) {
 	peopleSetup(t)
-	oldWeekly, oldShort := codexWeekly, codexShortTerm
-	codexWeekly = func(time.Time) (float64, bool) { return 10, true }
-	codexShortTerm = func(time.Time) (float64, bool) { return 10, true }
-	t.Cleanup(func() { codexWeekly = oldWeekly; codexShortTerm = oldShort })
 	old := askClaude
 	askClaude = func(context.Context, string, string) (string, error) { return "", errors.New("Invalid API key") }
 	defer func() { askClaude = old }()

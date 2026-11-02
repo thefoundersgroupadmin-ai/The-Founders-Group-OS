@@ -127,10 +127,6 @@ func registerTaskFleet(s *gin.RouterGroup, d *Deps) {
 			c.JSON(403, gin.H{"error": "Only the installation owner can configure task agents"})
 			return
 		}
-		if err := salesKitAIAllowed(); err != nil {
-			c.JSON(409, gin.H{"error": err.Error()})
-			return
-		}
 		if d.Agents == nil {
 			c.JSON(503, gin.H{"error": "Worker registry unavailable"})
 			return
@@ -178,10 +174,6 @@ func registerTaskFleet(s *gin.RouterGroup, d *Deps) {
 		created, existing := 0, 0
 		results := []gin.H{}
 		for _, m := range ordered {
-			if err := salesKitAIAllowed(); err != nil {
-				results = append(results, gin.H{"workerId": m.ID, "error": err.Error()})
-				break
-			}
 			manager := boss
 			if parent := parents[m.ID]; parent != "" {
 				if lead, ok := bindings[parent]; ok {

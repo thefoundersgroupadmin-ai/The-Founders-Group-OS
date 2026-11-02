@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"strings"
 	"testing"
-	"time"
 
 	"github.com/google/uuid"
 	"github.com/rhl/businessos-backend/internal/founderos/agents"
@@ -52,9 +51,6 @@ func TestCommandExecutesWorkersAndSharedWorkflowsOnceWithDurableReport(t *testin
 	taskHandover = func() (string, error) { return "Fixture owner handover: 50% cutoff, OS only", nil }
 	defer func() { taskHandover = oldHandover }()
 	t.Setenv("FOUNDEROS_CRONS", "1")
-	oldMeter := codexWeekly
-	codexWeekly = func(_ time.Time) (float64, bool) { return 4, true }
-	defer func() { codexWeekly = oldMeter }()
 	pool := catalogdb.TestDB(t)
 	ctx := context.Background()
 	ws := catalogdb.Workspace(t, pool, "command-client")
@@ -131,8 +127,8 @@ func TestCommandExecutesWorkersAndSharedWorkflowsOnceWithDurableReport(t *testin
 	if !strings.Contains(b.created[0], "Approved £3,850 offer") || !strings.Contains(b.created[0], "pipeline-review") {
 		t.Fatal("task lacked profile and workflows")
 	}
-	if !strings.Contains(b.created[0], "Latest official weekly Codex usage: 4%") || !strings.Contains(b.created[0], "Fixture owner handover") {
-		t.Fatal("task cannot run without attached guard and handover")
+	if !strings.Contains(b.created[0], "Fixture owner handover") || strings.Contains(b.created[0], "weekly Codex usage") {
+		t.Fatal("task needs the handover and no usage-pause wording")
 	}
 	// A provider quota failure is systemic: do not launch the next task.
 	b.done = false
@@ -254,9 +250,6 @@ func (unavailableRoleWorker) Run(context.Context) (agents.Result, error) {
 func TestCompletedRoleWorkIsNotBlockedByOptionalEvidenceRefresh(t *testing.T) {
 	peopleSetup(t)
 	t.Setenv("FOUNDEROS_CRONS", "1")
-	oldMeter := codexWeekly
-	codexWeekly = func(time.Time) (float64, bool) { return 5, true }
-	defer func() { codexWeekly = oldMeter }()
 	oldHandover := taskHandover
 	taskHandover = func() (string, error) { return "Owner handover", nil }
 	defer func() { taskHandover = oldHandover }()

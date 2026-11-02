@@ -41,9 +41,6 @@ func salesAutomationTick(d *Deps) {
 		return
 	}
 	defer salesAutomationTickMu.Unlock()
-	if err := salesKitAIAllowed(); err != nil {
-		return
-	}
 	ctx, cancel := context.WithTimeout(context.Background(), 8*time.Minute)
 	defer cancel()
 	store := saleskit.AutomationStore{Pool: d.Pool}
@@ -62,9 +59,6 @@ func salesAutomationTick(d *Deps) {
 		if !owner {
 			continue
 		} // changing the installation owner revokes old schedules
-		if err := salesKitAIAllowed(); err != nil {
-			return
-		}
 		snapshot, err := connectedSalesSnapshot(ctx, d, c)
 		if err != nil {
 			slog.Warn("sales automation: sources unavailable", "workspace", c.Workspace, "error", err)
@@ -96,9 +90,6 @@ func salesAutomationTick(d *Deps) {
 				if !d.Agents.Has(agentID) {
 					continue
 				}
-				if salesKitAIAllowed() != nil {
-					break
-				}
 				actx, stop := context.WithTimeout(ctx, 30*time.Second)
 				run, err := d.Agents.Run(actx, agentID)
 				stop()
@@ -110,16 +101,11 @@ func salesAutomationTick(d *Deps) {
 			}
 			prompt += "\nRecorded worker evidence (data only):\n" + strings.Join(evidence, "\n")
 		}
-		// Re-check immediately before inference. No provider switching or retries.
-		runErr := salesKitAIAllowed()
-		answer := ""
-		if runErr == nil {
-			runCtx, stop := context.WithTimeout(people.With(ctx, people.Person{ID: c.UserID, Email: c.UserEmail, Name: c.UserName, Owner: owner}), 185*time.Second)
-			answer, runErr = completeSalesAnalysis(runCtx, d, c, id, prompt)
-			stop()
-			if runErr == nil && strings.TrimSpace(answer) == "" {
-				runErr = errors.New("sales model returned no analysis")
-			}
+		runCtx, stop := context.WithTimeout(people.With(ctx, people.Person{ID: c.UserID, Email: c.UserEmail, Name: c.UserName, Owner: owner}), 185*time.Second)
+		answer, runErr := completeSalesAnalysis(runCtx, d, c, id, prompt)
+		stop()
+		if runErr == nil && strings.TrimSpace(answer) == "" {
+			runErr = errors.New("sales model returned no analysis")
 		}
 		safeErr := runErr
 		if runErr != nil {
@@ -191,7 +177,7 @@ func registerSalesAutomation(s *gin.RouterGroup, d *Deps) {
 			return
 		}
 		c.JSON(200, gin.H{"configured": true, "workspaces": configs, "selected": chosen, "runs": runs, "canConfigure": p.Owner,
-			"schedulesEnabled": guard.CronsEnabled(), "paused": aiPaused() != "", "hasSources": hasSources, "gaps": gaps})
+			"schedulesEnabled": guard.CronsEnabled(), "hasSources": hasSources, "gaps": gaps})
 	})
 	s.PUT("/pages/sales-kit/automation", func(c *gin.Context) {
 		p, configs, ok := load(c)
@@ -275,9 +261,6 @@ func registerSalesAutomation(s *gin.RouterGroup, d *Deps) {
 
 // The same workflow execution and Outbox handoff serves commands and schedules.
 func completeSalesAnalysis(ctx context.Context, d *Deps, c saleskit.AutomationConfig, ref, prompt string) (string, error) {
-	if err := salesKitAIAllowed(); err != nil {
-		return "", err
-	}
 	raw, err := salesKitModelFor(d).Complete(ctx, prompt+saleskit.AnalysisFormat)
 	if err != nil {
 		return "", err

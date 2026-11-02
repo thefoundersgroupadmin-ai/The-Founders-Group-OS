@@ -55,6 +55,11 @@ func salesKitAIAllowed() error {
 	}
 	pct, ok := codexWeekly(time.Now())
 	if !ok {
+		// Right after a reset there is no snapshot until Codex runs; the
+		// owner's go-ahead covers that gap, nothing else does.
+		if aiResumeActive(time.Now()) {
+			return nil
+		}
 		return errors.New("official weekly usage snapshot unavailable; use Prepare prompt until usage can be verified")
 	}
 	if pct >= aiCutoffPercent && !aiResumeActive(time.Now()) {

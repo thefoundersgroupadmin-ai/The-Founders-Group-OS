@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/rhl/businessos-backend/internal/founderos/connectors/devicepush"
 	"github.com/rhl/businessos-backend/internal/founderos/connectors/paperclip"
 )
 
@@ -187,4 +188,66 @@ func TestWakeAgentsTheLastPauseLeftBehind(t *testing.T) {
 	if w.Code != 200 || len(b.resumed) != 1 || b.resumed[0] != "pr" {
 		t.Fatalf("wake: %d %s woke=%v", w.Code, w.Body, b.resumed)
 	}
+}
+
+// 31 Oct–1 Nov: the shared notify loop stalled, the 4-hour lease lapsed, and
+// the sales kit wrote a pause while the owner's go-ahead still held. The
+// go-ahead itself must keep AI resumed in-process.
+func TestAnActiveGoAheadOutlivesALapsedLease(t *testing.T) {
+	now := time.Now().UTC()
+	aiControlSetup(t, 67, now.Add(48*time.Hour))
+	r := asUser(t, &Deps{}, ownerUser)
+	if w := do(t, r, http.MethodPost, "/api/founderos/pages/usage/ai/resume", ""); w.Code != 200 {
+		t.Fatalf("resume: %d %s", w.Code, w.Body)
+	}
+	os.Remove(aiResumePath())
+	if !aiResumeActive(now.Add(5 * time.Hour)) {
+		t.Fatal("go-ahead ignored once the lease lapsed")
+	}
+	if err := salesKitAIAllowed(); err != nil {
+		t.Fatalf("sales kit paused AI under an active go-ahead: %v", err)
+	}
+	if _, err := os.Stat(aiPausedPath()); err == nil {
+		t.Fatal("a pause was written under an active go-ahead")
+	}
+}
+
+// 2 Nov: after the weekly reset the newest snapshot still said 67% for the
+// window that had ended. An expired window is unknown, not the old percent.
+func TestAnExpiredWeeklyWindowIsNotCurrent(t *testing.T) {
+	now := time.Date(2026, 11, 2, 17, 0, 0, 0, time.UTC)
+	past, future := "2026-11-02T10:24:44Z", "2026-11-09T10:24:44Z"
+	if _, _, ok := currentWeekly(&devicepush.OfficialWindow{UsedPercent: 67, ResetsAt: &past}, now); ok {
+		t.Fatal("expired window read as current")
+	}
+	pct, reset, ok := currentWeekly(&devicepush.OfficialWindow{UsedPercent: 12, ResetsAt: &future}, now)
+	if !ok || pct != 12 || reset.Format(time.RFC3339) != future {
+		t.Fatalf("current window: %v %v %v", pct, reset, ok)
+	}
+	if _, _, ok := currentWeekly(nil, now); ok {
+		t.Fatal("missing window read as current")
+	}
+}
+
+// Right after a weekly reset no Codex snapshot exists until Codex runs. Under
+// the owner's go-ahead that must not block work; without it, it still does.
+func TestAnUnknownMeterNeedsTheOwnersGoAhead(t *testing.T) {
+	now := time.Now().UTC()
+	aiControlSetup(t, 0, time.Time{})
+	codexWeekly = func(time.Time) (float64, bool) { return 0, false }
+	codexWeeklyWindow = func(time.Time) (float64, time.Time, bool) { return 0, time.Time{}, false }
+	if salesKitAIAllowed() == nil {
+		t.Fatal("unknown meter allowed without a go-ahead")
+	}
+	r := asUser(t, &Deps{}, ownerUser)
+	if w := do(t, r, http.MethodPost, "/api/founderos/pages/usage/ai/resume", ""); w.Code != 200 {
+		t.Fatalf("resume: %d %s", w.Code, w.Body)
+	}
+	if err := salesKitAIAllowed(); err != nil {
+		t.Fatalf("go-ahead ignored with an unknown meter: %v", err)
+	}
+	if _, err := taskExecutionContext(); err != nil && strings.Contains(err.Error(), "weekly usage") {
+		t.Fatalf("task context blocked on the unknown meter: %v", err)
+	}
+	_ = now
 }

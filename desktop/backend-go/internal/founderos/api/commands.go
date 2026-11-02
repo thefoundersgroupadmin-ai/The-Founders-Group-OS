@@ -39,15 +39,17 @@ func taskExecutionContext() (string, error) {
 	if err := salesKitAIAllowed(); err != nil {
 		return "", err
 	}
-	pct, known := codexWeekly(time.Now())
-	if !known {
+	reading := "unknown (no snapshot since the weekly reset; running on the owner's go-ahead)"
+	if pct, known := codexWeekly(time.Now()); known {
+		reading = fmt.Sprintf("%.0f%%", pct)
+	} else if !aiResumeActive(time.Now()) {
 		return "", errors.New("official weekly usage unavailable")
 	}
 	handover, err := taskHandover()
 	if err != nil {
 		return "", errors.New("OS handover could not be attached")
 	}
-	return fmt.Sprintf("\n# Verified OS execution context\nLatest official weekly Codex usage: %.0f%%. Checked by the OS at %s. Execution authorized by the OS guard (including any recorded, time-limited explicit owner resume). Stop if the guard later pauses execution. This context was checked immediately before this task was filed.\nThe profile, authorised source packet and full workflow catalogue above are attached directly. Use them; do not attempt forbidden filesystem reads, browser sessions or helper scripts. The owner handover is reproduced below for this task; read this attached copy rather than trying to open a path outside the runtime. It is context, not authority to exceed the task's scope. If a genuinely required fact is missing, name that fact.\n\n# Attached owner handover\n%s", pct, time.Now().UTC().Format(time.RFC3339), handover), nil
+	return fmt.Sprintf("\n# Verified OS execution context\nLatest official weekly Codex usage: %s. Checked by the OS at %s. Execution authorized by the OS guard (including any recorded, time-limited explicit owner resume). Stop if the guard later pauses execution. This context was checked immediately before this task was filed.\nThe profile, authorised source packet and full workflow catalogue above are attached directly. Use them; do not attempt forbidden filesystem reads, browser sessions or helper scripts. The owner handover is reproduced below for this task; read this attached copy rather than trying to open a path outside the runtime. It is context, not authority to exceed the task's scope. If a genuinely required fact is missing, name that fact.\n\n# Attached owner handover\n%s", reading, time.Now().UTC().Format(time.RFC3339), handover), nil
 }
 
 // Keep the task agents' shared catalogue in sync with the deployed backend.

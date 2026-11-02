@@ -38,6 +38,13 @@ class UsageSnapshotTest(unittest.TestCase):
             os.utime(pause,(now.timestamp(),now.timestamp()))
             self.assertFalse(module.explicit_resume_active(root,now))
 
+    def test_a_finished_weekly_window_is_unknown(self):
+        # 2 Nov: after the reset the newest snapshot still described last week.
+        with tempfile.TemporaryDirectory() as root:
+            Path(root, "u.jsonl").write_text(json.dumps({"timestamp": "2026-11-01T03:00:00Z", "payload": {"rate_limits": {"secondary": {"used_percent": 67, "resets_at": 1793615084}}}}) + "\n")
+            self.assertIsNone(module.latest_weekly_usage(root, now=datetime(2026, 11, 2, 17, tzinfo=timezone.utc)))
+            self.assertEqual(module.latest_weekly_usage(root, now=datetime(2026, 11, 2, 9, tzinfo=timezone.utc)), 67)
+
     def test_missing_or_unofficial_usage_is_unknown(self):
         with tempfile.TemporaryDirectory() as root:
             Path(root, "usage.jsonl").write_text('{"used_percent": 4}\n')

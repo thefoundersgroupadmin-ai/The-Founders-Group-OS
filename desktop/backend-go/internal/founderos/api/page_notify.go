@@ -864,13 +864,24 @@ func startNotifyWatch(d *Deps) {
 					notify.Publish(ctx, e)
 				}
 				seen.save()
-				for _, e := range aiGuardPass(ctx, paperclip.New(d.Resolver), now) {
-					notify.Publish(ctx, e)
-				}
 				for _, e := range cw.pass(ctx, d, now) {
 					notify.Publish(ctx, e)
 				}
 				notifyBriefs(ctx, d, now)
+				cancel()
+				<-t.C
+			}
+		}()
+		// The 50% guard runs on its own loop: a stalled notify pass must not
+		// stop it renewing the resume lease agent tasks check (31 Oct).
+		go func() {
+			t := time.NewTicker(2 * time.Minute)
+			defer t.Stop()
+			for {
+				ctx, cancel := context.WithTimeout(context.Background(), 90*time.Second)
+				for _, e := range aiGuardPass(ctx, paperclip.New(d.Resolver), time.Now()) {
+					notify.Publish(ctx, e)
+				}
 				cancel()
 				<-t.C
 			}

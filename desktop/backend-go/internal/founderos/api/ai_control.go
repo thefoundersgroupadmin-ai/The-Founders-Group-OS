@@ -72,15 +72,10 @@ func renewAiLease(now time.Time, g aiGoAhead) error {
 var codexWeeklyWindow = func(now time.Time) (float64, time.Time, bool) {
 	home, _ := os.UserHomeDir()
 	seat := codexSeatFor(home, now)
-	if seat == nil || seat.Official == nil || seat.Official.Weekly == nil {
+	if seat == nil || seat.Official == nil {
 		return 0, time.Time{}, false
 	}
-	w := seat.Official.Weekly
-	var reset time.Time
-	if w.ResetsAt != nil {
-		reset, _ = time.Parse(time.RFC3339Nano, *w.ResetsAt)
-	}
-	return w.UsedPercent, reset, true
+	return currentWeekly(seat.Official.Weekly, now)
 }
 
 type aiBoardAPI interface {

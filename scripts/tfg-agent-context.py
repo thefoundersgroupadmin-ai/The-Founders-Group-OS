@@ -16,7 +16,8 @@ import sys
 ROOT = Path(__file__).resolve().parent.parent
 
 
-def latest_weekly_usage(session_root):
+def latest_weekly_usage(session_root, now=None):
+    now = now or datetime.now(timezone.utc)
     latest = None
     roots = session_root if isinstance(session_root, list) else [session_root]
     for path in (path for root in roots for path in Path(root).rglob("*.jsonl")):
@@ -29,12 +30,17 @@ def latest_weekly_usage(session_root):
                     limits = event.get("payload", {}).get("rate_limits") or {}
                     weekly = limits.get("secondary")
                     if weekly and isinstance(weekly.get("used_percent"), (int, float)):
-                        snapshot = (event.get("timestamp", ""), weekly["used_percent"])
+                        snapshot = (event.get("timestamp", ""), weekly["used_percent"], weekly.get("resets_at"))
                         if latest is None or snapshot[0] > latest[0]:
                             latest = snapshot
         except (OSError, ValueError):
             continue
-    return latest[1] if latest else None
+    if not latest:
+        return None
+    # After the reset the old percent describes a finished week: unknown.
+    if isinstance(latest[2], (int, float)) and latest[2] <= now.timestamp():
+        return None
+    return latest[1]
 
 
 def codex_session_roots(home):
@@ -80,9 +86,9 @@ def main():
         sys.exit("AI work is paused. Wait for the owner's explicit resume in TFG OS.")
     roots = codex_session_roots(Path.home())
     usage = latest_weekly_usage(roots)
-    if usage is None:
+    if usage is None and not resumed:
         sys.exit("Official weekly usage is unavailable. Do not execute AI work.")
-    if usage >= 50 and not resumed:
+    if usage is not None and usage >= 50 and not resumed:
         pause = Path.home() / ".founderos/ai-paused"
         pause.parent.mkdir(parents=True, exist_ok=True)
         pause.write_text("Weekly usage reached 50%; wait for the owner's explicit resume.\n")

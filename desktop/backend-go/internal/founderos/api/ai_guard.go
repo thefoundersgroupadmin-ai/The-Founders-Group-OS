@@ -37,6 +37,10 @@ type aiResumeGrant struct {
 }
 
 func aiResumeActive(now time.Time) bool {
+	// The owner's go-ahead holds until the reset even if the lease lapsed.
+	if _, ok := aiGoAheadActive(now); ok {
+		return true
+	}
 	raw, err := os.ReadFile(filepath.Join(filepath.Dir(aiPausedPath()), "ai-resume.json"))
 	if err != nil {
 		return false
@@ -70,12 +74,24 @@ var codexCache = collect.NewCodexCache()
 
 // codexWeekly is the official weekly percent used, and whether one was found.
 var codexWeekly = func(now time.Time) (float64, bool) {
-	home, _ := os.UserHomeDir()
-	seat := codexSeatFor(home, now)
-	if seat == nil || seat.Official == nil || seat.Official.Weekly == nil {
-		return 0, false
+	pct, _, ok := codexWeeklyWindow(now)
+	return pct, ok
+}
+
+// currentWeekly is a weekly reading only while its window is open: after the
+// reset the old percent describes a finished week (2 Nov: 67% read on).
+func currentWeekly(w *devicepush.OfficialWindow, now time.Time) (float64, time.Time, bool) {
+	if w == nil {
+		return 0, time.Time{}, false
 	}
-	return seat.Official.Weekly.UsedPercent, true
+	var reset time.Time
+	if w.ResetsAt != nil {
+		reset, _ = time.Parse(time.RFC3339Nano, *w.ResetsAt)
+	}
+	if !reset.IsZero() && !reset.After(now) {
+		return 0, time.Time{}, false
+	}
+	return w.UsedPercent, reset, true
 }
 
 // codexSeatFor is the newest Codex reading of the owner or any board seat.

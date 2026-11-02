@@ -29,6 +29,13 @@ from pathlib import Path
 REPO = Path(__file__).resolve().parent.parent
 WORKSPACE_SLUG = "vantage"  # displayed as "Sales System Build"
 PRODUCT = "Sales System Build"
+VENTURES = ("vantage", "launchpad-cohort")  # founderos_funnel_contacts.venture CHECK
+
+
+def venture_for(workspace):
+    """The funnel's venture for a command workspace. Other workspaces (TFG HQ,
+    client workspaces) sell PRODUCT, which is Vantage's offer."""
+    return workspace if workspace in VENTURES else "vantage"
 EMAIL = re.compile(r"[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}")
 LINK = re.compile(r"\[([^\]]+)\]\(([^)]+)\)")
 FENCE = re.compile(r"```(?:json)?\s*(\[.*?\])\s*```", re.S)
@@ -228,7 +235,7 @@ def main():
         stmts.append(
             "INSERT INTO founderos_funnel_contacts (id, workspace_id, name, venture, status, product, relationship, "
             "likelihood, email, person, company, website, location, buyer_role, research_evidence, next_action, research_source_ref, created_at) VALUES ("
-            f"{sql(cid)}, {sql(ws)}, {sql(a['buyer'] or a['name'])}, {sql(target)}, 'first_touch', {sql(PRODUCT)}, 'cold', "
+            f"{sql(cid)}, {sql(ws)}, {sql(a['buyer'] or a['name'])}, {sql(venture_for(target))}, 'first_touch', {sql(PRODUCT)}, 'cold', "
             f"{sql(a['score'])}, {sql(email)}, {sql(a['buyer'])}, {sql(a['name'])}, {sql(a.get('url'))}, {sql(a.get('location'))}, {sql(a.get('buyerRole'))}, {sql(a.get('evidence'))}, {sql(a.get('next'))}, {sql(a.get('sourceRef', 'THE-3'))}, now()) "
             "ON CONFLICT (id) DO UPDATE SET likelihood = EXCLUDED.likelihood, person = EXCLUDED.person, "
             "company = EXCLUDED.company, email = COALESCE(EXCLUDED.email, founderos_funnel_contacts.email), "

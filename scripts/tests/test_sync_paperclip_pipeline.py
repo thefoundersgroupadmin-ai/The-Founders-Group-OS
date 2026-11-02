@@ -21,6 +21,14 @@ class JsonProspectsTest(unittest.TestCase):
         self.assertEqual(sync.prospect_id("founderos", "Acme"), "fc-pc-founderos-acme")
         self.assertNotEqual(sync.prospect_id("client-a", "Acme"), sync.prospect_id("client-b", "Acme"))
 
+    def test_venture_is_a_real_venture_for_any_command_workspace(self):
+        # The funnel only accepts vantage/launchpad-cohort; an HQ ("founderos")
+        # command rolled back every sync from 31 Oct.
+        self.assertEqual(sync.venture_for("vantage"), "vantage")
+        self.assertEqual(sync.venture_for("launchpad-cohort"), "launchpad-cohort")
+        self.assertEqual(sync.venture_for("founderos"), "vantage")
+        self.assertEqual(sync.venture_for("workspace-abc"), "vantage")
+
     def test_reads_a_fenced_json_array(self):
         got, bad = sync.json_prospects("New accounts today:\n```json\n[" + GOOD + "]\n```\n")
         self.assertEqual(bad, 0)

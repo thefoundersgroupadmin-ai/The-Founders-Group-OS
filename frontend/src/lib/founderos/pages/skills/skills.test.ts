@@ -186,7 +186,7 @@ describe('/os/skills page', () => {
 		expect(screen.getByText('3 live · 1 drafts')).toBeTruthy();
 		// section order matches v1 app/skills/page.tsx
 		const titles = [...container.querySelectorAll('h2')].map((h) => h.textContent?.trim());
-		expect(titles).toEqual(['Give the OS a command', 'Sales automation', 'Sales Kit', 'Skill Library', 'Skill Volume', 'Categories', 'Owners', 'Skills']);
+		expect(titles).toEqual(['Give the OS a command', 'Task-agent coverage', 'Sales automation', 'Sales Kit', 'Skill Library', 'Skill Volume', 'Categories', 'Owners', 'Skills']);
 		expect(screen.getByText('skills per source group')).toBeTruthy();
 		expect(screen.getByText('operator skills')).toBeTruthy();
 		expect(screen.getByText('agents wielding them')).toBeTruthy();

@@ -58,6 +58,10 @@ type Connector struct {
 	downUntil  time.Time
 	downReason string
 	cockpitID  string
+
+	// runReplies caches answers recovered from finished cockpit runs, keyed by
+	// the operator comment that woke the run (see cockpit_reply.go).
+	runReplies sync.Map
 }
 
 func New(res connectors.Resolver) *Connector {
@@ -523,7 +527,7 @@ func (c *Connector) CockpitThread(ctx context.Context, limit int) ([]Comment, er
 	}
 	out := MapComments(listFrom(body, "comments"))
 	sort.SliceStable(out, func(i, j int) bool { return out[i].CreatedAt < out[j].CreatedAt })
-	return out, nil
+	return c.withRunReply(ctx, id, out), nil
 }
 
 // ---- status -----------------------------------------------------------------

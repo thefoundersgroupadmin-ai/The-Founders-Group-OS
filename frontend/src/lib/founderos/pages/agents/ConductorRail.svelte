@@ -11,6 +11,7 @@
 	import ConductorEmblem from '$lib/founderos/kit/ConductorEmblem.svelte';
 	import ConductorComposer from '$lib/founderos/chrome/ConductorComposer.svelte';
 	import Synthesizing from '$lib/founderos/chrome/Synthesizing.svelte';
+	import { SLOW_MESSAGE, settleReplyWait } from '$lib/founderos/chrome/conductor';
 
 	type WireMsg = { id: string; body: string; authorType: 'user' | 'agent'; createdAt: string };
 	type Turn = { id: string; role: 'user' | 'assistant'; content: string };
@@ -51,10 +52,9 @@
 		if (!thread || thread.length === 0) return;
 		turns = thread.slice(-14);
 		const assistants = thread.filter((t) => t.role === 'assistant').length;
-		if (awaiting && assistants > assistantBaseline) {
-			awaiting = false;
-			error = null;
-		}
+		const settled = settleReplyWait({ awaiting, error, assistants, baseline: assistantBaseline });
+		awaiting = settled.awaiting;
+		error = settled.error;
 	}
 
 	onMount(() => {
@@ -67,7 +67,7 @@
 			applyThread(await loadThread());
 			if (awaiting && Date.now() - awaitingSince > WAIT_LIMIT_MS) {
 				awaiting = false;
-				error = 'The CEO run is taking a while. Its reply lands in this thread automatically.';
+				error = SLOW_MESSAGE;
 			}
 		}, 4000);
 	});

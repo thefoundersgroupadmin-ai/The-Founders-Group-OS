@@ -121,6 +121,15 @@ export function dispatchTurn(request: string, res: { workspaceId?: string; branc
 export const SLOW_AFTER_MS = 150_000;
 export const SLOW_MESSAGE = 'The CEO run is taking a while. Its reply lands in this thread automatically.';
 
+/** A new reply ends the wait, and also clears the slow notice if the wait already gave up. */
+export function settleReplyWait(s: { awaiting: boolean; error: string | null; assistants: number; baseline: number }): {
+	awaiting: boolean;
+	error: string | null;
+} {
+	if (s.assistants > s.baseline && (s.awaiting || s.error === SLOW_MESSAGE)) return { awaiting: false, error: null };
+	return { awaiting: s.awaiting, error: s.error };
+}
+
 export const REFUSED_NOTICE = 'Writes are off (FOUNDEROS_WRITES=0), so nothing was sent.';
 
 // Only the write guard's own refusal reads as "writes are off"; any other 409

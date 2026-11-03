@@ -154,3 +154,20 @@ describe('composerHeight', () => {
 		expect(COMPOSER_MAX_PX / 20).toBeGreaterThanOrEqual(8);
 	});
 });
+
+describe('settleReplyWait', () => {
+	it('ends a pending wait when a new reply lands', async () => {
+		const { settleReplyWait } = await import('./conductor');
+		expect(settleReplyWait({ awaiting: true, error: null, assistants: 3, baseline: 2 })).toEqual({ awaiting: false, error: null });
+	});
+	it('clears the slow notice when the reply lands after the wait gave up', async () => {
+		const { settleReplyWait, SLOW_MESSAGE } = await import('./conductor');
+		expect(settleReplyWait({ awaiting: false, error: SLOW_MESSAGE, assistants: 3, baseline: 2 })).toEqual({ awaiting: false, error: null });
+	});
+	it('keeps waiting, and keeps other errors, until a new reply exists', async () => {
+		const { settleReplyWait, SLOW_MESSAGE } = await import('./conductor');
+		expect(settleReplyWait({ awaiting: true, error: null, assistants: 2, baseline: 2 })).toEqual({ awaiting: true, error: null });
+		expect(settleReplyWait({ awaiting: false, error: SLOW_MESSAGE, assistants: 2, baseline: 2 })).toEqual({ awaiting: false, error: SLOW_MESSAGE });
+		expect(settleReplyWait({ awaiting: false, error: 'Writes are off', assistants: 3, baseline: 2 })).toEqual({ awaiting: false, error: 'Writes are off' });
+	});
+});

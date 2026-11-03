@@ -54,6 +54,8 @@ type board struct {
 	status      int
 	issues      []map[string]any
 	comments    string
+	runs        string
+	runDetails  map[string]string
 	authHeader  string
 }
 
@@ -102,6 +104,18 @@ func (b *board) handler(t *testing.T) http.HandlerFunc {
 			  {"id":"r1","agentId":"a1","agentName":"Conductor","status":"succeeded","startedAt":"2026-09-29T09:00:00Z","finishedAt":"2026-09-29T09:04:00Z","usageJson":{"model":"claude-fable-5"}},
 			  {"id":"r2","agent":{"id":"a2","name":"Hermes"},"status":"failed","error":"Internal error","resultJson":{"summary":"usage limit reached"}},
 			  {"broken":true}]}`)
+		case strings.HasPrefix(r.URL.Path, "/api/issues/") && strings.HasSuffix(r.URL.Path, "/runs") && r.Method == http.MethodGet:
+			if b.runs == "" {
+				_, _ = io.WriteString(w, "[]")
+			} else {
+				_, _ = io.WriteString(w, b.runs)
+			}
+		case strings.HasPrefix(r.URL.Path, "/api/heartbeat-runs/") && r.Method == http.MethodGet:
+			if d, ok := b.runDetails[strings.TrimPrefix(r.URL.Path, "/api/heartbeat-runs/")]; ok {
+				_, _ = io.WriteString(w, d)
+			} else {
+				w.WriteHeader(http.StatusNotFound)
+			}
 		case strings.HasPrefix(r.URL.Path, "/api/issues/") && strings.HasSuffix(r.URL.Path, "/comments") && r.Method == http.MethodGet:
 			_, _ = io.WriteString(w, b.comments)
 		case strings.HasPrefix(r.URL.Path, "/api/issues/") && strings.HasSuffix(r.URL.Path, "/comments") && r.Method == http.MethodPost:

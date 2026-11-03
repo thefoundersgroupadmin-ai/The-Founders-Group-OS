@@ -47,16 +47,16 @@ func resolver(t *testing.T, lines ...string) connectors.Resolver {
 }
 
 type board struct {
-	mu          sync.Mutex
-	hits        []string
-	bodies      map[string]string
-	agents      string
-	status      int
-	issues      []map[string]any
-	comments    string
-	runs        string
-	runDetails  map[string]string
-	authHeader  string
+	mu         sync.Mutex
+	hits       []string
+	bodies     map[string]string
+	agents     string
+	status     int
+	issues     []map[string]any
+	comments   string
+	runs       string
+	runDetails map[string]string
+	authHeader string
 }
 
 func (b *board) handler(t *testing.T) http.HandlerFunc {

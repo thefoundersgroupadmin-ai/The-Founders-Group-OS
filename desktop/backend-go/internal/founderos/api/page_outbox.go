@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"os"
 	"strconv"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -72,6 +73,23 @@ func calBookings(ctx context.Context, d *Deps) ([]caldotcom.Booking, error) {
 	return all, nil
 }
 
+// ownerMailDailyCap bounds owner-addressed sends in 24 hours (a looping agent).
+const ownerMailDailyCap = 20
+
+// ownerAddresses are the owner's own inboxes: the send-as mailbox and the
+// installation owner (the first FOUNDEROS_OWNER_EMAIL), never teammates.
+func ownerAddresses(d *Deps) []string {
+	out := []string{d.Resolver.Resolve("INBOX_1_FROM")}
+	owners := os.Getenv("FOUNDEROS_OWNER_EMAIL")
+	if owners == "" {
+		owners = d.Resolver.Resolve("FOUNDEROS_OWNER_EMAIL")
+	}
+	if first, _, _ := strings.Cut(owners, ","); strings.TrimSpace(first) != "" {
+		out = append(out, strings.TrimSpace(first))
+	}
+	return out
+}
+
 var autoFollowUpsOnce sync.Once
 
 // startAutoFollowUps sends safe follow-ups every five minutes (see
@@ -86,6 +104,10 @@ func startAutoFollowUps(d *Deps) {
 			defer t.Stop()
 			for range t.C {
 				ctx, cancel := context.WithTimeout(context.Background(), 4*time.Minute)
+				// Mail to the owner's own inbox is not outreach: no booking check needed.
+				if n, err := outbox.AutoSendToOwner(ctx, d.Pool, outboxWorkspace, ownerAddresses(d), ownerMailDailyCap, outboxSender(d)); n > 0 || err != nil {
+					slog.Info("founderos outbox: owner-addressed mail sent without a click", "sent", n, "err", err)
+				}
 				// Bookings first: a prospect who just booked a call must not get a follow-up.
 				if booked, err := calBookings(ctx, d); err == nil {
 					if moved, err := bookings.MarkBooked(ctx, d.Pool, booked); moved > 0 || err != nil {

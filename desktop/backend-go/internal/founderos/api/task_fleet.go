@@ -30,7 +30,7 @@ var roleConnections = map[string][]string{
 	"brand-deal-agent": {"email", "payments"}, "sales-agent": {"email", "calendar"}, "stripe-sales": {"payments"}, "processor-confirmation": {"payments"}, "sales-calls-data": {"fathom", "plaud"},
 }
 
-func taskRoleInstructions(m agents.Meta) string {
+func taskRoleInstructions(m agents.Meta, ownerEmail string) string {
 	return fmt.Sprintf(`# TFG OS task agent: %s
 Worker identity: %s. Department: %s.
 Responsibility: %s
@@ -42,7 +42,16 @@ The OS executes the linked worker before your task and attaches recorded worker 
 All work runs through TFG OS. Do not redirect the owner to Paperclip or ask them to run individual workflows. Cooperate through the command's previous-role handoff packet; the OS passes your saved report to subsequent task agents. Never create duplicate child tasks, autonomous agent fleets, or background loops. You are activated on demand, not continuously.
 
 There is no usage cutoff or AI pause; work normally. The attached owner handover and work packet satisfy context reads; do not attempt forbidden filesystem helpers when the exact content is supplied.
-`, m.Name, m.ID, m.DepartmentID, m.Description)
+`, m.Name, m.ID, m.DepartmentID, m.Description) + ownerEmailInstruction(ownerEmail)
+}
+
+// ownerEmailInstruction tells agents where "email me" goes: an outbox entry to
+// the owner's own inbox, which the OS sends without a click.
+func ownerEmailInstruction(ownerEmail string) string {
+	if strings.TrimSpace(ownerEmail) == "" {
+		return ""
+	}
+	return fmt.Sprintf("\nThe owner's email address is %s. When the owner asks to be emailed (\"email me\", \"send me\"), do not ask for an address: add an entry to the \"outbox\" document with \"to\" set to %s. The OS sends mail addressed to the owner without a separate approval.\n", ownerEmail, ownerEmail)
 }
 
 func init() { RegisterPage(registerTaskFleet) }
@@ -183,7 +192,7 @@ func registerTaskFleet(s *gin.RouterGroup, d *Deps) {
 					continue
 				}
 			}
-			a, new, err := board.EnsureTaskRole(ctx, m.ID, taskRoleName(m), taskRoleInstructions(m), manager)
+			a, new, err := board.EnsureTaskRole(ctx, m.ID, taskRoleName(m), taskRoleInstructions(m, ownerAddresses(d)[0]), manager)
 			if err != nil {
 				results = append(results, gin.H{"workerId": m.ID, "error": err.Error()})
 				continue

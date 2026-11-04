@@ -173,7 +173,10 @@ func TestTaskFleetInstructionsAndHandoffsStayScoped(t *testing.T) {
 			t.Fatalf("ambiguous task name %s", m.Name)
 		}
 		seen[m.Name] = true
-		text := taskRoleInstructions(m)
+		text := taskRoleInstructions(m, "owner@own.example")
+		if !strings.Contains(text, "to\" set to owner@own.example") {
+			t.Fatalf("%s lacks the owner email instruction", m.ID)
+		}
 		for _, required := range []string{m.ID, m.Name, "report", "no usage cutoff", "on demand", "No external message", "previous-role"} {
 			if !strings.Contains(text, required) {
 				t.Fatalf("%s lacks %s", m.ID, required)

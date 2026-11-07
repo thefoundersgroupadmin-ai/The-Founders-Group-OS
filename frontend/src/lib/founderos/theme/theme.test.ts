@@ -18,7 +18,7 @@ describe('the operator theme selection', () => {
   // FounderOS v1 lib/theme.ts THEMES, in its order. Its 'dark' (Terminal) keeps
   // the bridge's id 'terminal'; every other id is production's.
   it("offers every production skin, in production's order, and ignores unknown stored values", () => {
-    expect(FOUNDEROS_THEMES).toEqual(['mono', 'mono-light', 'terminal', 'light', 'midnight', 'ember']);
+    expect(FOUNDEROS_THEMES).toEqual(['mono', 'mono-light', 'terminal', 'light', 'midnight', 'ember', 'glass']);
     localStorage.setItem(STORAGE_KEY, 'neon');
     expect(readStoredTheme()).toBe('mono');
     for (const t of FOUNDEROS_THEMES) {
@@ -40,7 +40,9 @@ describe('the operator theme selection', () => {
       ember: { name: 'Ember', blurb: 'coal dark, vault orange', swatch: ['#0c0806', '#e35c35', '#f2e9e2'] },
       mono: { name: 'Monolith', blurb: 'white on black, color = status only', swatch: ['#0a0a0a', '#f2f2f2', '#2fd36f'] },
       // G-Brain is retired on the bridge; the blurb names the colour, not the product
-      'mono-light': { name: 'Daylight', blurb: 'brain blue on cool white', swatch: ['#f2f6f9', '#4db3de', '#16222c'] }
+      'mono-light': { name: 'Daylight', blurb: 'brain blue on cool white', swatch: ['#f2f6f9', '#4db3de', '#16222c'] },
+      // TFG's own skin (2026-11-07): frosted glass over navy, the website's gold
+      glass: { name: 'Glass', blurb: 'frosted panels over navy, TFG gold', swatch: ['#070b18', '#d9b36c', '#eef1fa'] }
     });
   });
 
@@ -314,5 +316,43 @@ describe('first paint', () => {
     const mono = appCss.indexOf("$lib/founderos/theme/monolith.css");
     expect(mono).toBeGreaterThan(appCss.indexOf('bos-variables.css'));
     expect(mono).toBeGreaterThan(appCss.indexOf('variables.css'));
+  });
+});
+
+// Glass (owner request 2026-11-07): dark frosted panels over a navy canvas
+// with a gold and blue glow. Surfaces are see-through and the main chrome
+// blurs what is behind it; menus and dialogs stay near-opaque to read.
+describe('Glass skin', () => {
+  it('is a dark skin', () => {
+    expect(isDarkTheme('glass')).toBe(true);
+  });
+
+  it('has see-through surfaces and a gold accent', () => {
+    const g = block(":root[data-founderos-theme='glass']");
+    for (const t of ['--bn-bg-2', '--bn-surface', '--bn-surface-2', '--bn-surface-3', '--bn-border']) {
+      expect(g[t], t).toMatch(/^rgba\(/);
+    }
+    expect(g['--bn-accent']).toBe('#d9b36c');
+    expect(g['--bn-text']).toBe('#eef1fa');
+  });
+
+  it('frosts the sidebar, top bar, slab and cards', () => {
+    for (const sel of ['.bn-sidebar', '.bn-topbar', '.bn-slab', '.bn-card']) {
+      const re = new RegExp(`:root\\[data-founderos-theme='glass'\\][^{]*\\${sel}[^{]*\\{[^}]*backdrop-filter:\\s*blur`);
+      expect(css, sel).toMatch(re);
+    }
+  });
+
+  it('paints a glowing canvas behind the glass and keeps the document solid', () => {
+    expect(css).toMatch(/:root\[data-founderos-theme='glass'\] body \{[^}]*radial-gradient/);
+    expect(css).toMatch(/:root\[data-founderos-theme='glass'\] \{[^}]*background-color: #060914/);
+  });
+
+  it('keeps menus and dialogs near-opaque so their text stays readable', () => {
+    const o = block(":root[data-founderos-theme='glass'] /* overlays */");
+    for (const t of ['--popover', '--bos-v2-layer-background-modal']) {
+      const a = Number(/rgba\([^)]*,\s*([0-9.]+)\)/.exec(o[t] ?? '')?.[1]);
+      expect(a, t).toBeGreaterThanOrEqual(0.9);
+    }
   });
 });

@@ -1,9 +1,9 @@
 // The operator's skins on the bridge, ported from FounderOS v1 lib/theme.ts: Monolith
-// Signal is the default identity and the other five are full re-skins picked
+// Signal is the default identity and the others are full re-skins picked
 // from the Topbar's theme menu. Production calls Terminal 'dark'; the bridge
 // keeps its own id 'terminal' (pages key colours off it) and reads a stored
 // 'dark' as Terminal. The token blocks live in monolith.css.
-export const FOUNDEROS_THEMES = ['mono', 'mono-light', 'terminal', 'light', 'midnight', 'ember'] as const;
+export const FOUNDEROS_THEMES = ['mono', 'mono-light', 'terminal', 'light', 'midnight', 'ember', 'glass'] as const;
 export type FounderosTheme = (typeof FOUNDEROS_THEMES)[number];
 export const DEFAULT_FOUNDEROS_THEME: FounderosTheme = 'mono';
 export const STORAGE_KEY = 'founderos-theme';
@@ -19,7 +19,8 @@ export const THEME_META: Record<FounderosTheme, { name: string; blurb: string; s
 	midnight: { name: 'Midnight', blurb: 'deep navy, signal blue', swatch: ['#070d1f', '#5ec9f8', '#e8ecf9'] },
 	ember: { name: 'Ember', blurb: 'coal dark, vault orange', swatch: ['#0c0806', '#e35c35', '#f2e9e2'] },
 	mono: { name: 'Monolith', blurb: 'white on black, color = status only', swatch: ['#0a0a0a', '#f2f2f2', '#2fd36f'] },
-	'mono-light': { name: 'Daylight', blurb: 'brain blue on cool white', swatch: ['#f2f6f9', '#4db3de', '#16222c'] }
+	'mono-light': { name: 'Daylight', blurb: 'brain blue on cool white', swatch: ['#f2f6f9', '#4db3de', '#16222c'] },
+	glass: { name: 'Glass', blurb: 'frosted panels over navy, TFG gold', swatch: ['#070b18', '#d9b36c', '#eef1fa'] }
 };
 
 /** Production's id for a skin the bridge names differently. */

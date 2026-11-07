@@ -1,4 +1,4 @@
-import { readFileSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { beforeEach, describe, expect, it } from 'vitest';
 import { FOUNDEROS_THEMES, FOUNDEROS_THEME_INIT_SCRIPT, DEFAULT_FOUNDEROS_THEME, STORAGE_KEY, THEME_META, applyFounderosTheme, isDarkTheme, readStoredTheme } from './theme';
@@ -18,7 +18,7 @@ describe('the operator theme selection', () => {
   // FounderOS v1 lib/theme.ts THEMES, in its order. Its 'dark' (Terminal) keeps
   // the bridge's id 'terminal'; every other id is production's.
   it("offers every production skin, in production's order, and ignores unknown stored values", () => {
-    expect(FOUNDEROS_THEMES).toEqual(['mono', 'mono-light', 'terminal', 'light', 'midnight', 'ember', 'glass']);
+    expect(FOUNDEROS_THEMES).toEqual(['mono', 'mono-light', 'terminal', 'light', 'midnight', 'ember', 'glass', 'glass-light']);
     localStorage.setItem(STORAGE_KEY, 'neon');
     expect(readStoredTheme()).toBe('mono');
     for (const t of FOUNDEROS_THEMES) {
@@ -42,7 +42,8 @@ describe('the operator theme selection', () => {
       // G-Brain is retired on the bridge; the blurb names the colour, not the product
       'mono-light': { name: 'Daylight', blurb: 'brain blue on cool white', swatch: ['#f2f6f9', '#4db3de', '#16222c'] },
       // TFG's own skin (2026-11-07): frosted glass over navy, the website's gold
-      glass: { name: 'Glass', blurb: 'frosted panels over navy, TFG gold', swatch: ['#070b18', '#d9b36c', '#eef1fa'] }
+      glass: { name: 'Glass', blurb: 'frosted panels over dark greenery, TFG gold', swatch: ['#061a10', '#d9b36c', '#eef1fa'] },
+      'glass-light': { name: 'Glass Light', blurb: 'milky glass over sunlit leaves', swatch: ['#e8efe4', '#a0732a', '#10241a'] }
     });
   });
 
@@ -56,7 +57,7 @@ describe('the operator theme selection', () => {
   // BusinessOS components under /os follow `.dark`; a light skin must drop it
   // or they paint dark panels on Daylight's white canvas.
   it('light skins (Daylight, Clay) leave the document light', () => {
-    expect(FOUNDEROS_THEMES.filter((t) => !isDarkTheme(t))).toEqual(['mono-light', 'light']);
+    expect(FOUNDEROS_THEMES.filter((t) => !isDarkTheme(t))).toEqual(['mono-light', 'light', 'glass-light']);
     document.documentElement.classList.add('dark');
     applyFounderosTheme('mono-light');
     expect(document.documentElement.getAttribute('data-founderos-theme')).toBe('mono-light');
@@ -344,12 +345,47 @@ describe('Glass skin', () => {
   });
 
   it('paints a glowing canvas behind the glass and keeps the document solid', () => {
-    expect(css).toMatch(/:root\[data-founderos-theme='glass'\] body \{[^}]*radial-gradient/);
-    expect(css).toMatch(/:root\[data-founderos-theme='glass'\] \{[^}]*background-color: #060914/);
+    expect(css).toMatch(/:root\[data-founderos-theme='glass'\] body \{[^}]*url\('\/founderos\/greenery-dark\.svg'\)/);
+    expect(css).toMatch(/:root\[data-founderos-theme='glass'\] \{[^}]*background-color: #03120b/);
+    expect(existsSync(resolve(__dirname, '../../../../static/founderos/greenery-dark.svg'))).toBe(true);
   });
 
   it('keeps menus and dialogs near-opaque so their text stays readable', () => {
     const o = block(":root[data-founderos-theme='glass'] /* overlays */");
+    for (const t of ['--popover', '--bos-v2-layer-background-modal']) {
+      const a = Number(/rgba\([^)]*,\s*([0-9.]+)\)/.exec(o[t] ?? '')?.[1]);
+      expect(a, t).toBeGreaterThanOrEqual(0.9);
+    }
+  });
+});
+
+// Glass Light (owner, 7 Nov 2026): milky white glass over a sunlit version of
+// the same greenery, dark text, bronze-gold accent.
+describe('Glass Light skin', () => {
+  it('is a light skin', () => {
+    expect(isDarkTheme('glass-light')).toBe(false);
+  });
+
+  it('has see-through white surfaces and dark text', () => {
+    const g = block(":root[data-founderos-theme='glass-light']");
+    for (const t of ['--bn-bg-2', '--bn-surface', '--bn-surface-2']) {
+      expect(g[t], t).toMatch(/^rgba\(255, 255, 255,/);
+    }
+    expect(g['--bn-text']).toBe('#10241a');
+    expect(g['--bn-accent']).toBe('#a0732a');
+  });
+
+  it('frosts the same chrome and sits on the sunlit greenery', () => {
+    for (const sel of ['.bn-sidebar', '.bn-topbar', '.bn-slab', '.bn-card']) {
+      const re = new RegExp(`:root\\[data-founderos-theme='glass-light'\\][^{]*\\${sel}[^{]*\\{[^}]*backdrop-filter:\\s*blur`);
+      expect(css, sel).toMatch(re);
+    }
+    expect(css).toMatch(/:root\[data-founderos-theme='glass-light'\] body \{[^}]*url\('\/founderos\/greenery-light\.svg'\)/);
+    expect(existsSync(resolve(__dirname, '../../../../static/founderos/greenery-light.svg'))).toBe(true);
+  });
+
+  it('keeps menus and dialogs near-opaque', () => {
+    const o = block(":root[data-founderos-theme='glass-light'] /* overlays */");
     for (const t of ['--popover', '--bos-v2-layer-background-modal']) {
       const a = Number(/rgba\([^)]*,\s*([0-9.]+)\)/.exec(o[t] ?? '')?.[1]);
       expect(a, t).toBeGreaterThanOrEqual(0.9);

@@ -151,7 +151,7 @@ describe('Topbar: Conductor button and theme toggle (spec 6.20)', () => {
 		const menu = screen.getByRole('menu');
 		expect(menu.querySelector('[data-part="menu-title"]')!.textContent).toBe('Theme');
 		const items = screen.getAllByRole('menuitemradio');
-		expect(items.map((i) => i.querySelector('[data-part="name"]')!.textContent)).toEqual(['Monolith', 'Daylight', 'Terminal', 'Clay', 'Midnight', 'Ember', 'Glass']);
+		expect(items.map((i) => i.querySelector('[data-part="name"]')!.textContent)).toEqual(['Monolith', 'Daylight', 'Terminal', 'Clay', 'Midnight', 'Ember', 'Glass', 'Glass Light']);
 		expect(items[0].getAttribute('aria-checked')).toBe('true');
 		expect(items[0].querySelectorAll('[data-part="swatch"] > span')).toHaveLength(3);
 		expect(items[3].textContent).toContain('warm paper with clay orange');

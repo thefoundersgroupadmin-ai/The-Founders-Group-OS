@@ -184,13 +184,14 @@
   --bn-brain-3: #d98d62;
 }
 
-/* Glass (owner request 2026-11-07): TFG's own skin. Dark frosted panels over a
-   navy canvas with a soft gold and blue glow, gold accent from the website.
-   Surfaces are translucent; the frosting and the canvas live at the end of
-   this file, and menus/dialogs are made near-opaque there so they read. */
+/* Glass skins (owner request 2026-11-07): TFG's own. Frosted panels over a
+   greenery backdrop (static/founderos/greenery-*.svg). Glass is dark with the
+   website's gold; Glass Light is milky white glass with dark text. Surfaces
+   are translucent; the frosting and backdrop live at the end of this file,
+   where menus/dialogs are also made near-opaque so they read. */
 :root[data-founderos-theme='glass'] {
   color-scheme: dark;
-  --bn-bg: rgba(9, 13, 28, 0.55);
+  --bn-bg: rgba(4, 16, 10, 0.55);
   --bn-bg-2: rgba(255, 255, 255, 0.035);
   --bn-surface: rgba(255, 255, 255, 0.055);
   --bn-surface-2: rgba(255, 255, 255, 0.085);
@@ -198,8 +199,8 @@
   --bn-border: rgba(255, 255, 255, 0.1);
   --bn-border-strong: rgba(255, 255, 255, 0.2);
   --bn-text: #eef1fa;
-  --bn-text-2: #a9b2cc;
-  --bn-text-3: #737d9c;
+  --bn-text-2: #b0bdb4;
+  --bn-text-3: #7a8a80;
   --bn-accent: #d9b36c;
   --bn-accent-2: #c49a4f;
   --bn-accent-ink: #1a1306;
@@ -213,8 +214,36 @@
   --bn-brain-1: #8b7cff;
   --bn-brain-2: #5ec9f8;
   --bn-brain-3: #d9b36c;
-  --bn-glass-blur: blur(22px) saturate(150%);
   --bn-glass-edge: inset 0 1px 0 rgba(255, 255, 255, 0.07);
+}
+
+:root[data-founderos-theme='glass-light'] {
+  color-scheme: light;
+  --bn-bg: rgba(255, 255, 255, 0.45);
+  --bn-bg-2: rgba(255, 255, 255, 0.4);
+  --bn-surface: rgba(255, 255, 255, 0.55);
+  --bn-surface-2: rgba(255, 255, 255, 0.72);
+  --bn-surface-3: rgba(255, 255, 255, 0.85);
+  --bn-border: rgba(16, 40, 26, 0.12);
+  --bn-border-strong: rgba(16, 40, 26, 0.24);
+  --bn-text: #10241a;
+  --bn-text-2: #3d5546;
+  --bn-text-3: #5c7365;
+  --bn-accent: #a0732a;
+  --bn-accent-2: #87601f;
+  --bn-accent-ink: #fffaf0;
+  --bn-accent-soft: rgba(160, 115, 42, 0.12);
+  --bn-accent-line: rgba(160, 115, 42, 0.35);
+  --bn-ok: #17824a;
+  --bn-warn: #a8670f;
+  --bn-err: #c4372b;
+  --bn-grid: transparent;
+  --bn-hairline: rgba(16, 40, 26, 0.07);
+  --bn-brain-1: #6d5cf0;
+  --bn-brain-2: #2b8fd8;
+  --bn-brain-3: #a0732a;
+  --bn-glass-edge: inset 0 1px 0 rgba(255, 255, 255, 0.75);
+  --bn-insight-ink: #10241a;
 }
 
 :root[data-founderos-theme] {
@@ -354,6 +383,7 @@
 :root[data-founderos-theme='light'] .bn-kg,
 :root[data-founderos-theme='midnight'] .bn-kg,
 :root[data-founderos-theme='glass'] .bn-kg,
+:root[data-founderos-theme='glass-light'] .bn-kg,
 :root[data-founderos-theme='ember'] .bn-kg {
   --bn-kg-tool: var(--bn-brain-2);
 }
@@ -378,7 +408,8 @@
   --fn-hot: #1d8fd6; --fn-warm: #2f5fa8; --fn-cold: #6b83a3;
   --fn-s0: #1d8fd6; --fn-s1: #7a5cf0; --fn-s2: #a98f1c; --fn-s3: #0f9c8a; --fn-s4: #0b8a52; --fn-s5: #c04a8a; --fn-s6: #b5651d;
 }
-:root[data-founderos-theme='mono-light'] .bn-fn {
+:root[data-founderos-theme='mono-light'] .bn-fn,
+:root[data-founderos-theme='glass-light'] .bn-fn {
   --fn-hot: #d92d20; --fn-warm: #b7791f; --fn-cold: #6b83a3;
   --fn-s0: #4db3de; --fn-s1: #6d5cf0; --fn-s2: #b7791f; --fn-s3: #0f9c8a; --fn-s4: #17924e; --fn-s5: #c04a8a; --fn-s6: #7a828c;
 }
@@ -393,57 +424,88 @@
   filter: brightness(0);
 }
 
-/* ── Glass: the canvas and the frosting ───────────────────────────────────
-   The document stays solid navy (no white flash behind translucent layers);
-   the body carries the glow, fixed so it does not scroll away. */
+/* ── Glass skins: the backdrop and the frosting ────────────────────────────
+   The document stays solid (no flash behind translucent layers); the body
+   carries the greenery, fixed so it does not scroll away. */
 :root[data-founderos-theme='glass'] {
-  background-color: #060914;
+  background-color: #03120b;
+}
+:root[data-founderos-theme='glass-light'] {
+  background-color: #e8efe4;
 }
 :root[data-founderos-theme='glass'] body {
-  background-color: #060914;
-  background-image:
-    radial-gradient(1000px 700px at 85% -10%, rgba(217, 179, 108, 0.26), transparent 62%),
-    radial-gradient(900px 800px at -5% 105%, rgba(94, 121, 248, 0.3), transparent 62%),
-    radial-gradient(700px 600px at 45% 55%, rgba(139, 124, 255, 0.14), transparent 70%);
-  background-attachment: fixed;
+  background: #03120b url('/founderos/greenery-dark.svg') center / cover fixed no-repeat;
 }
-:root[data-founderos-theme='glass'] .bn-os {
+:root[data-founderos-theme='glass-light'] body {
+  background: #e8efe4 url('/founderos/greenery-light.svg') center / cover fixed no-repeat;
+}
+:root[data-founderos-theme='glass'] .bn-os,
+:root[data-founderos-theme='glass-light'] .bn-os {
   background: transparent;
 }
 /* the frosted chrome and surfaces */
 :root[data-founderos-theme='glass'] .bn-sidebar,
 :root[data-founderos-theme='glass'] .bn-topbar,
 :root[data-founderos-theme='glass'] .bn-slab,
-:root[data-founderos-theme='glass'] .bn-card {
-  -webkit-backdrop-filter: var(--bn-glass-blur);
+:root[data-founderos-theme='glass'] .bn-card,
+:root[data-founderos-theme='glass-light'] .bn-sidebar,
+:root[data-founderos-theme='glass-light'] .bn-topbar,
+:root[data-founderos-theme='glass-light'] .bn-slab,
+:root[data-founderos-theme='glass-light'] .bn-card {
+  -webkit-backdrop-filter: blur(22px) saturate(150%);
   backdrop-filter: blur(22px) saturate(150%);
 }
 :root[data-founderos-theme='glass'] .bn-sidebar {
-  background: rgba(10, 14, 30, 0.45);
+  background: rgba(4, 14, 9, 0.5);
 }
 :root[data-founderos-theme='glass'] .bn-topbar {
-  background: rgba(10, 14, 30, 0.4);
+  background: rgba(4, 14, 9, 0.42);
 }
 :root[data-founderos-theme='glass'] .bn-slab {
-  box-shadow: var(--bn-glass-edge), 0 30px 80px -30px rgba(0, 0, 0, 0.7);
+  background: rgba(6, 20, 13, 0.38);
+}
+:root[data-founderos-theme='glass-light'] .bn-sidebar {
+  background: rgba(255, 255, 255, 0.5);
+}
+:root[data-founderos-theme='glass-light'] .bn-topbar {
+  background: rgba(255, 255, 255, 0.45);
+}
+:root[data-founderos-theme='glass-light'] .bn-slab {
+  background: rgba(255, 255, 255, 0.38);
+  border-color: rgba(255, 255, 255, 0.7);
+}
+:root[data-founderos-theme='glass'] .bn-slab,
+:root[data-founderos-theme='glass-light'] .bn-slab {
+  box-shadow: var(--bn-glass-edge), 0 30px 80px -30px rgba(0, 0, 0, 0.55);
 }
 :root[data-founderos-theme='glass'] .bn-card,
-:root[data-founderos-theme='glass'] .bn-slab [data-part='card'] {
+:root[data-founderos-theme='glass'] .bn-slab [data-part='card'],
+:root[data-founderos-theme='glass-light'] .bn-card,
+:root[data-founderos-theme='glass-light'] .bn-slab [data-part='card'] {
   box-shadow: var(--bn-glass-edge);
 }
 /* a card inside the slab is already over frosted glass: tint only, no second
    blur (nested backdrop filters cost a lot of paint for no visible gain) */
-:root[data-founderos-theme='glass'] .bn-slab .bn-card {
+:root[data-founderos-theme='glass'] .bn-slab .bn-card,
+:root[data-founderos-theme='glass-light'] .bn-slab .bn-card {
   -webkit-backdrop-filter: none;
   backdrop-filter: none;
 }
 /* overlays: menus, popovers and dialogs sit over busy content, so they stay
-   near-opaque, still frosted at the edges */
+   near-opaque */
 :root[data-founderos-theme='glass'] /* overlays */ {
-  --popover: rgba(14, 19, 38, 0.94);
-  --bos-v2-layer-background-modal: rgba(14, 19, 38, 0.94);
+  --popover: rgba(8, 22, 15, 0.94);
+  --bos-v2-layer-background-modal: rgba(8, 22, 15, 0.94);
 }
-:root[data-founderos-theme='glass'] ::-webkit-scrollbar-thumb {
+:root[data-founderos-theme='glass-light'] /* overlays */ {
+  --popover: rgba(250, 252, 248, 0.95);
+  --bos-v2-layer-background-modal: rgba(250, 252, 248, 0.95);
+}
+:root[data-founderos-theme='glass'] ::-webkit-scrollbar-thumb,
+:root[data-founderos-theme='glass-light'] ::-webkit-scrollbar-thumb {
   border-color: transparent;
   background-clip: padding-box;
+}
+:root[data-founderos-theme='glass-light'] .bn-mark-adaptive {
+  filter: brightness(0);
 }

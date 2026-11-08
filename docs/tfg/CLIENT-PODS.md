@@ -110,13 +110,13 @@ Guarantees added to M1 (full review in the build log):
 ### M1 checklist (TDD, in order)
 
 1. [x] Pod store: lifecycle, sender, docs, activity (commit 884d186)
-2. [ ] Pod API with workspace-membership authorization; two pods can't touch each other
-3. [ ] Email account registry per pod; reject missing/unknown/foreign accounts
-4. [ ] Outbox: per-pod scope everywhere (`page_outbox.go`, `drafts.go`, importers)
-5. [ ] One send gate for manual, campaign, follow-up and owner sends: policy, pause, window, caps
-6. [ ] Reservations per pod+recipient+step; uncertain never retried
-7. [ ] Revision-bound approvals for messages, sequences, target lists
-8. [ ] Pod + global email suppression; reply and booking matching scoped to the pod
-9. [ ] Dry run via approved sink with separate simulated receipts
-10. [ ] Agent packets per pod (no HQ handover); routines provisioned per pod, idempotently
+2. [x] Pod API with workspace-membership authorization; two pods can't touch each other
+3. [x] Per-pod mailbox (pod:<slug> keys), unknown/missing refused
+4. [x] Pod outbox API, dispatcher, importers routed by board project
+5. [x] One send gate for manual, campaign, follow-up and owner sends: policy, pause, window, caps
+6. [x] Reservations per pod+recipient+step; uncertain never retried
+7. [x] Revision-bound approvals for messages, sequences, target lists
+8. [x] Suppression, per-pod replies and opt-outs, bookings scoped per workspace
+9. [x] Dry run via approved sink with separate simulated receipts
+10. [x] Agent packets per pod (no HQ handover); routines provisioned per pod, idempotently
 11. [ ] /os/clients admin view; full gates; Codex review

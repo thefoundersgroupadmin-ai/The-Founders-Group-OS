@@ -3,6 +3,7 @@ package outbox
 import (
 	"context"
 	"errors"
+	"fmt"
 	"testing"
 	"time"
 
@@ -23,13 +24,14 @@ func TestAPersonGetsOneFirstEmailAndAtMostTwoSpacedFollowUps(t *testing.T) {
 	}
 	for i, id := range []string{"s-0", "s-1", "s-2", "s-3"} {
 		file(id, "priya@brightvale.example")
+		step := Content{Subject: podReviewed.Subject, Body: podReviewed.Body + fmt.Sprintf(" (step %d)", i)}
 		if i > 0 && i < 3 {
-			if _, err := Approve(ctx, pool, "client-bv", id, podReviewed, send); !errors.Is(err, ErrHeld) {
+			if _, err := Approve(ctx, pool, "client-bv", id, step, send); !errors.Is(err, ErrHeld) {
 				t.Fatalf("%s: sent too soon after the last email: %v", id, err)
 			}
 			age(3)
 		}
-		_, err := Approve(ctx, pool, "client-bv", id, podReviewed, send)
+		_, err := Approve(ctx, pool, "client-bv", id, step, send)
 		if i < 3 && err != nil {
 			t.Fatalf("%s: %v", id, err)
 		}
@@ -77,11 +79,12 @@ func TestAnApprovedConversationReplyGoesOutAfterTheProspectWroteBack(t *testing.
 		t.Fatal(err)
 	}
 	file("r-1", "priya@brightvale.example")
-	if _, err := pool.Exec(ctx, `UPDATE founderos_outbox SET sequence_key = 'reply', contact_id = 'ct-r' WHERE id = 'r-1'`); err != nil {
+	if _, err := pool.Exec(ctx, `UPDATE founderos_outbox SET sequence_key = 'reply', contact_id = 'ct-r' WHERE id = 'r-1';
+		INSERT INTO founderos_pod_conversations (issue_id, workspace_id, contact_id) SELECT 'iss-r', workspace_id, 'ct-r' FROM founderos_client_pods`); err != nil {
 		t.Fatal(err)
 	}
 	got, send := recorder()
-	if _, err := Approve(ctx, pool, "client-bv", "r-1", podReviewed, send); err != nil || len(*got) != 1 {
+	if _, err := Approve(ctx, pool, "client-bv", "r-1", Content{Subject: "Re: stock counts", Body: "Wednesday 11:00 works. Sam"}, send); err != nil || len(*got) != 1 {
 		t.Fatalf("approved reply blocked: %v", err)
 	}
 }

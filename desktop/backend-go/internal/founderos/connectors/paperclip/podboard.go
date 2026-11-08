@@ -95,8 +95,27 @@ func (b PodBoard) UpdateRoutineFields(ctx context.Context, id, projectID, agentI
 	return err
 }
 
-func (b PodBoard) AddScheduleTrigger(ctx context.Context, routineID, cron, timezone string) error {
-	_, err := b.C.send(ctx, "paperclip.pod.trigger", http.MethodPost, "/api/routines/"+routineID+"/triggers",
+func (b PodBoard) AddScheduleTrigger(ctx context.Context, routineID, cron, timezone string) (string, error) {
+	out, err := b.C.send(ctx, "paperclip.pod.trigger", http.MethodPost, "/api/routines/"+routineID+"/triggers",
 		map[string]any{"kind": "schedule", "cronExpression": cron, "timezone": timezone})
+	if err != nil {
+		return "", err
+	}
+	if id := idOf(out); id != "" {
+		return id, nil
+	}
+	if m, ok := out.(map[string]any); ok {
+		if tr, ok := m["trigger"].(map[string]any); ok {
+			if id, ok := tr["id"].(string); ok {
+				return id, nil
+			}
+		}
+	}
+	return "", nil
+}
+
+func (b PodBoard) UpdateScheduleTrigger(ctx context.Context, triggerID, cron, timezone string) error {
+	_, err := b.C.send(ctx, "paperclip.pod.trigger", http.MethodPatch, "/api/routine-triggers/"+triggerID,
+		map[string]any{"cronExpression": cron, "timezone": timezone})
 	return err
 }

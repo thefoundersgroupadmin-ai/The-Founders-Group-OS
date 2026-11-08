@@ -26,8 +26,11 @@ func (p podBoard) CreateRoutine(ctx context.Context, r pods.BoardRoutine) (strin
 func (p podBoard) UpdateRoutine(ctx context.Context, id string, r pods.BoardRoutine) error {
 	return p.b.UpdateRoutineFields(ctx, id, r.ProjectID, r.AssigneeAgentID, r.Title, r.Description, r.Status)
 }
-func (p podBoard) AddScheduleTrigger(ctx context.Context, routineID, cron, tz string) error {
+func (p podBoard) AddScheduleTrigger(ctx context.Context, routineID, cron, tz string) (string, error) {
 	return p.b.AddScheduleTrigger(ctx, routineID, cron, tz)
+}
+func (p podBoard) UpdateScheduleTrigger(ctx context.Context, triggerID, cron, tz string) error {
+	return p.b.UpdateScheduleTrigger(ctx, triggerID, cron, tz)
 }
 
 // podBoardFor is swapped in tests.

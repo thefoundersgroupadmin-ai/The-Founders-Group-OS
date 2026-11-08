@@ -25,7 +25,8 @@ type Board interface {
 	PutInstructions(ctx context.Context, agentID, content string) error
 	CreateRoutine(ctx context.Context, r BoardRoutine) (string, error)
 	UpdateRoutine(ctx context.Context, id string, r BoardRoutine) error
-	AddScheduleTrigger(ctx context.Context, routineID, cron, timezone string) error
+	AddScheduleTrigger(ctx context.Context, routineID, cron, timezone string) (string, error)
+	UpdateScheduleTrigger(ctx context.Context, triggerID, cron, timezone string) error
 }
 
 // BoardRoutine is one routine as provisioning writes it.
@@ -38,6 +39,7 @@ type Binding struct {
 	ProjectID, AgentID, ResearchRoutineID, OutreachRoutineID, BriefHash string
 	RoutinesActive                                                      bool
 	ResearchScheduled, OutreachScheduled                                bool
+	ResearchTriggerID, OutreachTriggerID, TriggerSignature              string
 }
 
 func (b Binding) withHash(h string) Binding { b.BriefHash = h; return b }
@@ -163,21 +165,24 @@ func (s *Store) Provision(ctx context.Context, b Board, slug string) (Binding, e
 	}
 	var bind Binding
 	err = s.Pool.QueryRow(ctx, `SELECT project_id, agent_id, research_routine_id, outreach_routine_id, brief_hash, routines_active,
-		research_trigger_ok, outreach_trigger_ok
+		research_trigger_ok, outreach_trigger_ok, research_trigger_id, outreach_trigger_id, trigger_signature
 		FROM founderos_pod_agents WHERE pod_id = $1`, p.ID).Scan(&bind.ProjectID, &bind.AgentID, &bind.ResearchRoutineID,
-		&bind.OutreachRoutineID, &bind.BriefHash, &bind.RoutinesActive, &bind.ResearchScheduled, &bind.OutreachScheduled)
+		&bind.OutreachRoutineID, &bind.BriefHash, &bind.RoutinesActive, &bind.ResearchScheduled, &bind.OutreachScheduled,
+		&bind.ResearchTriggerID, &bind.OutreachTriggerID, &bind.TriggerSignature)
 	if err != nil && !errors.Is(err, pgx.ErrNoRows) {
 		return bind, err
 	}
 	save := func() error {
 		_, err := s.Pool.Exec(ctx, `INSERT INTO founderos_pod_agents (pod_id, project_id, agent_id, research_routine_id,
-			outreach_routine_id, brief_hash, routines_active, research_trigger_ok, outreach_trigger_ok, synced_at)
-			VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, now())
+			outreach_routine_id, brief_hash, routines_active, research_trigger_ok, outreach_trigger_ok,
+			research_trigger_id, outreach_trigger_id, trigger_signature, synced_at)
+			VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, now())
 			ON CONFLICT (pod_id) DO UPDATE SET project_id = $2, agent_id = $3, research_routine_id = $4,
 			outreach_routine_id = $5, brief_hash = $6, routines_active = $7, research_trigger_ok = $8,
-			outreach_trigger_ok = $9, synced_at = now()`,
+			outreach_trigger_ok = $9, research_trigger_id = $10, outreach_trigger_id = $11, trigger_signature = $12,
+			synced_at = now()`,
 			p.ID, bind.ProjectID, bind.AgentID, bind.ResearchRoutineID, bind.OutreachRoutineID, bind.BriefHash, bind.RoutinesActive,
-			bind.ResearchScheduled, bind.OutreachScheduled)
+			bind.ResearchScheduled, bind.OutreachScheduled, bind.ResearchTriggerID, bind.OutreachTriggerID, bind.TriggerSignature)
 		return err
 	}
 	instructions := Instructions(p, docs)
@@ -209,13 +214,15 @@ func (s *Store) Provision(ctx context.Context, b Board, slug string) (Binding, e
 	routines := []struct {
 		id        *string
 		scheduled *bool
+		trigger   *string
 		title     string
 		brief     string
 		cron      string
 	}{
-		{&bind.ResearchRoutineID, &bind.ResearchScheduled, p.ClientName + ": daily prospect research", researchBrief(p, docs), "0 7 * * " + cronDays(p)},
-		{&bind.OutreachRoutineID, &bind.OutreachScheduled, p.ClientName + ": daily outreach", outreachBrief(p, docs), "0 8 * * " + cronDays(p)},
+		{&bind.ResearchRoutineID, &bind.ResearchScheduled, &bind.ResearchTriggerID, p.ClientName + ": daily prospect research", researchBrief(p, docs), "0 7 * * " + cronDays(p)},
+		{&bind.OutreachRoutineID, &bind.OutreachScheduled, &bind.OutreachTriggerID, p.ClientName + ": daily outreach", outreachBrief(p, docs), "0 8 * * " + cronDays(p)},
 	}
+	signature := cronDays(p) + "@" + p.Timezone
 	for _, r := range routines {
 		br := BoardRoutine{ProjectID: bind.ProjectID, AssigneeAgentID: bind.AgentID, Title: r.title, Description: r.brief, Status: status}
 		if *r.id == "" {
@@ -230,15 +237,21 @@ func (s *Store) Provision(ctx context.Context, b Board, slug string) (Binding, e
 		}
 		// Codex M1 review #10: a routine without its schedule is repaired here.
 		if !*r.scheduled {
-			if err := b.AddScheduleTrigger(ctx, *r.id, r.cron, p.Timezone); err != nil {
+			if *r.trigger, err = b.AddScheduleTrigger(ctx, *r.id, r.cron, p.Timezone); err != nil {
 				return bind, err
 			}
 			*r.scheduled = true
 			if err := save(); err != nil {
 				return bind, err
 			}
+		} else if bind.TriggerSignature != "" && bind.TriggerSignature != signature && *r.trigger != "" {
+			// Timezone or weekends changed: move the existing schedule.
+			if err := b.UpdateScheduleTrigger(ctx, *r.trigger, r.cron, p.Timezone); err != nil {
+				return bind, err
+			}
 		}
 	}
+	bind.TriggerSignature = signature
 	bind.BriefHash = hashOf(instructions, routines[0].brief, routines[1].brief, status)
 	bind.RoutinesActive = active
 	if err := save(); err != nil {
@@ -268,9 +281,10 @@ func (s *Store) HasAgent(ctx context.Context, slug string) (bool, error) {
 func (s *Store) GetBinding(ctx context.Context, podID string) (Binding, bool, error) {
 	var b Binding
 	err := s.Pool.QueryRow(ctx, `SELECT project_id, agent_id, research_routine_id, outreach_routine_id, brief_hash, routines_active,
-		research_trigger_ok, outreach_trigger_ok
+		research_trigger_ok, outreach_trigger_ok, research_trigger_id, outreach_trigger_id, trigger_signature
 		FROM founderos_pod_agents WHERE pod_id = $1`, podID).Scan(&b.ProjectID, &b.AgentID, &b.ResearchRoutineID,
-		&b.OutreachRoutineID, &b.BriefHash, &b.RoutinesActive, &b.ResearchScheduled, &b.OutreachScheduled)
+		&b.OutreachRoutineID, &b.BriefHash, &b.RoutinesActive, &b.ResearchScheduled, &b.OutreachScheduled,
+		&b.ResearchTriggerID, &b.OutreachTriggerID, &b.TriggerSignature)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return b, false, nil
 	}

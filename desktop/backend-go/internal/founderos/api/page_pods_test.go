@@ -246,7 +246,10 @@ func (b *recBoard) UpdateRoutine(_ context.Context, id string, r pods.BoardRouti
 	b.routines[id] = r
 	return nil
 }
-func (b *recBoard) AddScheduleTrigger(context.Context, string, string, string) error { return nil }
+func (b *recBoard) AddScheduleTrigger(context.Context, string, string, string) (string, error) {
+	return "tr", nil
+}
+func (b *recBoard) UpdateScheduleTrigger(context.Context, string, string, string) error { return nil }
 
 func TestOwnerProvisionsAPodsAISDRAndPausingReachesTheBoard(t *testing.T) {
 	t.Setenv("FOUNDEROS_OWNER_EMAIL", "owner@tfg.example")

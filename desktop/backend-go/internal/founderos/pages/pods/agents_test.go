@@ -16,12 +16,13 @@ type fakeBoard struct {
 	instructions map[string]string // agent id → AGENTS.md
 	routines     map[string]BoardRoutine
 	triggers     map[string][]string // routine id → cron@tz
+	triggerOf    map[string]string   // trigger id → routine id
 	n            int
 }
 
 func newFakeBoard() *fakeBoard {
 	return &fakeBoard{projects: map[string]string{}, agents: map[string]string{}, instructions: map[string]string{},
-		routines: map[string]BoardRoutine{}, triggers: map[string][]string{}}
+		routines: map[string]BoardRoutine{}, triggers: map[string][]string{}, triggerOf: map[string]string{}}
 }
 
 func (b *fakeBoard) id(p string) string { b.n++; return p + "-" + string(rune('a'+b.n)) }
@@ -59,8 +60,15 @@ func (b *fakeBoard) UpdateRoutine(_ context.Context, id string, r BoardRoutine) 
 	return nil
 }
 
-func (b *fakeBoard) AddScheduleTrigger(_ context.Context, routineID, cron, tz string) error {
+func (b *fakeBoard) AddScheduleTrigger(_ context.Context, routineID, cron, tz string) (string, error) {
 	b.triggers[routineID] = append(b.triggers[routineID], cron+"@"+tz)
+	id := b.id("trigger")
+	b.triggerOf[id] = routineID
+	return id, nil
+}
+
+func (b *fakeBoard) UpdateScheduleTrigger(_ context.Context, triggerID, cron, tz string) error {
+	b.triggers[b.triggerOf[triggerID]] = []string{cron + "@" + tz}
 	return nil
 }
 
@@ -166,10 +174,10 @@ type flakyTriggers struct {
 	fail int
 }
 
-func (f *flakyTriggers) AddScheduleTrigger(ctx context.Context, id, cron, tz string) error {
+func (f *flakyTriggers) AddScheduleTrigger(ctx context.Context, id, cron, tz string) (string, error) {
 	if f.fail > 0 {
 		f.fail--
-		return errors.New("board timeout")
+		return "", errors.New("board timeout")
 	}
 	return f.fakeBoard.AddScheduleTrigger(ctx, id, cron, tz)
 }
@@ -193,5 +201,28 @@ func TestAMissingScheduleIsRepairedOnTheNextSync(t *testing.T) {
 	}
 	if _, err := s.Provision(ctx, b, p.Slug); err != nil || len(b.triggers[bind.ResearchRoutineID]) != 1 {
 		t.Fatalf("schedule added twice: %v %v", b.triggers, err)
+	}
+}
+
+// Codex fix review #10: schedules follow the pod's timezone and weekends.
+func TestSchedulesFollowTimezoneAndWeekendChanges(t *testing.T) {
+	s := &Store{Pool: catalogdb.TestDB(t)}
+	ctx := context.Background()
+	b := newFakeBoard()
+	p := readyPod(t, s, "Brightvale")
+	bind, err := s.Provision(ctx, b, p.Slug)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := s.UpdateSettings(ctx, p.Slug, Settings{ApprovalPolicy: "client_approves_each", Timezone: "America/New_York",
+		SendWindowStart: 9, SendWindowEnd: 17, SendWeekends: true, FirstEmailDailyCap: 20, FollowUpDailyCap: 40}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.Provision(ctx, b, p.Slug); err != nil {
+		t.Fatal(err)
+	}
+	got := b.triggers[bind.ResearchRoutineID]
+	if len(got) != 1 || got[0] != "0 7 * * *@America/New_York" {
+		t.Fatalf("research schedule after change: %v", got)
 	}
 }

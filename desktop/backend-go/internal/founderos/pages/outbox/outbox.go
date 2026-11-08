@@ -65,6 +65,8 @@ type Item struct {
 	RequireAccount bool `json:"-"`
 	// ViaPodGate marks a send the pod gate cleared (pod mailboxes need it).
 	ViaPodGate bool `json:"-"`
+	// ExpectFrom is the pod's sender; the mailbox must send as it.
+	ExpectFrom string `json:"-"`
 }
 
 // Page is the /os/outbox model: everything needing a decision, then the
@@ -110,7 +112,7 @@ func workspaceID(ctx context.Context, pool *pgxpool.Pool, slug string) (string, 
 // ReconcileStale marks 'sending' claims older than StaleAfter as uncertain:
 // the send was interrupted and may or may not have been delivered.
 func ReconcileStale(ctx context.Context, pool *pgxpool.Pool, workspaceID string, now time.Time) error {
-	_, err := pool.Exec(ctx, `UPDATE founderos_outbox SET status = 'uncertain',
+	_, err := pool.Exec(ctx, `UPDATE founderos_outbox SET status = 'uncertain', maybe_delivered = true,
 		error = 'Interrupted while sending; delivery unknown. Check the sending log before retrying.'
 		WHERE workspace_id = $1 AND status = 'sending' AND decided_at < $2`, workspaceID, now.Add(-StaleAfter))
 	return err
@@ -234,8 +236,10 @@ func Reject(ctx context.Context, pool *pgxpool.Pool, workspaceSlug, id string) (
 		return nil, notPendingOrMissing(ctx, pool, ws, id)
 	}
 	if err == nil {
-		// A rejected row frees its place in a pod's sequence.
-		_, err = pool.Exec(ctx, `DELETE FROM founderos_send_steps WHERE outbox_id = $1`, id)
+		// A rejected row frees its place in a pod's sequence, unless it may
+		// have been delivered (it was ever uncertain).
+		_, err = pool.Exec(ctx, `DELETE FROM founderos_send_steps s USING founderos_outbox o
+			WHERE s.outbox_id = $1 AND o.id = s.outbox_id AND NOT o.maybe_delivered`, id)
 	}
 	return &it, err
 }

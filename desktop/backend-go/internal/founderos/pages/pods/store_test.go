@@ -188,3 +188,37 @@ func TestSettingsAreValidated(t *testing.T) {
 		}
 	}
 }
+
+// Codex fix review: a test run counts toward go-live only if it happened after
+// the latest change to the sender or sending rules.
+func TestAChangeAfterTheTestRunNeedsANewTestRun(t *testing.T) {
+	s := &Store{Pool: catalogdb.TestDB(t)}
+	ctx := context.Background()
+	p := newPod(t, s, "Brightvale")
+	_ = s.SetSender(ctx, p.Slug, Sender{Name: "Sam", Email: "sam@bv.example", AccountID: "pod:" + p.Slug})
+	for _, k := range []string{"icp", "voice"} {
+		_ = s.SetDoc(ctx, p.Slug, k, k)
+		_ = s.ApproveDoc(ctx, p.Slug, k, "client")
+	}
+	if _, err := s.SetStatus(ctx, p.Slug, StatusDryRun, ""); err != nil {
+		t.Fatal(err)
+	}
+	sim := func(id string) {
+		if _, err := s.Pool.Exec(ctx, `INSERT INTO founderos_outbox (id, workspace_id, source, to_address, subject, body, status, sent_at)
+			SELECT $1, workspace_id, 'paperclip', 'a@b.example', 's', 'b', 'simulated', now() FROM founderos_client_pods WHERE slug = $2`, id, p.Slug); err != nil {
+			t.Fatal(err)
+		}
+	}
+	sim("sim-old")
+	if err := s.UpdateSettings(ctx, p.Slug, Settings{ApprovalPolicy: "auto", Timezone: "UTC", SendWindowStart: 9, SendWindowEnd: 17,
+		FirstEmailDailyCap: 10, FollowUpDailyCap: 10}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.SetStatus(ctx, p.Slug, StatusLive, ""); !errors.Is(err, ErrNotReady) {
+		t.Fatalf("went live on a test run older than the settings: %v", err)
+	}
+	sim("sim-new")
+	if _, err := s.SetStatus(ctx, p.Slug, StatusLive, ""); err != nil {
+		t.Fatal(err)
+	}
+}

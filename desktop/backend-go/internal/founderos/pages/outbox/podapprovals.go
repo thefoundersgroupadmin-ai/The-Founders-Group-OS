@@ -49,6 +49,24 @@ func RenderTemplate(tmpl string, fields map[string]string) (string, bool) {
 	return strings.TrimSpace(out), ok
 }
 
+var fieldRe = regexp.MustCompile(`^[\p{L}\p{N}][\p{L}\p{N} &.,'’()\-]{0,59}$`)
+
+// validField reports whether a typed field looks like a name or a company: no
+// sentence punctuation, symbols, links or line breaks that could carry a claim.
+func validField(v string) bool {
+	v = strings.TrimSpace(v)
+	if !fieldRe.MatchString(v) || len(strings.Fields(v)) > 6 || strings.Contains(v, "..") {
+		return false
+	}
+	low := strings.ToLower(v)
+	for _, w := range []string{"http", "www.", "guarantee", "free", "%"} {
+		if strings.Contains(low, w) {
+			return false
+		}
+	}
+	return true
+}
+
 func normalizeSpace(s string) string {
 	lines := strings.Split(strings.ReplaceAll(strings.TrimSpace(s), "\r\n", "\n"), "\n")
 	for i, l := range lines {
@@ -82,14 +100,19 @@ func clientApproval(ctx context.Context, tx pgx.Tx, r *podRules, it Item, c Cont
 		if err == nil {
 			// Codex M1 review #5: filled by the OS from the contact's record and
 			// the pod's sender, then compared exactly.
-			fields := map[string]string{"sender_name": r.SenderName}
+			fields := map[string]string{}
+			if validField(r.SenderName) {
+				fields["sender_name"] = r.SenderName
+			}
 			if it.ContactID != nil {
 				var person, company string
 				_ = tx.QueryRow(ctx, `SELECT coalesce(person, ''), coalesce(company, '') FROM founderos_funnel_contacts
 					WHERE id = $1 AND workspace_id = (SELECT workspace_id FROM founderos_client_pods WHERE id = $2)`,
 					*it.ContactID, r.ID).Scan(&person, &company)
-				fields["company"] = company
-				if f := strings.Fields(person); len(f) > 0 {
+				if validField(company) {
+					fields["company"] = company
+				}
+				if f := strings.Fields(person); len(f) > 0 && validField(f[0]) {
 					fields["first_name"] = f[0]
 				}
 			}

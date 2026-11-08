@@ -46,7 +46,7 @@ func TestPodBoardWritesProjectsRoutinesTriggersAndInstructions(t *testing.T) {
 	if rb["projectId"] != "proj-1" || rb["assigneeAgentId"] != "ag-1" || rb["status"] != "paused" || rb["catchUpPolicy"] != "skip_missed" || rb["concurrencyPolicy"] != "coalesce_if_active" {
 		t.Fatalf("routine body %v", rb)
 	}
-	if err := b.AddScheduleTrigger(ctx, "rt-1", "0 7 * * 1-5", "America/New_York"); err != nil {
+	if _, err := b.AddScheduleTrigger(ctx, "rt-1", "0 7 * * 1-5", "America/New_York"); err != nil {
 		t.Fatal(err)
 	}
 	if tb := bodies["POST /api/routines/rt-1/triggers"]; tb["kind"] != "schedule" || tb["timezone"] != "America/New_York" {

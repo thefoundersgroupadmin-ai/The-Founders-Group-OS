@@ -43,20 +43,22 @@ var (
 	ErrConversationStarted = errors.New("the prospect has replied or booked")
 	// ErrSequenceDone: the first email and two follow-ups already went.
 	ErrSequenceDone = errors.New("sequence finished")
+	// ErrDuplicate: this exact email already went (or may have gone) to them.
+	ErrDuplicate = errors.New("already sent this exact email")
 )
 
 // nowFunc is swapped in tests.
 var nowFunc = time.Now
 
 type podRules struct {
-	ID, Slug, Status, AccountID, Sink, Timezone, Policy, SenderName string
-	Start, End                                                      int
-	Weekends                                                        bool
-	FirstCap, FollowCap                                             int
+	ID, Slug, Status, AccountID, Sink, Timezone, Policy, SenderName, SenderEmail string
+	Start, End                                                                   int
+	Weekends                                                                     bool
+	FirstCap, FollowCap                                                          int
 }
 
 const podRulesSQL = `SELECT id::text, slug, status, coalesce(sending_account_id, ''), dry_run_inbox, timezone,
-	send_window_start, send_window_end, send_weekends, first_email_daily_cap, follow_up_daily_cap, approval_policy, sender_name
+	send_window_start, send_window_end, send_weekends, first_email_daily_cap, follow_up_daily_cap, approval_policy, sender_name, sender_email
 	FROM founderos_client_pods WHERE workspace_id = $1`
 
 type querier interface {
@@ -67,7 +69,7 @@ func loadPodRules(ctx context.Context, q querier, ws string) (*podRules, error) 
 	var r podRules
 	var s, e int16
 	err := q.QueryRow(ctx, podRulesSQL, ws).Scan(&r.ID, &r.Slug, &r.Status, &r.AccountID, &r.Sink, &r.Timezone,
-		&s, &e, &r.Weekends, &r.FirstCap, &r.FollowCap, &r.Policy, &r.SenderName)
+		&s, &e, &r.Weekends, &r.FirstCap, &r.FollowCap, &r.Policy, &r.SenderName, &r.SenderEmail)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, nil
 	}
@@ -161,7 +163,7 @@ func approvePod(ctx context.Context, pool *pgxpool.Pool, ws, id string, content 
 	var prior int
 	var last *time.Time
 	if err := tx.QueryRow(ctx, `SELECT count(*), max(coalesce(sent_at, decided_at)) FROM founderos_outbox
-		WHERE workspace_id = $1 AND id <> $2 AND lower(to_address) = $3 AND status IN ('sent', 'uncertain')`,
+		WHERE workspace_id = $1 AND id <> $2 AND lower(to_address) = $3 AND (status IN ('sent', 'uncertain') OR maybe_delivered)`,
 		ws, id, addr).Scan(&prior, &last); err != nil {
 		return nil, err
 	}
@@ -172,10 +174,18 @@ func approvePod(ctx context.Context, pool *pgxpool.Pool, ws, id string, content 
 			return nil, err
 		}
 	}
+	var conversation bool
+	if reply {
+		if err := tx.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM founderos_pod_conversations v WHERE v.workspace_id = $1
+			AND (v.contact_id = $2 OR v.contact_id IN (SELECT id FROM founderos_funnel_contacts
+				WHERE workspace_id = $1 AND lower(email) = $3)))`, ws, it.ContactID, addr).Scan(&conversation); err != nil {
+			return nil, err
+		}
+	}
 	var step string
 	switch {
-	case reply && !moved:
-		return nil, held("a conversation reply needs the prospect to have written back first")
+	case reply && !conversation:
+		return nil, held("a conversation reply needs the prospect's recorded reply first")
 	case reply:
 		step = "reply:" + id
 	case moved:
@@ -186,6 +196,27 @@ func approvePod(ctx context.Context, pool *pgxpool.Pool, ws, id string, content 
 		return nil, held("too soon: emails to one person go at least two days apart")
 	default:
 		step = fmt.Sprintf("step:%d", prior)
+	}
+
+	if prior > 0 {
+		rows, err := tx.Query(ctx, `SELECT subject, body FROM founderos_outbox WHERE workspace_id = $1 AND id <> $2
+			AND lower(to_address) = $3 AND (status IN ('sent', 'uncertain') OR maybe_delivered)`, ws, id, addr)
+		if err != nil {
+			return nil, err
+		}
+		want, dup := ContentHash(content.Subject, content.Body), false
+		for rows.Next() {
+			var subj, body string
+			if err := rows.Scan(&subj, &body); err != nil {
+				rows.Close()
+				return nil, err
+			}
+			dup = dup || ContentHash(subj, body) == want
+		}
+		rows.Close()
+		if dup {
+			return refuse(ErrDuplicate, "this exact email already went to them")
+		}
 	}
 
 	if why, err := clientApproval(ctx, tx, r, it, content, domain); err != nil {
@@ -219,9 +250,9 @@ func approvePod(ctx context.Context, pool *pgxpool.Pool, ws, id string, content 
 		if err := tx.QueryRow(ctx, `SELECT count(*) FROM founderos_outbox o WHERE o.workspace_id = $1
 			AND (o.status = 'sending'
 			     OR (o.status = 'sent' AND o.sent_at > now() - interval '24 hours')
-			     OR (o.status = 'uncertain' AND o.decided_at > now() - interval '24 hours'))
+			     OR ((o.status = 'uncertain' OR o.maybe_delivered) AND o.decided_at > now() - interval '24 hours'))
 			AND EXISTS (SELECT 1 FROM founderos_outbox p WHERE p.workspace_id = o.workspace_id AND p.id <> o.id
-				AND lower(p.to_address) = lower(o.to_address) AND p.status IN ('sent', 'uncertain')
+				AND lower(p.to_address) = lower(o.to_address) AND (p.status IN ('sent', 'uncertain') OR p.maybe_delivered)
 				AND coalesce(p.sent_at, p.decided_at) < coalesce(o.sent_at, o.decided_at, now())) = $2`,
 			ws, followUp).Scan(&used); err != nil {
 			return nil, err
@@ -292,6 +323,8 @@ func dispatchPodSend(ctx context.Context, pool *pgxpool.Pool, ws string, r *podR
 		stop = "pod is " + strings.ReplaceAll(now.Status, "_", " ")
 	case now.AccountID != r.AccountID:
 		stop = "the pod's mailbox changed"
+	case !dry && !now.inWindow(nowFunc()):
+		stop = "outside the pod's sending hours"
 	default:
 		var suppressed bool
 		if err := tx.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM founderos_email_suppression
@@ -326,19 +359,27 @@ func dispatchPodSend(ctx context.Context, pool *pgxpool.Pool, ws string, r *podR
 		out.AccountID, out.RequireAccount = &acct, true
 	}
 	out.ViaPodGate = true
+	if !dry {
+		out.ExpectFrom = now.SenderEmail
+	}
 	if dry {
 		out.To = r.Sink
 		out.Subject = "[DRY RUN → " + it.To + "] " + it.Subject
 		out.Body = "DRY RUN for " + r.Slug + ". Nothing was sent to the prospect.\nWould have gone to: " + it.To +
 			"\n----------------------------------------\n\n" + it.Body
 	}
-	if sendErr := send(ctx, out); sendErr != nil {
+	sendErr := send(ctx, out)
+	// The outcome is recorded on a fresh budget, so a slow mail server cannot
+	// leave a delivered email unrecorded.
+	ctx, cancelRec := context.WithTimeout(context.WithoutCancel(ctx), 30*time.Second)
+	defer cancelRec()
+	if sendErr != nil {
 		status := "failed"
 		if errors.Is(sendErr, ErrUncertain) {
 			status = "uncertain"
 		}
 		msg := sendErr.Error()
-		if _, err := tx.Exec(ctx, `UPDATE founderos_outbox SET status = $3, error = $4
+		if _, err := tx.Exec(ctx, `UPDATE founderos_outbox SET status = $3, error = $4, maybe_delivered = maybe_delivered OR $3 = 'uncertain'
 			WHERE workspace_id = $1 AND id = $2 AND attempt = $5`, ws, it.ID, status, msg, it.Attempt); err != nil {
 			return nil, err
 		}

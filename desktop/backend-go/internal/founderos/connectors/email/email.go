@@ -108,6 +108,8 @@ type Reply struct {
 	// ViaPodGate is set only by the outbox pod gate. A pod mailbox
 	// ("pod:<slug>") refuses every send without it.
 	ViaPodGate bool
+	// ExpectFrom, when set, must be the mailbox's real From address.
+	ExpectFrom string
 	To         string
 	Subject    string
 	Text       string
@@ -531,6 +533,9 @@ var ErrUnknownAccount = errors.New("unknown sending account")
 // ErrPodGateOnly: a client pod mailbox was named outside the pod send gate.
 var ErrPodGateOnly = errors.New("a client pod mailbox sends only through its pod's outbox")
 
+// ErrSenderMismatch: the mailbox would send From someone other than expected.
+var ErrSenderMismatch = errors.New("the mailbox's From address is not the pod's sender")
+
 // SendReply sends a plain-text reply from the originating inbox. The mail
 // guard (an earlier incident) is checked first and refuses unapproved recipients; then the
 // send runs only through guard.Outbound("email.send"), so with FOUNDEROS_WRITES
@@ -564,6 +569,9 @@ func (c *Connector) SendReply(ctx context.Context, r Reply) error {
 	}
 	if !found {
 		return fmt.Errorf("%w: %q", ErrUnknownAccount, r.AccountID)
+	}
+	if r.ExpectFrom != "" && !strings.EqualFold(strings.TrimSpace(cfg.From), strings.TrimSpace(r.ExpectFrom)) {
+		return fmt.Errorf("%w: mailbox sends as %s, pod sender is %s", ErrSenderMismatch, cfg.From, r.ExpectFrom)
 	}
 	env := c.env
 	if r.RecipientApproved {

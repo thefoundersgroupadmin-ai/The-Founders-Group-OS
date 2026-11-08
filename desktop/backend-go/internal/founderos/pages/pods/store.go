@@ -68,6 +68,7 @@ type Pod struct {
 	PausedReason                      string
 	CreatedAt, UpdatedAt              time.Time
 	WentLiveAt                        *time.Time
+	ConfigChangedAt                   time.Time
 }
 
 type NewPod struct {
@@ -95,7 +96,7 @@ const podCols = `id::text, workspace_id::text, slug, client_name, portal_client_
 	sender_name, sender_email, sending_account_id, sending_domain, dry_run_inbox, approval_policy,
 	first_email_daily_cap, follow_up_daily_cap, timezone, send_window_start, send_window_end,
 	send_weekends, crm_provider, calendar_provider, booking_url, paused_reason, created_at,
-	updated_at, went_live_at`
+	updated_at, went_live_at, config_changed_at`
 
 func scanPod(row pgx.Row) (Pod, error) {
 	var p Pod
@@ -104,7 +105,7 @@ func scanPod(row pgx.Row) (Pod, error) {
 		&p.Status, &p.SenderName, &p.SenderEmail, &p.SendingAccountID, &p.SendingDomain, &p.DryRunInbox,
 		&p.ApprovalPolicy, &p.FirstEmailDailyCap, &p.FollowUpDailyCap, &p.Timezone, &ws, &we,
 		&p.SendWeekends, &p.CRMProvider, &p.CalendarProvider, &p.BookingURL, &p.PausedReason,
-		&p.CreatedAt, &p.UpdatedAt, &p.WentLiveAt)
+		&p.CreatedAt, &p.UpdatedAt, &p.WentLiveAt, &p.ConfigChangedAt)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return p, ErrNotFound
 	}
@@ -193,6 +194,25 @@ func (s *Store) List(ctx context.Context) ([]Pod, error) {
 	return out, rows.Err()
 }
 
+// lockedExec runs one write under the pod send gate's lock (outbox/podgate.go),
+// so it lands between sends, never in the middle of one.
+func (s *Store) lockedExec(ctx context.Context, slug, sql string, args ...any) (int64, error) {
+	tx, err := s.Pool.Begin(ctx)
+	if err != nil {
+		return 0, err
+	}
+	defer tx.Rollback(ctx)
+	if _, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtext('founderos-pod-send:' || workspace_id::text))
+		FROM founderos_client_pods WHERE slug = $1`, slug); err != nil {
+		return 0, err
+	}
+	tag, err := tx.Exec(ctx, sql, args...)
+	if err != nil {
+		return 0, err
+	}
+	return tag.RowsAffected(), tx.Commit(ctx)
+}
+
 // SetSender records who the pod's emails come from.
 func (s *Store) SetSender(ctx context.Context, slug string, snd Sender) error {
 	email := strings.TrimSpace(strings.ToLower(snd.Email))
@@ -211,10 +231,10 @@ func (s *Store) SetSender(ctx context.Context, slug string, snd Sender) error {
 		}
 		acct = snd.AccountID
 	}
-	tag, err := s.Pool.Exec(ctx, `UPDATE founderos_client_pods SET sender_name = $2, sender_email = $3,
-		sending_domain = $4, sending_account_id = $5, updated_at = now() WHERE slug = $1`,
+	n, err := s.lockedExec(ctx, slug, `UPDATE founderos_client_pods SET sender_name = $2, sender_email = $3,
+		sending_domain = $4, sending_account_id = $5, updated_at = now(), config_changed_at = now() WHERE slug = $1`,
 		slug, strings.TrimSpace(snd.Name), email, domain, acct)
-	if err == nil && tag.RowsAffected() == 0 {
+	if err == nil && n == 0 {
 		return ErrNotFound
 	}
 	return err
@@ -287,12 +307,12 @@ func (s *Store) Readiness(ctx context.Context, p Pod) ([]string, error) {
 		missing = append(missing, "the client's own connected sending mailbox")
 	}
 	var simulated bool
-	if err := s.Pool.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM founderos_outbox WHERE workspace_id = $1 AND status = 'simulated')`,
-		p.WorkspaceID).Scan(&simulated); err != nil {
+	if err := s.Pool.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM founderos_outbox WHERE workspace_id = $1
+		AND status = 'simulated' AND sent_at > $2)`, p.WorkspaceID, p.ConfigChangedAt).Scan(&simulated); err != nil {
 		return nil, err
 	}
 	if !simulated {
-		missing = append(missing, "a successful test run (at least one email delivered to the test inbox)")
+		missing = append(missing, "a successful test run since the last change to the sender or sending rules")
 	}
 	for _, k := range requiredToGoLive {
 		d, err := s.Doc(ctx, p.Slug, k)
@@ -308,10 +328,24 @@ func (s *Store) Readiness(ctx context.Context, p Pod) ([]string, error) {
 	return missing, nil
 }
 
-// SetStatus moves the pod through its lifecycle. Pausing needs a reason.
+// SetStatus moves the pod through its lifecycle. Pausing needs a reason. The
+// move and its readiness check happen under the pod send gate's lock, so a
+// status change waits for an email being handed to the mail server, every
+// later send sees it, and nothing changes between the check and the move.
 func (s *Store) SetStatus(ctx context.Context, slug, to, reason string) (Pod, error) {
 	p, err := s.Get(ctx, slug)
 	if err != nil {
+		return p, err
+	}
+	tx, err := s.Pool.Begin(ctx)
+	if err != nil {
+		return p, err
+	}
+	defer tx.Rollback(ctx)
+	if _, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtext('founderos-pod-send:' || $1))`, p.WorkspaceID); err != nil {
+		return p, err
+	}
+	if p, err = scanPod(tx.QueryRow(ctx, `SELECT `+podCols+` FROM founderos_client_pods WHERE slug = $1`, slug)); err != nil {
 		return p, err
 	}
 	ok := false
@@ -336,22 +370,9 @@ func (s *Store) SetStatus(ctx context.Context, slug, to, reason string) (Pod, er
 	if to != StatusPaused {
 		reason = ""
 	}
-	// The pod send gate's lock (outbox/podgate.go): a status change waits for
-	// an email being handed to the mail server, and every later send sees it.
-	tx, err := s.Pool.Begin(ctx)
-	if err != nil {
-		return p, err
-	}
-	defer tx.Rollback(ctx)
-	if _, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtext('founderos-pod-send:' || $1))`, p.WorkspaceID); err != nil {
-		return p, err
-	}
 	p, err = scanPod(tx.QueryRow(ctx, `UPDATE founderos_client_pods SET status = $2, paused_reason = $3,
 		went_live_at = CASE WHEN $2 = 'live' THEN coalesce(went_live_at, now()) ELSE went_live_at END,
-		updated_at = now() WHERE slug = $1 AND status = $4 RETURNING `+podCols, slug, to, strings.TrimSpace(reason), p.Status))
-	if errors.Is(err, ErrNotFound) {
-		return p, fmt.Errorf("%w: the pod changed meanwhile; try again", ErrTransition)
-	}
+		updated_at = now() WHERE slug = $1 RETURNING `+podCols, slug, to, strings.TrimSpace(reason)))
 	if err != nil {
 		return p, err
 	}
@@ -481,12 +502,13 @@ func (s *Store) UpdateSettings(ctx context.Context, slug string, in Settings) er
 	default:
 		return bad("calendar must be calcom, google or microsoft")
 	}
-	tag, err := s.Pool.Exec(ctx, `UPDATE founderos_client_pods SET approval_policy = $2, first_email_daily_cap = $3,
+	n, err := s.lockedExec(ctx, slug, `UPDATE founderos_client_pods SET approval_policy = $2, first_email_daily_cap = $3,
 		follow_up_daily_cap = $4, timezone = $5, send_window_start = $6, send_window_end = $7, send_weekends = $8,
-		dry_run_inbox = $9, booking_url = $10, crm_provider = $11, calendar_provider = $12, updated_at = now() WHERE slug = $1`,
+		dry_run_inbox = $9, booking_url = $10, crm_provider = $11, calendar_provider = $12, updated_at = now(),
+		config_changed_at = now() WHERE slug = $1`,
 		slug, in.ApprovalPolicy, in.FirstEmailDailyCap, in.FollowUpDailyCap, in.Timezone, in.SendWindowStart, in.SendWindowEnd,
 		in.SendWeekends, sink, booking, in.CRMProvider, in.CalendarProvider)
-	if err == nil && tag.RowsAffected() == 0 {
+	if err == nil && n == 0 {
 		return ErrNotFound
 	}
 	if err == nil {

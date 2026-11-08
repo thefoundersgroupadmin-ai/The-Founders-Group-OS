@@ -755,3 +755,16 @@ func TestAPodMailboxRefusesEverySendThatDidNotComeThroughThePodGate(t *testing.T
 		t.Fatalf("pod mailbox used outside the gate: %v", err)
 	}
 }
+
+// Codex fix review #2: the mailbox's real From must be the pod's sender.
+func TestAPodSendRefusesAMailboxWhoseFromIsNotThePodsSender(t *testing.T) {
+	t.Setenv("FOUNDEROS_WRITES", "1")
+	c := sendConnector(t, "alex@vantage.example", "p1", "", map[string]string{
+		"POD_CLIENT_BV_HOST": "imap.bv.example", "POD_CLIENT_BV_USER": "someone-else@bv.example", "POD_CLIENT_BV_PASS": "pp",
+	})
+	err := c.SendReply(context.Background(), Reply{AccountID: "pod:client-bv", RequireAccount: true, ViaPodGate: true,
+		ExpectFrom: "sam@bv.example", To: "x@y.example", Subject: "s", Text: "t", RecipientApproved: true})
+	if !errors.Is(err, ErrSenderMismatch) {
+		t.Fatalf("sent from a mailbox that is not the pod's sender: %v", err)
+	}
+}

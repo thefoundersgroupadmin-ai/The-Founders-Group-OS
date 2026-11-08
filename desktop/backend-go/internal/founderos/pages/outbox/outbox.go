@@ -233,6 +233,10 @@ func Reject(ctx context.Context, pool *pgxpool.Pool, workspaceSlug, id string) (
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, notPendingOrMissing(ctx, pool, ws, id)
 	}
+	if err == nil {
+		// A rejected row frees its place in a pod's sequence.
+		_, err = pool.Exec(ctx, `DELETE FROM founderos_send_steps WHERE outbox_id = $1`, id)
+	}
 	return &it, err
 }
 

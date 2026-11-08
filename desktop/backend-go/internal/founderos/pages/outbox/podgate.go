@@ -41,6 +41,8 @@ var (
 	// ErrConversationStarted: a follow-up to someone who replied, booked or
 	// moved on in the pipeline. Refused: a person takes it from here.
 	ErrConversationStarted = errors.New("the prospect has replied or booked")
+	// ErrSequenceDone: the first email and two follow-ups already went.
+	ErrSequenceDone = errors.New("sequence finished")
 )
 
 // nowFunc is swapped in tests.
@@ -151,20 +153,39 @@ func approvePod(ctx context.Context, pool *pgxpool.Pool, ws, id string, content 
 	if inFlight {
 		return nil, held("another email to this person is sending or its delivery is uncertain")
 	}
-	var emailedBefore bool
-	if err := tx.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM founderos_outbox WHERE workspace_id = $1 AND id <> $2
-		AND lower(to_address) = $3 AND status = 'sent')`, ws, id, addr).Scan(&emailedBefore); err != nil {
+
+	// The sequence (Codex M1 review #3): a first email, then at most two
+	// follow-ups, two days apart, until they reply, book or opt out. A reply in
+	// a conversation they started is its own step and needs their message first.
+	reply := it.SequenceKey != nil && *it.SequenceKey == "reply"
+	var prior int
+	var last *time.Time
+	if err := tx.QueryRow(ctx, `SELECT count(*), max(coalesce(sent_at, decided_at)) FROM founderos_outbox
+		WHERE workspace_id = $1 AND id <> $2 AND lower(to_address) = $3 AND status IN ('sent', 'uncertain')`,
+		ws, id, addr).Scan(&prior, &last); err != nil {
 		return nil, err
 	}
-	if emailedBefore {
-		var moved bool
+	var moved bool
+	if prior > 0 {
 		if err := tx.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM founderos_funnel_contacts c WHERE c.workspace_id = $1
 			AND c.status <> 'first_touch' AND (c.id = $2 OR lower(c.email) = $3))`, ws, it.ContactID, addr).Scan(&moved); err != nil {
 			return nil, err
 		}
-		if moved {
-			return refuse(ErrConversationStarted, "they replied, booked or moved on in the pipeline; no automatic follow-up")
-		}
+	}
+	var step string
+	switch {
+	case reply && !moved:
+		return nil, held("a conversation reply needs the prospect to have written back first")
+	case reply:
+		step = "reply:" + id
+	case moved:
+		return refuse(ErrConversationStarted, "they replied, booked or moved on in the pipeline; no automatic follow-up")
+	case prior >= 3:
+		return refuse(ErrSequenceDone, "they already had the first email and two follow-ups")
+	case prior > 0 && last != nil && nowFunc().Sub(*last) < 48*time.Hour:
+		return nil, held("too soon: emails to one person go at least two days apart")
+	default:
+		step = fmt.Sprintf("step:%d", prior)
 	}
 
 	if why, err := clientApproval(ctx, tx, r, it, content, domain); err != nil {
@@ -191,17 +212,18 @@ func approvePod(ctx context.Context, pool *pgxpool.Pool, ws, id string, content 
 		if !r.inWindow(nowFunc()) {
 			return nil, held("outside the pod's sending hours")
 		}
-		var followUp bool
-		if err := tx.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM founderos_outbox WHERE workspace_id = $1
-			AND lower(to_address) = $2 AND status = 'sent')`, ws, addr).Scan(&followUp); err != nil {
-			return nil, err
-		}
+		// Caps count every delivery that may have happened (Codex M1 review #9):
+		// sending, sent in the last day, and uncertain in the last day.
+		followUp := prior > 0
 		var used int
 		if err := tx.QueryRow(ctx, `SELECT count(*) FROM founderos_outbox o WHERE o.workspace_id = $1
-			AND (o.status = 'sending' OR (o.status = 'sent' AND o.sent_at > now() - interval '24 hours'))
-			AND EXISTS (SELECT 1 FROM founderos_outbox p WHERE p.workspace_id = o.workspace_id
-				AND lower(p.to_address) = lower(o.to_address) AND p.status = 'sent' AND p.id <> o.id
-				AND p.sent_at < coalesce(o.sent_at, now())) = $2`, ws, followUp).Scan(&used); err != nil {
+			AND (o.status = 'sending'
+			     OR (o.status = 'sent' AND o.sent_at > now() - interval '24 hours')
+			     OR (o.status = 'uncertain' AND o.decided_at > now() - interval '24 hours'))
+			AND EXISTS (SELECT 1 FROM founderos_outbox p WHERE p.workspace_id = o.workspace_id AND p.id <> o.id
+				AND lower(p.to_address) = lower(o.to_address) AND p.status IN ('sent', 'uncertain')
+				AND coalesce(p.sent_at, p.decided_at) < coalesce(o.sent_at, o.decided_at, now())) = $2`,
+			ws, followUp).Scan(&used); err != nil {
 			return nil, err
 		}
 		limit, kind := r.FirstCap, "first-email"
@@ -210,6 +232,17 @@ func approvePod(ctx context.Context, pool *pgxpool.Pool, ws, id string, content 
 		}
 		if used >= limit {
 			return nil, held(fmt.Sprintf("the pod's daily %s cap (%d) is reached", kind, limit))
+		}
+		// One reservation per person and step; retrying the same row reuses it.
+		var owner string
+		err := tx.QueryRow(ctx, `INSERT INTO founderos_send_steps (workspace_id, recipient, step, outbox_id)
+			VALUES ($1, $2, $3, $4) ON CONFLICT (workspace_id, recipient, step) DO UPDATE SET outbox_id = founderos_send_steps.outbox_id
+			WHERE founderos_send_steps.outbox_id = EXCLUDED.outbox_id RETURNING outbox_id`, ws, addr, step, id).Scan(&owner)
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, held("this step of the sequence already went to them from another draft")
+		}
+		if err != nil {
+			return nil, err
 		}
 	}
 
@@ -223,8 +256,70 @@ func approvePod(ctx context.Context, pool *pgxpool.Pool, ws, id string, content 
 		return nil, err
 	}
 
+	// From the claim on, the request may go away; the send and its record must not.
 	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), sendBudget)
 	defer cancel()
+	return dispatchPodSend(ctx, pool, ws, r, it, content, domain, dry, send)
+}
+
+// beforeDispatch is a test seam between the claim and the final check.
+var beforeDispatch func()
+
+// dispatchPodSend re-takes the pod lock, checks again that the pod still runs,
+// the person is not suppressed and the approval still holds (Codex M1 review
+// #4), and keeps the lock through the hand-over to the mail server, so a pause
+// or opt-out either lands first (nothing is sent) or waits for this send.
+func dispatchPodSend(ctx context.Context, pool *pgxpool.Pool, ws string, r *podRules, it Item, content Content, domain string, dry bool, send SendFunc) (*Item, error) {
+	if beforeDispatch != nil {
+		beforeDispatch()
+	}
+	tx, err := pool.Begin(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer tx.Rollback(ctx)
+	if _, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtext('founderos-pod-send:' || $1))`, ws); err != nil {
+		return nil, err
+	}
+	now, err := loadPodRules(ctx, tx, ws)
+	if err != nil || now == nil {
+		return nil, fmt.Errorf("pod rules: %v", err)
+	}
+	stop := ""
+	addr := strings.ToLower(strings.TrimSpace(it.To))
+	switch {
+	case now.Status != r.Status:
+		stop = "pod is " + strings.ReplaceAll(now.Status, "_", " ")
+	case now.AccountID != r.AccountID:
+		stop = "the pod's mailbox changed"
+	default:
+		var suppressed bool
+		if err := tx.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM founderos_email_suppression
+			WHERE (workspace_id = $1 OR workspace_id IS NULL) AND (address = $2 OR domain = $3))`, ws, addr, domain).Scan(&suppressed); err != nil {
+			return nil, err
+		}
+		if suppressed {
+			stop = "they were put on the do-not-email list"
+		} else if why, err := clientApproval(ctx, tx, now, it, content, domain); err != nil {
+			return nil, err
+		} else if why != "" {
+			stop = "the client's approval changed: " + why
+		}
+	}
+	if stop != "" {
+		if _, err := tx.Exec(ctx, `UPDATE founderos_outbox SET status = 'pending', error = $3 WHERE workspace_id = $1 AND id = $2`,
+			ws, it.ID, "held: "+stop); err != nil {
+			return nil, err
+		}
+		if _, err := tx.Exec(ctx, `DELETE FROM founderos_send_steps WHERE outbox_id = $1`, it.ID); err != nil {
+			return nil, err
+		}
+		if err := tx.Commit(ctx); err != nil {
+			return nil, err
+		}
+		return nil, held(stop)
+	}
+
 	out := it
 	if r.AccountID != "" {
 		acct := r.AccountID
@@ -243,8 +338,11 @@ func approvePod(ctx context.Context, pool *pgxpool.Pool, ws, id string, content 
 			status = "uncertain"
 		}
 		msg := sendErr.Error()
-		if _, err := pool.Exec(ctx, `UPDATE founderos_outbox SET status = $3, error = $4
-			WHERE workspace_id = $1 AND id = $2 AND attempt = $5`, ws, id, status, msg, it.Attempt); err != nil {
+		if _, err := tx.Exec(ctx, `UPDATE founderos_outbox SET status = $3, error = $4
+			WHERE workspace_id = $1 AND id = $2 AND attempt = $5`, ws, it.ID, status, msg, it.Attempt); err != nil {
+			return nil, err
+		}
+		if err := tx.Commit(ctx); err != nil {
 			return nil, err
 		}
 		it.Status, it.Error = status, &msg
@@ -254,15 +352,18 @@ func approvePod(ctx context.Context, pool *pgxpool.Pool, ws, id string, content 
 	if dry {
 		final, kind, summary = "simulated", "email_simulated", "Dry run: email to "+it.To+" delivered to "+r.Sink
 	}
-	if err := pool.QueryRow(ctx, `UPDATE founderos_outbox SET status = $4, sent_at = now()
-		WHERE workspace_id = $1 AND id = $2 AND attempt = $3 RETURNING sent_at`, ws, id, it.Attempt, final).Scan(&it.SentAt); err != nil {
+	if err := tx.QueryRow(ctx, `UPDATE founderos_outbox SET status = $4, sent_at = now()
+		WHERE workspace_id = $1 AND id = $2 AND attempt = $3 RETURNING sent_at`, ws, it.ID, it.Attempt, final).Scan(&it.SentAt); err != nil {
+		return nil, err
+	}
+	if _, err := tx.Exec(ctx, `INSERT INTO founderos_client_activity (pod_id, kind, summary, ref) VALUES ($1, $2, $3, $4)`,
+		r.ID, kind, summary, it.ID); err != nil {
+		return nil, err
+	}
+	if err := tx.Commit(ctx); err != nil {
 		return nil, err
 	}
 	it.Status = final
-	if _, err := pool.Exec(ctx, `INSERT INTO founderos_client_activity (pod_id, kind, summary, ref) VALUES ($1, $2, $3, $4)`,
-		r.ID, kind, summary, id); err != nil {
-		return &it, fmt.Errorf("sent, but the activity was not recorded: %w", err)
-	}
 	if !dry && it.ContactID != nil {
 		if err := recordTouch(ctx, pool, *it.ContactID, it.Subject); err != nil {
 			return &it, fmt.Errorf("sent, but the pipeline touch was not recorded: %w", err)

@@ -285,7 +285,9 @@ def pod_pass():
                 print(f"  {company}: {sender} | {subject}")
                 continue
             if is_opt_out(body):
-                psql(db, "insert into founderos_email_suppression (workspace_id, address, reason) "
+                # Under the pod send gate's lock, so a send in flight finishes first and none follows.
+                psql(db, f"select pg_advisory_xact_lock(hashtext('founderos-pod-send:' || {sql(ws)})); "
+                         "insert into founderos_email_suppression (workspace_id, address, reason) "
                          f"values ({sql(ws)}, {sql(sender)}, {sql('opted out by reply: ' + subject[:120])}) on conflict do nothing")
                 psql(db, f"update founderos_outbox set status='rejected', decided_at=now(), error='opted out by reply' "
                          f"where workspace_id={sql(ws)} and lower(to_address)={sql(sender)} and status='pending'")

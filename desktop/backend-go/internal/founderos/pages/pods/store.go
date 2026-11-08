@@ -325,10 +325,26 @@ func (s *Store) SetStatus(ctx context.Context, slug, to, reason string) (Pod, er
 	if to != StatusPaused {
 		reason = ""
 	}
-	p, err = scanPod(s.Pool.QueryRow(ctx, `UPDATE founderos_client_pods SET status = $2, paused_reason = $3,
-		went_live_at = CASE WHEN $2 = 'live' THEN coalesce(went_live_at, now()) ELSE went_live_at END,
-		updated_at = now() WHERE slug = $1 RETURNING `+podCols, slug, to, strings.TrimSpace(reason)))
+	// The pod send gate's lock (outbox/podgate.go): a status change waits for
+	// an email being handed to the mail server, and every later send sees it.
+	tx, err := s.Pool.Begin(ctx)
 	if err != nil {
+		return p, err
+	}
+	defer tx.Rollback(ctx)
+	if _, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtext('founderos-pod-send:' || $1))`, p.WorkspaceID); err != nil {
+		return p, err
+	}
+	p, err = scanPod(tx.QueryRow(ctx, `UPDATE founderos_client_pods SET status = $2, paused_reason = $3,
+		went_live_at = CASE WHEN $2 = 'live' THEN coalesce(went_live_at, now()) ELSE went_live_at END,
+		updated_at = now() WHERE slug = $1 AND status = $4 RETURNING `+podCols, slug, to, strings.TrimSpace(reason), p.Status))
+	if errors.Is(err, ErrNotFound) {
+		return p, fmt.Errorf("%w: the pod changed meanwhile; try again", ErrTransition)
+	}
+	if err != nil {
+		return p, err
+	}
+	if err := tx.Commit(ctx); err != nil {
 		return p, err
 	}
 	summary := "Status: " + strings.ReplaceAll(to, "_", " ")

@@ -104,6 +104,11 @@ class PodRoutingTest(unittest.TestCase):
             sync.load_pods(lambda: (1, "", "connection refused"))
         self.assertEqual(sync.load_pods(lambda: (0, "[]", "")), {})
 
+    def test_unbound_client_projects_are_quarantined(self):
+        names = {"proj-x": "Client: Unknown"}
+        self.assertTrue(sync.quarantined({"projectId": "proj-x"}, self.PODS, names))
+        self.assertFalse(sync.quarantined({"projectId": "proj-bv"}, self.PODS, names))
+
     def test_pod_documents_never_feed_hq_addresses(self):
         self.assertFalse(sync.scan_for_hq_addresses({"id": "i1", "projectId": "proj-bv"}, self.PODS))
         self.assertTrue(sync.scan_for_hq_addresses({"id": "i2", "projectId": "other"}, self.PODS))

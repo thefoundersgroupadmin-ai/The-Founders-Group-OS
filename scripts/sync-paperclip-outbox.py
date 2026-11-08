@@ -119,6 +119,24 @@ def sequence_key_for(entry, is_reply_task):
     return "reply" if is_reply_task else entry.get("sequenceKey")
 
 
+def quarantined(issue, pods, project_names):
+    """A task in a "Client: ..." board project that no pod owns goes nowhere: never
+    into TFG's pipeline or outbox (Codex fix review #6)."""
+    pid = issue.get("projectId") or ""
+    return bool(pid) and pid not in pods and (project_names.get(pid) or "").startswith("Client:")
+
+
+def project_names_of(projects):
+    projects = projects.get("projects", projects) if isinstance(projects, dict) else projects
+    return {p["id"]: p.get("name") or "" for p in projects or [] if isinstance(p, dict) and p.get("id")}
+
+
+def withdraw_moved_query(ident, workspace_id):
+    """Waiting drafts a task left in another workspace when it moved (Codex fix review #7)."""
+    return ("UPDATE founderos_outbox SET status = 'rejected', decided_at = now(), error = 'task moved to another workspace' "
+            f"WHERE source = 'paperclip' AND source_ref = {sql(ident)} AND status = 'pending' AND workspace_id <> {sql(workspace_id)}")
+
+
 def recipient_matches_query(addr):
     """HQ drafts with no command binding find their pipeline by recipient, never inside a client pod."""
     return ("SELECT DISTINCT c.workspace_id::text AS workspace_id,w.slug FROM founderos_funnel_contacts c JOIN workspaces w ON w.id=c.workspace_id "
@@ -205,7 +223,11 @@ def main():
     pods = {p["project_id"]: p for p in psql_rows(db, POD_ROUTES_QUERY)}
     conversations = {r["issue_id"] for r in psql_rows(db, CONVERSATIONS_QUERY)}
     pod_senders = {p["workspace_id"]: p["sender_name"] for p in pods.values()}
+    project_names = project_names_of(paperclip(pc, "GET", f"/api/companies/{company}/projects"))
     for issue in issues:
+        if quarantined(issue, pods, project_names):
+            print(f"  {issue.get('identifier')}: skipped (client project with no pod)")
+            continue
         rt = route(issue, pods, task_workspaces, default_pipeline_ws)
         binding = rt["binding"]
         pipeline_ws, pipeline_slug = rt["pipeline_ws"], rt["pipeline_slug"]
@@ -216,6 +238,8 @@ def main():
         if not doc:
             continue
         ident = issue.get("identifier") or issue["id"]
+        if not dry:
+            psql(db, withdraw_moved_query(ident, outbox_ws))
         try:
             items = entries(doc.get("body") or (doc.get("latestRevision") or {}).get("body") or "")
         except ValueError as e:

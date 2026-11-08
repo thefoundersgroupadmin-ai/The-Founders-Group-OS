@@ -110,6 +110,20 @@ class PodRoutingTest(unittest.TestCase):
         self.assertEqual(sync.sequence_key_for({"sequenceKey": "warehouses:1"}, is_reply_task=False), "warehouses:1")
         self.assertIsNone(sync.sequence_key_for({"sequenceKey": None}, is_reply_task=False))
 
+    def test_unbound_client_projects_are_quarantined(self):
+        names = {"proj-bv": "Client: Brightvale", "proj-x": "Client: Unknown", "proj-tfg": "TFG sales"}
+        self.assertFalse(sync.quarantined({"projectId": "proj-bv"}, self.PODS, names))
+        self.assertTrue(sync.quarantined({"projectId": "proj-x"}, self.PODS, names))
+        self.assertFalse(sync.quarantined({"projectId": "proj-tfg"}, self.PODS, names))
+        self.assertFalse(sync.quarantined({}, self.PODS, names))
+
+    def test_moving_a_task_withdraws_its_waiting_drafts_elsewhere(self):
+        q = sync.withdraw_moved_query("THE-90", "w-bv")
+        self.assertIn("status = 'rejected'", q)
+        self.assertIn("source_ref = 'THE-90'", q)
+        self.assertIn("workspace_id <> 'w-bv'", q)
+        self.assertIn("status = 'pending'", q)
+
     def test_sequence_key_is_kept(self):
         got = sync.entries('[{"to": "a@b.co", "subject": "s", "body": "b", "sequenceKey": "warehouses:1"}]')
         self.assertEqual(got[0]["sequenceKey"], "warehouses:1")

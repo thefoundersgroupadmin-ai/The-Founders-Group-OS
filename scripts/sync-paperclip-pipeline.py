@@ -60,6 +60,18 @@ def load_pods(run):
     return {p["project_id"]: p for p in json.loads(out.strip() or "[]")}
 
 
+def quarantined(issue, pods, project_names):
+    """A task in a "Client: ..." board project that no pod owns goes nowhere: never
+    into TFG's pipeline or outbox (Codex fix review #6)."""
+    pid = issue.get("projectId") or ""
+    return bool(pid) and pid not in pods and (project_names.get(pid) or "").startswith("Client:")
+
+
+def project_names_of(projects):
+    projects = projects.get("projects", projects) if isinstance(projects, dict) else projects
+    return {p["id"]: p.get("name") or "" for p in projects or [] if isinstance(p, dict) and p.get("id")}
+
+
 def target_for(issue, pods, task_workspaces):
     """Where a task's research goes: its client pod (by board project, docs/tfg/CLIENT-PODS.md),
     else its durable command's workspace, else the default pipeline. Never model text."""
@@ -212,8 +224,12 @@ def main():
     # naming a known company with an email in it gives its recipient address.
     emails = {}
     other_docs = []
+    project_names = project_names_of(paperclip(pc, f"/api/companies/{company}/projects"))
     for ident, issue in by_ident.items():
         if ident in (None, "THE-3"):
+            continue
+        if quarantined(issue, pods, project_names):
+            print(f"skipped {ident}: client project with no pod", file=sys.stderr)
             continue
         docs = paperclip(pc, f"/api/issues/{issue['id']}/documents")
         docs = docs.get("documents", docs) if isinstance(docs, dict) else docs

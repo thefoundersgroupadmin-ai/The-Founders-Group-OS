@@ -138,6 +138,12 @@ class PodRoutingTest(unittest.TestCase):
         self.assertIsNone(sync.qualification_update("w-bv", "issue-9", "not json"))
         self.assertIn("likelihood = 100", sync.qualification_update("w-bv", "i", '{"fit": 400}'))
 
+    def test_a_brief_document_fills_its_meeting(self):
+        q = sync.brief_query("issue-7", "Priya runs operations at Brightvale.")
+        self.assertIn("UPDATE founderos_pod_meetings SET brief =", q)
+        self.assertIn("brief_issue_id = 'issue-7'", q)
+        self.assertIn("brief_sent_at IS NULL", q)
+
     def test_sequence_key_is_kept(self):
         got = sync.entries('[{"to": "a@b.co", "subject": "s", "body": "b", "sequenceKey": "warehouses:1"}]')
         self.assertEqual(got[0]["sequenceKey"], "warehouses:1")

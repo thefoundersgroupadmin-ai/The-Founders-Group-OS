@@ -94,6 +94,10 @@ func Instructions(p Pod, docs map[string]string) string {
 	b.WriteString(section("How we sound", docs["voice"]))
 	b.WriteString(section("What we sell", docs["product"]))
 	b.WriteString(section("Never contact", docs["exclusions"]))
+	if p.BookingURL != "" {
+		b.WriteString(section("Booking a meeting", "When they want to talk, offer this booking link: "+p.BookingURL+
+			". It books straight into the rep's calendar and sends the invite and reminders."))
+	}
 	b.WriteString("## Hand-over formats\n" +
 		"- Research: a task document with key \"prospects\": a JSON array of {\"company\", \"website\", \"location\", " +
 		"\"buyer\", \"buyerRole\", \"email\", \"score\" (0-100), \"evidence\", \"nextAction\"}. Email only with public " +

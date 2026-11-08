@@ -123,3 +123,7 @@ func (r *REST) OpenRequests(ctx context.Context, client string) ([]Request, erro
 func (r *REST) CloseRequest(ctx context.Context, id, outcome string) error {
 	return r.write(ctx, http.MethodPatch, "sdr_requests?id="+eq(id), map[string]any{"handled_at": nowString(), "outcome": outcome}, "return=minimal")
 }
+
+func (r *REST) UpsertMeetings(ctx context.Context, rows []Meeting) error {
+	return r.write(ctx, http.MethodPost, "sdr_meetings?on_conflict=client_id,os_id", rows, "resolution=merge-duplicates,return=minimal")
+}

@@ -55,6 +55,15 @@ type Activity struct {
 	Summary  string `json:"summary"`
 }
 
+type Meeting struct {
+	ClientID string  `json:"client_id"`
+	OSID     int64   `json:"os_id"`
+	Title    string  `json:"title"`
+	Attendee string  `json:"attendee"`
+	StartsAt *string `json:"starts_at"`
+	Brief    string  `json:"brief"`
+}
+
 type Request struct {
 	ID              string `json:"id"`
 	ClientID        string `json:"client_id"`
@@ -73,6 +82,7 @@ type Portal interface {
 	InsertActivity(ctx context.Context, rows []Activity) error
 	OpenRequests(ctx context.Context, clientID string) ([]Request, error)
 	CloseRequest(ctx context.Context, id, outcome string) error
+	UpsertMeetings(ctx context.Context, rows []Meeting) error
 }
 
 // Activity kinds that stay inside TFG (operator plumbing, not client news).
@@ -127,6 +137,9 @@ func syncPod(ctx context.Context, s *pods.Store, portal Portal, p pods.Pod, clie
 		return err
 	}
 	if err := pushApprovals(ctx, s, portal, p, client); err != nil {
+		return err
+	}
+	if err := pushMeetings(ctx, s, portal, p, client); err != nil {
 		return err
 	}
 	return pushActivity(ctx, s, portal, p, client)
@@ -277,3 +290,20 @@ func pullRequests(ctx context.Context, s *pods.Store, portal Portal, p pods.Pod,
 
 // nowString is a timestamp the portal's REST API accepts; swapped in tests.
 var nowString = func() string { return time.Now().UTC().Format(time.RFC3339) }
+
+func pushMeetings(ctx context.Context, s *pods.Store, portal Portal, p pods.Pod, client string) error {
+	rows, err := s.MeetingsForPortal(ctx, p.ID)
+	if err != nil || len(rows) == 0 {
+		return err
+	}
+	out := make([]Meeting, 0, len(rows))
+	for _, m := range rows {
+		var at *string
+		if m.StartsAt != nil {
+			v := m.StartsAt.UTC().Format(time.RFC3339)
+			at = &v
+		}
+		out = append(out, Meeting{ClientID: client, OSID: m.ID, Title: m.Title, Attendee: m.Attendee, StartsAt: at, Brief: m.Brief})
+	}
+	return portal.UpsertMeetings(ctx, out)
+}

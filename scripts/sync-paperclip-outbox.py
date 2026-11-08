@@ -181,6 +181,12 @@ def qualification_update(workspace_id, issue_id, body):
             f"AND id = (SELECT contact_id FROM founderos_pod_conversations WHERE issue_id = {sql(issue_id)})")
 
 
+def brief_query(issue_id, body):
+    """A call brief for the meeting this task was opened for (until it has been sent)."""
+    return (f"UPDATE founderos_pod_meetings SET brief = {sql(body.strip()[:8000])} "
+            f"WHERE brief_issue_id = {sql(issue_id)} AND brief_sent_at IS NULL")
+
+
 def recipient_matches_query(addr):
     """HQ drafts with no command binding find their pipeline by recipient, never inside a client pod."""
     return ("SELECT DISTINCT c.workspace_id::text AS workspace_id,w.slug FROM founderos_funnel_contacts c JOIN workspaces w ON w.id=c.workspace_id "
@@ -289,6 +295,8 @@ def main():
                 text = d.get("body") or (d.get("latestRevision") or {}).get("body") or ""
                 if d.get("key") == "handoff" and text.strip():
                     psql(db, handoff_query(rt["outbox_ws"], issue["id"], text))
+                elif d.get("key") == "brief" and text.strip():
+                    psql(db, brief_query(issue["id"], text))
                 elif d.get("key") == "qualification":
                     upd = qualification_update(rt["outbox_ws"], issue["id"], text)
                     if upd:

@@ -18,6 +18,7 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"github.com/rhl/businessos-backend/internal/founderos/connectors/caldotcom"
 	"github.com/rhl/businessos-backend/internal/founderos/connectors/email"
 	"github.com/rhl/businessos-backend/internal/founderos/pages/pods"
 )
@@ -115,10 +116,25 @@ func startPodLoops(d *Deps) {
 					slog.Info("client pods: enquiries tasked", "tasked", k, "err", err)
 				}
 				cancel()
+				ctx, cancel = context.WithTimeout(context.Background(), 25*time.Second)
+				if k, err := st.TaskBriefs(ctx, podTasksFor(d)); k > 0 || err != nil {
+					slog.Info("client pods: call briefs requested", "tasked", k, "err", err)
+				}
+				cancel()
 				if n++; n%4 == 0 {
 					ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 					if k, err := notifyHandoffs(ctx, d, st); k > 0 || err != nil {
 						slog.Info("client pods: hand-offs sent", "sent", k, "err", err)
+					}
+					if k, err := sendBriefs(ctx, d, st); k > 0 || err != nil {
+						slog.Info("client pods: call briefs sent", "sent", k, "err", err)
+					}
+					cancel()
+				}
+				if n%10 == 0 {
+					ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+					if k, err := readPodCalendars(ctx, d, st); k > 0 || err != nil {
+						slog.Info("client pods: meetings booked", "new", k, "err", err)
 					}
 					cancel()
 				}
@@ -153,4 +169,84 @@ func notifyHandoffs(ctx context.Context, d *Deps, st *pods.Store) (int, error) {
 		sent++
 	}
 	return sent, errors.Join(errs...)
+}
+
+// sendBriefs emails each finished call brief to the client's rep from TFG's
+// own inbox (a notice to the client) and logs it for the portal.
+func sendBriefs(ctx context.Context, d *Deps, st *pods.Store) (int, error) {
+	list, err := st.BriefsToSend(ctx)
+	if err != nil {
+		return 0, err
+	}
+	sent := 0
+	var errs []error
+	for _, b := range list {
+		if b.To == "" {
+			_ = st.MarkBriefSent(ctx, b.ID, "no rep email set")
+			continue
+		}
+		when := ""
+		if b.At != nil {
+			when = " on " + b.At.Format("Mon 2 Jan 15:04 MST")
+		}
+		err := commsSourcesFor(d).SendEmail(ctx, email.Reply{To: b.To, Subject: "Call brief: " + b.Name + when,
+			Text: "Your call brief for \"" + b.Title + "\" with " + b.Name + when + ".\n\n" + b.Text +
+				"\n\nAlso in your portal: https://thefoundersgroup.net/portal\n\nThe Founders Group", RecipientApproved: true})
+		if err != nil {
+			errs = append(errs, err)
+			continue
+		}
+		_ = st.MarkBriefSent(ctx, b.ID, "")
+		sent++
+	}
+	return sent, errors.Join(errs...)
+}
+
+// podCalendarKey is the pod's own Cal.com key.
+func podCalendarKey(d *Deps, slug string) string {
+	return d.Resolver.Resolve(caldotcom.PodKeyName(email.PodKeyPrefix(slug)))
+}
+
+// readPodCalendars records new bookings from each pod's own Cal.com account.
+func readPodCalendars(ctx context.Context, d *Deps, st *pods.Store) (int, error) {
+	list, err := st.List(ctx)
+	if err != nil {
+		return 0, err
+	}
+	cal := caldotcom.New(d.Resolver)
+	added := 0
+	var errs []error
+	for _, p := range list {
+		if p.CalendarProvider != "calcom" || (p.Status != pods.StatusLive && p.Status != pods.StatusDryRun && p.Status != pods.StatusPaused) {
+			continue
+		}
+		key := podCalendarKey(d, p.Slug)
+		if key == "" {
+			continue
+		}
+		var meetings []pods.Meeting
+		for _, status := range []string{"upcoming", "past"} {
+			bs, err := cal.BookingsWithKey(ctx, key, status)
+			if err != nil {
+				errs = append(errs, fmt.Errorf("%s: %w", p.Slug, err))
+				break
+			}
+			for _, b := range bs {
+				m := pods.Meeting{UID: b.UID, Title: b.Title, Start: b.Start, Cancelled: b.Status == "cancelled" || b.Status == "rejected"}
+				for _, a := range b.Attendees {
+					if !strings.EqualFold(a.Email, p.SenderEmail) {
+						m.AttendeeEmail, m.AttendeeName = a.Email, a.Name
+						break
+					}
+				}
+				meetings = append(meetings, m)
+			}
+		}
+		k, err := st.RecordMeetings(ctx, p.Slug, meetings)
+		added += k
+		if err != nil {
+			errs = append(errs, err)
+		}
+	}
+	return added, errors.Join(errs...)
 }

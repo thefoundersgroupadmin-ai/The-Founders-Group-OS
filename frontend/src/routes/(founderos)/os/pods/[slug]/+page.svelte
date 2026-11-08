@@ -33,6 +33,9 @@
 	let list = $state({ title: '', domains: '' });
 	let rules = $state<{ approvalPolicy: string; firstEmailDailyCap: number; followUpDailyCap: number; timezone: string; sendWindow: [number, number]; sendWeekends: boolean; dryRunInbox: string; bookingUrl: string; crmProvider: string; calendarProvider: string; handoffEmail: string; inboundAutoReply: boolean } | null>(null);
 	let formLink = $state<{ endpoint: string; snippet: string } | null>(null);
+	let meetings = $state<{ uid: string; title: string; name: string; email: string; startsAt: string | null; brief: string; briefSent: boolean }[]>([]);
+	let calendarConnected = $state(false);
+	let calcomKey = $state('');
 
 	const err = (e: unknown) => (e instanceof Error ? e.message : 'request failed');
 
@@ -54,6 +57,12 @@
 		founderosFetch<{ activity: Activity[] }>(`${base}/activity`).then((b) => (activity = b.activity)).catch(() => {});
 		founderosFetch<{ agent: AgentBinding | null }>(`${base}/agent`).then((b) => (agent = b.agent)).catch(() => {});
 		founderosFetch<{ approvals: ClientApproval[] }>(`${base}/approvals`).then((b) => (approvals = b.approvals)).catch(() => {});
+		founderosFetch<{ meetings: typeof meetings; calendarConnected: boolean }>(`${base}/meetings`)
+			.then((b) => {
+				meetings = b.meetings;
+				calendarConnected = b.calendarConnected;
+			})
+			.catch(() => {});
 		portalId ||= pod?.portalClientId ?? '';
 		for (const key of Object.keys(DOC_LABELS)) {
 			founderosFetch<{ doc: PodDoc }>(`${base}/docs/${key}`)
@@ -94,6 +103,11 @@
 		act(async () => {
 			await founderosFetch(`${base}/target-lists`, { method: 'POST', json: { title: list.title, domains: parseDomains(list.domains) } });
 			list = { title: '', domains: '' };
+		});
+	const connectCalendar = () =>
+		act(async () => {
+			await founderosFetch(`${base}/calendar`, { method: 'PUT', json: { calcomKey } });
+			calcomKey = '';
 		});
 	const makeFormLink = () =>
 		act(async () => {
@@ -278,6 +292,26 @@
 					<input readonly value={formLink.endpoint} aria-label="Form link" class="pc-input mt-1 w-full rounded-[6px] px-2.5 py-1.5 font-mono text-[11px]" />
 					<textarea readonly rows="10" aria-label="Form code" class="pc-input mt-2 w-full rounded-[6px] px-2.5 py-2 font-mono text-[11px]">{formLink.snippet}</textarea>
 				{/if}
+			</Slab>
+
+			<Slab>
+				<p class="bn-dim mb-2 font-mono text-[10px] uppercase tracking-[0.15em]">Meetings and call briefs</p>
+				<p class="mb-2 text-[12px]">{calendarConnected ? "The client's Cal.com is connected: bookings become meetings, stop the sequence, and get a call brief for the rep before the call." : "Connect the client's Cal.com so bookings become meetings with call briefs."}</p>
+				<div class="flex flex-wrap items-center gap-2">
+					<input type="password" bind:value={calcomKey} placeholder="Client's Cal.com API key" aria-label="Cal.com API key" class="pc-input min-w-[260px] flex-1 rounded-[6px] px-2.5 py-1.5 text-[12px]" />
+					<Pressable tone="secondary" disabled={busy || !calcomKey.trim()} onclick={connectCalendar}>{calendarConnected ? 'Replace key' : 'Connect Cal.com'}</Pressable>
+				</div>
+				{#each meetings as m (m.uid)}
+					<div class="border-b py-2" style="border-color: var(--bn-hairline)">
+						<div class="flex flex-wrap items-center justify-between gap-2">
+							<span class="text-[12px]">{m.startsAt ? m.startsAt.slice(0, 16).replace('T', ' ') : ''} · {m.title} · {m.name || m.email}</span>
+							<Badge tone={m.brief ? (m.briefSent ? 'ok' : 'accent') : 'default'}>{m.brief ? (m.briefSent ? 'Brief sent' : 'Brief ready') : 'Brief pending'}</Badge>
+						</div>
+						{#if m.brief}<p class="bn-dim mt-1 whitespace-pre-wrap text-[12px]">{m.brief}</p>{/if}
+					</div>
+				{:else}
+					<p class="bn-dim mt-2 font-mono text-[12px]">No meetings yet.</p>
+				{/each}
 			</Slab>
 
 			<Slab>

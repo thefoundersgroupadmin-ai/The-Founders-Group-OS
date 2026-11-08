@@ -137,7 +137,15 @@ func (c *Connector) get(ctx context.Context, key, path string) ([]byte, error) {
 // Bookings lists bookings with one status (upcoming, past, cancelled or
 // unconfirmed), following the cursor for up to five pages of 100.
 func (c *Connector) Bookings(ctx context.Context, status string) ([]Booking, error) {
-	key := c.key()
+	return c.BookingsWithKey(ctx, c.key(), status)
+}
+
+// PodKeyName is a client pod's own Cal.com key (POD_<SLUG>_CALCOM_KEY).
+func PodKeyName(podKeyPrefix string) string { return podKeyPrefix + "CALCOM_KEY" }
+
+// BookingsWithKey reads bookings with an explicit key: a client pod's own
+// Cal.com account, never TFG's.
+func (c *Connector) BookingsWithKey(ctx context.Context, key, status string) ([]Booking, error) {
 	if key == "" {
 		return nil, ErrNotConfigured
 	}

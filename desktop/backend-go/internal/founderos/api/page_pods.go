@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"github.com/rhl/businessos-backend/internal/founderos/connectors/caldotcom"
 	"github.com/rhl/businessos-backend/internal/founderos/connectors/email"
 	"github.com/rhl/businessos-backend/internal/founderos/pages/integrations"
 	"github.com/rhl/businessos-backend/internal/founderos/pages/outbox"
@@ -513,6 +514,65 @@ func registerPods(s *gin.RouterGroup, d *Deps) {
 		_ = st.Log(c.Request.Context(), p.ID, "settings", "New website form link made", "")
 		c.Header("Cache-Control", "no-store")
 		c.JSON(http.StatusOK, gin.H{"endpoint": endpoint, "snippet": InboundSnippet(endpoint)})
+	})
+	// The client's own Cal.com account (owner only): bookings there become
+	// meetings with call briefs. The key is saved like the mailbox password.
+	s.PUT("/pods/:slug/calendar", func(c *gin.Context) {
+		st, p, ok := pod(c)
+		if !ok {
+			return
+		}
+		if who, _ := personOf(c); !who.Owner {
+			c.JSON(http.StatusForbidden, gin.H{"error": "only the TFG owner connects a client's calendar"})
+			return
+		}
+		var in struct {
+			CalcomKey string `json:"calcomKey"`
+		}
+		if err := c.ShouldBindJSON(&in); err != nil || strings.TrimSpace(in.CalcomKey) == "" || !integrationsSafeValue(strings.TrimSpace(in.CalcomKey)) {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "calcomKey expected"})
+			return
+		}
+		path, ok := integrationsEnvLocal(c, d)
+		if !ok {
+			return
+		}
+		if err := integrations.UpsertEnv(path, map[string]string{caldotcom.PodKeyName(email.PodKeyPrefix(p.Slug)): strings.TrimSpace(in.CalcomKey)}); err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "could not write ~/.founderos/.env"})
+			return
+		}
+		if _, err := d.Pool.Exec(c.Request.Context(), `UPDATE founderos_client_pods SET calendar_provider = 'calcom', updated_at = now() WHERE slug = $1`, p.Slug); err != nil {
+			podError(c, err)
+			return
+		}
+		_ = st.Log(c.Request.Context(), p.ID, "settings", "Cal.com calendar connected", "")
+		c.Header("Cache-Control", "no-store")
+		reply(c, st, p.Slug)
+	})
+	s.GET("/pods/:slug/meetings", func(c *gin.Context) {
+		_, p, ok := pod(c)
+		if !ok {
+			return
+		}
+		rows, err := d.Pool.Query(c.Request.Context(), `SELECT booking_uid, title, attendee_name, attendee_email, starts_at, brief,
+			brief_sent_at IS NOT NULL FROM founderos_pod_meetings WHERE pod_id = $1 ORDER BY starts_at DESC NULLS LAST LIMIT 100`, p.ID)
+		if err != nil {
+			podError(c, err)
+			return
+		}
+		defer rows.Close()
+		out := []gin.H{}
+		for rows.Next() {
+			var uid, title, name, mail, brief string
+			var at *time.Time
+			var sent bool
+			if err := rows.Scan(&uid, &title, &name, &mail, &at, &brief, &sent); err != nil {
+				podError(c, err)
+				return
+			}
+			out = append(out, gin.H{"uid": uid, "title": title, "name": name, "email": mail, "startsAt": at, "brief": brief, "briefSent": sent})
+		}
+		c.JSON(http.StatusOK, gin.H{"meetings": out, "calendarConnected": podCalendarKey(d, p.Slug) != ""})
 	})
 	s.GET("/pods/:slug/activity", func(c *gin.Context) {
 		st, p, ok := pod(c)

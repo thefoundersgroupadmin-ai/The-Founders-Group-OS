@@ -10,6 +10,7 @@ import (
 )
 
 type fakePortal struct {
+	meetings  map[int64]Meeting
 	pods      map[string]Pod
 	approvals map[string]*Approval // id → row
 	activity  []Activity
@@ -169,4 +170,38 @@ func TestClientPauseRequestsPauseThePod(t *testing.T) {
 	if got.Status != pods.StatusPaused || !strings.Contains(got.PausedReason, "holiday") || f.requests[0].Outcome == "" {
 		t.Fatalf("pause not applied: %s %q %q", got.Status, got.PausedReason, f.requests[0].Outcome)
 	}
+}
+
+func TestMeetingsAndBriefsReachThePortal(t *testing.T) {
+	s, p := setup(t)
+	ctx := context.Background()
+	if _, err := s.RecordMeetings(ctx, p.Slug, []pods.Meeting{{UID: "b-1", Title: "Discovery call", Start: "2030-01-07T10:00:00Z",
+		AttendeeEmail: "priya@bv.example", AttendeeName: "Priya Shah"}}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.Pool.Exec(ctx, `UPDATE founderos_pod_meetings SET brief = 'Priya runs ops.'`); err != nil {
+		t.Fatal(err)
+	}
+	f := newFake()
+	if err := Sync(ctx, s, f); err != nil {
+		t.Fatal(err)
+	}
+	if len(f.meetings) != 1 {
+		t.Fatalf("meetings %d", len(f.meetings))
+	}
+	for _, m := range f.meetings {
+		if m.Attendee != "Priya Shah" || m.Brief != "Priya runs ops." || m.StartsAt == nil || *m.StartsAt != "2030-01-07T10:00:00Z" {
+			t.Fatalf("meeting %+v", m)
+		}
+	}
+}
+
+func (f *fakePortal) UpsertMeetings(_ context.Context, rows []Meeting) error {
+	if f.meetings == nil {
+		f.meetings = map[int64]Meeting{}
+	}
+	for _, m := range rows {
+		f.meetings[m.OSID] = m
+	}
+	return nil
 }

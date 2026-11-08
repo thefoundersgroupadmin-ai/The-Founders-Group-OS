@@ -86,3 +86,37 @@ svelte-check 0 errors), Codex review, fixes, deploy, build-log entry.
 - **M8 Hand-off + end-to-end test:** export bundle (playbook, sequences, reports, CRM
   config), onboarding checklist, full dry-run of a fictional client from signature to
   hand-off, then Codex review of the whole system.
+
+## Codex design review (8 Nov 2026), adopted
+
+Guarantees added to M1 (full review in the build log):
+
+- **Identity:** `connectors/email` has four installation-wide inboxes and silently falls back to
+  inbox 1 for a missing or unknown `AccountID`. Pods need an account registry; dispatch must
+  reject missing, unknown or foreign accounts and pin the approved identity revision.
+- **Isolation:** every request checks workspace membership (a slug is not authorization);
+  bookings match attendees within the pod only; agent packets carry no HQ handover or data;
+  connectors resolve pod-bound credentials, never installation ones, for pod work.
+- **Exactly-once:** reserve per pod + recipient + step before sending; caps checked inside the
+  reservation; `uncertain` outcomes are never retried automatically.
+- **Dry run:** an explicit approved sink, all original recipients stripped, simulated receipts
+  kept apart from live history and caps.
+- **Pause:** re-checked immediately before dispatch.
+- **Approvals:** immutable revisions for messages, sequences and target lists; any edit
+  invalidates approval; client live sending waits for portal approval evidence (M2).
+- **Routines:** per-pod Paperclip routines provisioned idempotently, bindings stored in the OS,
+  scoped packets, pause blocks dispatch of already-running tasks.
+
+### M1 checklist (TDD, in order)
+
+1. [x] Pod store: lifecycle, sender, docs, activity (commit 884d186)
+2. [ ] Pod API with workspace-membership authorization; two pods can't touch each other
+3. [ ] Email account registry per pod; reject missing/unknown/foreign accounts
+4. [ ] Outbox: per-pod scope everywhere (`page_outbox.go`, `drafts.go`, importers)
+5. [ ] One send gate for manual, campaign, follow-up and owner sends: policy, pause, window, caps
+6. [ ] Reservations per pod+recipient+step; uncertain never retried
+7. [ ] Revision-bound approvals for messages, sequences, target lists
+8. [ ] Pod + global email suppression; reply and booking matching scoped to the pod
+9. [ ] Dry run via approved sink with separate simulated receipts
+10. [ ] Agent packets per pod (no HQ handover); routines provisioned per pod, idempotently
+11. [ ] /os/clients admin view; full gates; Codex review

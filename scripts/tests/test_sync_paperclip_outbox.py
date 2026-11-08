@@ -111,7 +111,9 @@ class PodRoutingTest(unittest.TestCase):
         self.assertIsNone(sync.sequence_key_for({"sequenceKey": None}, is_reply_task=False))
 
     def test_unbound_client_projects_are_quarantined(self):
-        names = {"proj-bv": "Client: Brightvale", "proj-x": "Client: Unknown", "proj-tfg": "TFG sales"}
+        names = {"proj-bv": "Client: Brightvale\n", "proj-x": "Client: Unknown\n", "proj-tfg": "TFG sales\n",
+                 "proj-renamed": "Renamed by hand\nAI SDR work for X (TFG OS pod client-x)"}
+        self.assertTrue(sync.quarantined({"projectId": "proj-renamed"}, self.PODS, names))
         self.assertFalse(sync.quarantined({"projectId": "proj-bv"}, self.PODS, names))
         self.assertTrue(sync.quarantined({"projectId": "proj-x"}, self.PODS, names))
         self.assertFalse(sync.quarantined({"projectId": "proj-tfg"}, self.PODS, names))

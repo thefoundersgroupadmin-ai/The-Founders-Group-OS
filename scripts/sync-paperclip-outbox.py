@@ -120,15 +120,26 @@ def sequence_key_for(entry, is_reply_task):
 
 
 def quarantined(issue, pods, project_names):
-    """A task in a "Client: ..." board project that no pod owns goes nowhere: never
-    into TFG's pipeline or outbox (Codex fix review #6)."""
+    """A task in a client board project that no pod owns goes nowhere: never into
+    TFG's pipeline or outbox (Codex reviews #6). A client project is named
+    "Client: ..." or carries the "(TFG OS pod ...)" description provisioning
+    writes, so a renamed or unbound pod project is still recognised."""
     pid = issue.get("projectId") or ""
-    return bool(pid) and pid not in pods and (project_names.get(pid) or "").startswith("Client:")
+    meta = project_names.get(pid) or ""
+    return bool(pid) and pid not in pods and (meta.startswith("Client:") or "(TFG OS pod " in meta)
 
 
 def project_names_of(projects):
+    """Project id -> name and description, from the board (a failed read raises: fail closed)."""
     projects = projects.get("projects", projects) if isinstance(projects, dict) else projects
-    return {p["id"]: p.get("name") or "" for p in projects or [] if isinstance(p, dict) and p.get("id")}
+    return {p["id"]: (p.get("name") or "") + "\n" + (p.get("description") or "")
+            for p in projects or [] if isinstance(p, dict) and p.get("id")}
+
+
+def withdraw_all_query(ident):
+    """Every waiting draft of a quarantined task."""
+    return ("UPDATE founderos_outbox SET status = 'rejected', decided_at = now(), error = 'task is in a client project with no pod' "
+            f"WHERE source = 'paperclip' AND source_ref = {sql(ident)} AND status = 'pending'")
 
 
 def withdraw_moved_query(ident, workspace_id):
@@ -225,10 +236,16 @@ def main():
     pod_senders = {p["workspace_id"]: p["sender_name"] for p in pods.values()}
     project_names = project_names_of(paperclip(pc, "GET", f"/api/companies/{company}/projects"))
     for issue in issues:
+        qident = issue.get("identifier") or issue["id"]
         if quarantined(issue, pods, project_names):
-            print(f"  {issue.get('identifier')}: skipped (client project with no pod)")
+            print(f"  {qident}: skipped (client project with no pod)")
+            if not dry:
+                psql(db, withdraw_all_query(qident))
             continue
         rt = route(issue, pods, task_workspaces, default_pipeline_ws)
+        if not dry:
+            # Before reading documents: a task that moved loses its old drafts even if it has no outbox yet.
+            psql(db, withdraw_moved_query(qident, rt["outbox_ws"] or ws))
         binding = rt["binding"]
         pipeline_ws, pipeline_slug = rt["pipeline_ws"], rt["pipeline_slug"]
         outbox_ws = rt["outbox_ws"] or ws
@@ -238,8 +255,6 @@ def main():
         if not doc:
             continue
         ident = issue.get("identifier") or issue["id"]
-        if not dry:
-            psql(db, withdraw_moved_query(ident, outbox_ws))
         try:
             items = entries(doc.get("body") or (doc.get("latestRevision") or {}).get("body") or "")
         except ValueError as e:

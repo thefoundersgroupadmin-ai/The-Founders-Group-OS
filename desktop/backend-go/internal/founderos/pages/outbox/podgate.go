@@ -325,6 +325,8 @@ func dispatchPodSend(ctx context.Context, pool *pgxpool.Pool, ws string, r *podR
 		stop = "the pod's mailbox changed"
 	case !dry && !now.inWindow(nowFunc()):
 		stop = "outside the pod's sending hours"
+	case !dry && (now.FirstCap < r.FirstCap || now.FollowCap < r.FollowCap):
+		stop = "the pod's daily caps were lowered; trying again on the next pass"
 	default:
 		var suppressed bool
 		if err := tx.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM founderos_email_suppression
@@ -344,7 +346,8 @@ func dispatchPodSend(ctx context.Context, pool *pgxpool.Pool, ws string, r *podR
 			ws, it.ID, "held: "+stop); err != nil {
 			return nil, err
 		}
-		if _, err := tx.Exec(ctx, `DELETE FROM founderos_send_steps WHERE outbox_id = $1`, it.ID); err != nil {
+		if _, err := tx.Exec(ctx, `DELETE FROM founderos_send_steps s USING founderos_outbox o
+			WHERE s.outbox_id = $1 AND o.id = s.outbox_id AND NOT o.maybe_delivered`, it.ID); err != nil {
 			return nil, err
 		}
 		if err := tx.Commit(ctx); err != nil {
@@ -359,7 +362,8 @@ func dispatchPodSend(ctx context.Context, pool *pgxpool.Pool, ws string, r *podR
 		out.AccountID, out.RequireAccount = &acct, true
 	}
 	out.ViaPodGate = true
-	if !dry {
+	if r.AccountID != "" {
+		// The test run proves the live sender too.
 		out.ExpectFrom = now.SenderEmail
 	}
 	if dry {

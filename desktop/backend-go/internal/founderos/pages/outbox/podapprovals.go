@@ -55,7 +55,8 @@ var fieldRe = regexp.MustCompile(`^[\p{L}\p{N}][\p{L}\p{N} &.,'’()\-]{0,59}$`)
 // sentence punctuation, symbols, links or line breaks that could carry a claim.
 func validField(v string) bool {
 	v = strings.TrimSpace(v)
-	if !fieldRe.MatchString(v) || len(strings.Fields(v)) > 6 || strings.Contains(v, "..") {
+	// No sentence inside a field: a full stop may only end an abbreviation at the very end ("Ltd.").
+	if !fieldRe.MatchString(v) || len(strings.Fields(v)) > 4 || strings.Contains(strings.TrimSuffix(v, "."), ".") {
 		return false
 	}
 	low := strings.ToLower(v)
@@ -65,6 +66,21 @@ func validField(v string) bool {
 		}
 	}
 	return true
+}
+
+var alnum = regexp.MustCompile(`[^a-z0-9]+`)
+
+// companyMatchesDomain anchors {company} to the recipient: the company must
+// share a word of four or more letters with the first label of their domain.
+func companyMatchesDomain(company, domain string) bool {
+	label := alnum.ReplaceAllString(strings.ToLower(strings.SplitN(domain, ".", 2)[0]), "")
+	for _, w := range strings.Fields(strings.ToLower(company)) {
+		w = alnum.ReplaceAllString(w, "")
+		if len(w) >= 4 && strings.Contains(label, w) {
+			return true
+		}
+	}
+	return false
 }
 
 func normalizeSpace(s string) string {
@@ -109,7 +125,7 @@ func clientApproval(ctx context.Context, tx pgx.Tx, r *podRules, it Item, c Cont
 				_ = tx.QueryRow(ctx, `SELECT coalesce(person, ''), coalesce(company, '') FROM founderos_funnel_contacts
 					WHERE id = $1 AND workspace_id = (SELECT workspace_id FROM founderos_client_pods WHERE id = $2)`,
 					*it.ContactID, r.ID).Scan(&person, &company)
-				if validField(company) {
+				if validField(company) && companyMatchesDomain(company, domain) {
 					fields["company"] = company
 				}
 				if f := strings.Fields(person); len(f) > 0 && validField(f[0]) {
@@ -123,7 +139,8 @@ func clientApproval(ctx context.Context, tx pgx.Tx, r *podRules, it Item, c Cont
 			}
 		}
 	}
-	hash := ContentHash(c.Subject, c.Body)
+	// Bound to who sends it as well as the wording: a new sender needs a new approval.
+	hash := ContentHash(r.SenderEmail+"\n"+c.Subject, c.Body)
 	var status, approvedHash string
 	err := tx.QueryRow(ctx, `SELECT status, coalesce(payload->>'hash', '') FROM founderos_client_approvals
 		WHERE pod_id = $1 AND kind = 'message' AND ref = $2`, r.ID, it.ID).Scan(&status, &approvedHash)

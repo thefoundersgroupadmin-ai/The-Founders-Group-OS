@@ -254,7 +254,7 @@ func (s *Store) SetDoc(ctx context.Context, slug, key, body string) error {
 	if !validKey(key) {
 		return fmt.Errorf("%w: unknown document %q", ErrInvalid, key)
 	}
-	tag, err := s.Pool.Exec(ctx, `INSERT INTO founderos_client_pod_docs (pod_id, key, body)
+	n, err := s.lockedExec(ctx, slug, `INSERT INTO founderos_client_pod_docs (pod_id, key, body)
 		SELECT id, $2, $3 FROM founderos_client_pods WHERE slug = $1
 		ON CONFLICT (pod_id, key) DO UPDATE SET
 			version = founderos_client_pod_docs.version + 1, body = EXCLUDED.body,
@@ -263,7 +263,7 @@ func (s *Store) SetDoc(ctx context.Context, slug, key, body string) error {
 	if err != nil {
 		return err
 	}
-	if tag.RowsAffected() == 0 {
+	if n == 0 {
 		if _, err := s.Get(ctx, slug); err != nil {
 			return err
 		}
@@ -288,6 +288,16 @@ func (s *Store) ApproveDoc(ctx context.Context, slug, key, by string) error {
 	return s.Log(ctx, podID, "doc_approved", fmt.Sprintf("%s approved by %s", key, by), key)
 }
 
+func docVia(ctx context.Context, q querier, podID, key string) (Doc, error) {
+	var d Doc
+	err := q.QueryRow(ctx, `SELECT key, body, version, approved_at, updated_at FROM founderos_client_pod_docs
+		WHERE pod_id = $1 AND key = $2`, podID, key).Scan(&d.Key, &d.Body, &d.Version, &d.ApprovedAt, &d.UpdatedAt)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return d, ErrNotFound
+	}
+	return d, err
+}
+
 func (s *Store) Doc(ctx context.Context, slug, key string) (Doc, error) {
 	var d Doc
 	err := s.Pool.QueryRow(ctx, `SELECT d.key, d.body, d.version, d.approved_at, d.updated_at
@@ -301,6 +311,14 @@ func (s *Store) Doc(ctx context.Context, slug, key string) (Doc, error) {
 
 // Readiness lists what stops the pod going live (empty = ready).
 func (s *Store) Readiness(ctx context.Context, p Pod) ([]string, error) {
+	return s.readiness(ctx, s.Pool, p)
+}
+
+type querier interface {
+	QueryRow(ctx context.Context, sql string, args ...any) pgx.Row
+}
+
+func (s *Store) readiness(ctx context.Context, q querier, p Pod) ([]string, error) {
 	var missing []string
 	if p.SenderEmail == "" {
 		missing = append(missing, "a sender email")
@@ -309,7 +327,7 @@ func (s *Store) Readiness(ctx context.Context, p Pod) ([]string, error) {
 		missing = append(missing, "the client's own connected sending mailbox")
 	}
 	var simulated bool
-	if err := s.Pool.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM founderos_outbox WHERE workspace_id = $1
+	if err := q.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM founderos_outbox WHERE workspace_id = $1
 		AND status = 'simulated' AND sent_at > $2)`, p.WorkspaceID, p.ConfigChangedAt).Scan(&simulated); err != nil {
 		return nil, err
 	}
@@ -317,7 +335,7 @@ func (s *Store) Readiness(ctx context.Context, p Pod) ([]string, error) {
 		missing = append(missing, "a successful test run since the last change to the sender or sending rules")
 	}
 	for _, k := range requiredToGoLive {
-		d, err := s.Doc(ctx, p.Slug, k)
+		d, err := docVia(ctx, q, p.ID, k)
 		switch {
 		case errors.Is(err, ErrNotFound) || (err == nil && strings.TrimSpace(d.Body) == ""):
 			missing = append(missing, "the "+k+" document")
@@ -361,7 +379,8 @@ func (s *Store) SetStatus(ctx context.Context, slug, to, reason string) (Pod, er
 		return p, fmt.Errorf("%w: pausing needs a reason", ErrInvalid)
 	}
 	if to == StatusLive {
-		missing, err := s.Readiness(ctx, p)
+		// Through the locked transaction: no second connection while the lock is held.
+		missing, err := s.readiness(ctx, tx, p)
 		if err != nil {
 			return p, err
 		}

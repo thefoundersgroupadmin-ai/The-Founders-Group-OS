@@ -36,10 +36,37 @@ func TestTemplateFieldsMustLookLikeNames(t *testing.T) {
 			t.Errorf("%q rejected", ok)
 		}
 	}
-	for _, bad := range []string{"Brightvale; we guarantee £100k", "Acme! Best price", "a\nb", "ACME — 3x pipeline guaranteed", "", "Visit https://x.example"} {
+	for _, bad := range []string{"Brightvale; we guarantee £100k", "Acme! Best price", "a\nb", "ACME — 3x pipeline guaranteed", "", "Visit https://x.example",
+		"Acme. We triple your revenue"} {
 		if validField(bad) {
 			t.Errorf("%q accepted", bad)
 		}
+	}
+	// A company must match the recipient's domain.
+	if !companyMatchesDomain("Brightvale Logistics", "brightvale.example") || companyMatchesDomain("Acme", "brightvale.example") {
+		t.Error("company/domain anchoring wrong")
+	}
+}
+
+// Codex third review: an approval is bound to the sender too.
+func TestChangingTheSenderNeedsTheEmailApprovedAgain(t *testing.T) {
+	pool := catalogdb.TestDB(t)
+	ctx := context.Background()
+	file := podFixture(t, pool, "client-bv", "live")
+	if _, err := pool.Exec(ctx, `UPDATE founderos_client_pods SET approval_policy = 'client_approves_each';
+		INSERT INTO founderos_client_approvals (pod_id, kind, ref, title, payload, status)
+		SELECT id, 'target_list', 'l', 'L', jsonb_build_object('domains', '["brightvale.example"]'::jsonb), 'approved' FROM founderos_client_pods`); err != nil {
+		t.Fatal(err)
+	}
+	file("sx-1", "priya@brightvale.example")
+	got, send := recorder()
+	_, _ = Approve(ctx, pool, "client-bv", "sx-1", podReviewed, send)
+	if _, err := pool.Exec(ctx, `UPDATE founderos_client_approvals SET status = 'approved' WHERE kind = 'message';
+		UPDATE founderos_client_pods SET sender_email = 'other@bv-mail.example'`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Approve(ctx, pool, "client-bv", "sx-1", podReviewed, send); !errors.Is(err, ErrAwaitingClient) || len(*got) != 0 {
+		t.Fatalf("old approval used after the sender changed: %v", err)
 	}
 }
 

@@ -61,15 +61,20 @@ def load_pods(run):
 
 
 def quarantined(issue, pods, project_names):
-    """A task in a "Client: ..." board project that no pod owns goes nowhere: never
-    into TFG's pipeline or outbox (Codex fix review #6)."""
+    """A task in a client board project that no pod owns goes nowhere: never into
+    TFG's pipeline or outbox (Codex reviews #6). A client project is named
+    "Client: ..." or carries the "(TFG OS pod ...)" description provisioning
+    writes, so a renamed or unbound pod project is still recognised."""
     pid = issue.get("projectId") or ""
-    return bool(pid) and pid not in pods and (project_names.get(pid) or "").startswith("Client:")
+    meta = project_names.get(pid) or ""
+    return bool(pid) and pid not in pods and (meta.startswith("Client:") or "(TFG OS pod " in meta)
 
 
 def project_names_of(projects):
+    """Project id -> name and description, from the board (a failed read raises: fail closed)."""
     projects = projects.get("projects", projects) if isinstance(projects, dict) else projects
-    return {p["id"]: p.get("name") or "" for p in projects or [] if isinstance(p, dict) and p.get("id")}
+    return {p["id"]: (p.get("name") or "") + "\n" + (p.get("description") or "")
+            for p in projects or [] if isinstance(p, dict) and p.get("id")}
 
 
 def target_for(issue, pods, task_workspaces):

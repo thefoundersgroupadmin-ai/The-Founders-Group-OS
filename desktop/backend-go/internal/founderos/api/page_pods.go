@@ -40,6 +40,7 @@ type podJSON struct {
 	CalendarProvider   string     `json:"calendarProvider"`
 	BookingURL         string     `json:"bookingUrl"`
 	PausedReason       string     `json:"pausedReason"`
+	PortalClientID     string     `json:"portalClientId"`
 	WentLiveAt         *time.Time `json:"wentLiveAt"`
 	Missing            []string   `json:"missingToGoLive,omitempty"`
 }
@@ -50,10 +51,11 @@ func podOut(p pods.Pod) podJSON {
 		ApprovalPolicy: p.ApprovalPolicy, FirstEmailDailyCap: p.FirstEmailDailyCap, FollowUpDailyCap: p.FollowUpDailyCap,
 		Timezone: p.Timezone, SendWindow: [2]int{p.SendWindowStart, p.SendWindowEnd}, SendWeekends: p.SendWeekends, DryRunInbox: p.DryRunInbox,
 		CRMProvider: p.CRMProvider, CalendarProvider: p.CalendarProvider, BookingURL: p.BookingURL,
-		PausedReason: p.PausedReason, WentLiveAt: p.WentLiveAt}
+		PausedReason: p.PausedReason, WentLiveAt: p.WentLiveAt, PortalClientID: deref(p.PortalClientID)}
 }
 
 func registerPods(s *gin.RouterGroup, d *Deps) {
+	startPortalSync(d)
 	store := func(c *gin.Context) (*pods.Store, pods.Viewer, bool) {
 		p, ok := personOf(c)
 		if !ok {
@@ -427,6 +429,63 @@ func registerPods(s *gin.RouterGroup, d *Deps) {
 		c.JSON(http.StatusOK, gin.H{"agent": gin.H{"projectId": bind.ProjectID, "agentId": bind.AgentID,
 			"researchRoutineId": bind.ResearchRoutineID, "outreachRoutineId": bind.OutreachRoutineID, "routinesActive": bind.RoutinesActive}})
 	})
+	s.PUT("/pods/:slug/portal", func(c *gin.Context) {
+		st, p, ok := pod(c)
+		if !ok {
+			return
+		}
+		if who, _ := personOf(c); !who.Owner {
+			c.JSON(http.StatusForbidden, gin.H{"error": "only the TFG owner links a client portal"})
+			return
+		}
+		var in struct {
+			PortalClientID string `json:"portalClientId"`
+		}
+		if err := c.ShouldBindJSON(&in); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "portalClientId expected"})
+			return
+		}
+		if err := st.LinkPortal(c.Request.Context(), p.Slug, in.PortalClientID); err != nil {
+			podError(c, err)
+			return
+		}
+		reply(c, st, p.Slug)
+	})
+	s.POST("/pods/:slug/target-lists", func(c *gin.Context) {
+		st, p, ok := pod(c)
+		if !ok {
+			return
+		}
+		var in struct {
+			Title   string   `json:"title"`
+			Domains []string `json:"domains"`
+		}
+		if err := c.ShouldBindJSON(&in); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "title and domains expected"})
+			return
+		}
+		if err := st.ProposeTargetList(c.Request.Context(), p.Slug, in.Title, in.Domains); err != nil {
+			podError(c, err)
+			return
+		}
+		c.JSON(http.StatusOK, gin.H{"ok": true})
+	})
+	s.GET("/pods/:slug/approvals", func(c *gin.Context) {
+		st, p, ok := pod(c)
+		if !ok {
+			return
+		}
+		list, err := st.Approvals(c.Request.Context(), p.ID)
+		if err != nil {
+			podError(c, err)
+			return
+		}
+		out := make([]gin.H, 0, len(list))
+		for _, a := range list {
+			out = append(out, gin.H{"kind": a.Kind, "ref": a.Ref, "title": a.Title, "status": a.Status})
+		}
+		c.JSON(http.StatusOK, gin.H{"approvals": out})
+	})
 	s.GET("/pods/:slug/activity", func(c *gin.Context) {
 		st, p, ok := pod(c)
 		if !ok {
@@ -459,4 +518,11 @@ func podError(c *gin.Context, err error) {
 		slog.Error("client pods", "error", err)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "client pods: internal error"})
 	}
+}
+
+func deref(s *string) string {
+	if s == nil {
+		return ""
+	}
+	return *s
 }

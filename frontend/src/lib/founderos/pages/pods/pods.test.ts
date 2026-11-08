@@ -1,12 +1,12 @@
 import { describe, expect, it } from 'vitest';
-import { DOC_LABELS, STATUS_BADGE, actionsFor, setupChecklist, waitingReason } from './pods';
+import { APPROVAL_BADGE, DOC_LABELS, STATUS_BADGE, actionsFor, parseDomains, setupChecklist, waitingReason } from './pods';
 import type { Pod } from './types';
 
 const pod = (over: Partial<Pod> = {}): Pod => ({
 	slug: 'client-brightvale', clientName: 'Brightvale', package: 'core', reps: 6, status: 'setup',
 	senderName: '', senderEmail: '', sendingDomain: '', approvalPolicy: 'client_approves_each',
 	firstEmailDailyCap: 20, followUpDailyCap: 40, timezone: 'Europe/London', sendWindow: [9, 17], sendWeekends: false, dryRunInbox: '',
-	crmProvider: '', calendarProvider: '', bookingUrl: '', pausedReason: '', wentLiveAt: null, ...over
+	crmProvider: '', calendarProvider: '', bookingUrl: '', pausedReason: '', portalClientId: '', wentLiveAt: null, ...over
 });
 
 describe('client pods view', () => {
@@ -48,6 +48,14 @@ describe('client pods view', () => {
 		expect(waitingReason('waiting: not signed')).toBe('Not signed by the pod\'s sender');
 		expect(waitingReason(null)).toBe('');
 		expect(waitingReason('something new')).toBe('something new');
+	});
+
+	it('labels client approval states and parses target-list domains', () => {
+		expect(APPROVAL_BADGE.pending.label).toBe('Waiting for client');
+		expect(APPROVAL_BADGE.changes_requested.tone).toBe('warn');
+		expect(parseDomains('Brightvale.example, oakfield.example\nhttps://www.ridgeway.example/about  oakfield.example')).toEqual([
+			'brightvale.example', 'oakfield.example', 'ridgeway.example'
+		]);
 	});
 
 	it('names every document', () => {

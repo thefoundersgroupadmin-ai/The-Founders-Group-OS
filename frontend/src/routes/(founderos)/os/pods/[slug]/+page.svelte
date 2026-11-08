@@ -7,8 +7,8 @@
 	import { page } from '$app/state';
 	import { founderosFetch } from '$lib/founderos/api';
 	import { Badge, PageHeader, Pressable, Rise, Slab } from '$lib/founderos/kit';
-	import { DOC_LABELS, STATUS_BADGE, actionsFor, setupChecklist, waitingReason } from '$lib/founderos/pages/pods/pods';
-	import type { Activity, AgentBinding, Mailbox, Pod, PodDoc } from '$lib/founderos/pages/pods/types';
+	import { APPROVAL_BADGE, DOC_LABELS, STATUS_BADGE, actionsFor, parseDomains, setupChecklist, waitingReason } from '$lib/founderos/pages/pods/pods';
+	import type { Activity, AgentBinding, ClientApproval, Mailbox, Pod, PodDoc } from '$lib/founderos/pages/pods/types';
 	import { STATUS_BADGE as OUTBOX_BADGE, recipientLine } from '$lib/founderos/pages/outbox/outbox';
 	import type { OutboxBody, OutboxItem } from '$lib/founderos/pages/outbox/types';
 
@@ -28,6 +28,9 @@
 	let note = $state('');
 	let busy = $state(false);
 	let openDoc = $state('icp');
+	let approvals = $state<ClientApproval[]>([]);
+	let portalId = $state('');
+	let list = $state({ title: '', domains: '' });
 	let rules = $state<{ approvalPolicy: string; firstEmailDailyCap: number; followUpDailyCap: number; timezone: string; sendWindow: [number, number]; sendWeekends: boolean; dryRunInbox: string; bookingUrl: string; crmProvider: string; calendarProvider: string } | null>(null);
 
 	const err = (e: unknown) => (e instanceof Error ? e.message : 'request failed');
@@ -48,6 +51,8 @@
 		founderosFetch<OutboxBody>(`${base}/outbox`).then((b) => (outbox = b)).catch(() => {});
 		founderosFetch<{ activity: Activity[] }>(`${base}/activity`).then((b) => (activity = b.activity)).catch(() => {});
 		founderosFetch<{ agent: AgentBinding | null }>(`${base}/agent`).then((b) => (agent = b.agent)).catch(() => {});
+		founderosFetch<{ approvals: ClientApproval[] }>(`${base}/approvals`).then((b) => (approvals = b.approvals)).catch(() => {});
+		portalId ||= pod?.portalClientId ?? '';
 		for (const key of Object.keys(DOC_LABELS)) {
 			founderosFetch<{ doc: PodDoc }>(`${base}/docs/${key}`)
 				.then((b) => {
@@ -81,6 +86,12 @@
 		act(async () => {
 			await founderosFetch(`${base}/mailbox`, { method: 'PUT', json: mb });
 			mb = { ...mb, pass: '' };
+		});
+	const linkPortal = () => act(() => founderosFetch(`${base}/portal`, { method: 'PUT', json: { portalClientId: portalId } }));
+	const proposeList = () =>
+		act(async () => {
+			await founderosFetch(`${base}/target-lists`, { method: 'POST', json: { title: list.title, domains: parseDomains(list.domains) } });
+			list = { title: '', domains: '' };
 		});
 	const saveRules = () => act(() => founderosFetch(`${base}/settings`, { method: 'PUT', json: rules }));
 	const saveDoc = (key: string) => act(() => founderosFetch(`${base}/docs/${key}`, { method: 'PUT', json: { body: drafts[key] ?? '' } }));
@@ -222,6 +233,31 @@
 				<div class="mt-2 flex flex-wrap gap-2">
 					<Pressable tone="secondary" disabled={busy} onclick={() => saveDoc(openDoc)}>Save</Pressable>
 					<Pressable tone="ghost" disabled={busy || !docs[openDoc] || !!docs[openDoc]?.approvedAt} onclick={() => recordApproval(openDoc)}>Record client approval</Pressable>
+				</div>
+			</Slab>
+
+			<Slab>
+				<p class="bn-dim mb-2 font-mono text-[10px] uppercase tracking-[0.15em]">Client portal</p>
+				<div class="flex flex-wrap items-center gap-2">
+					<input bind:value={portalId} placeholder="Portal client id (from the CRM)" aria-label="Portal client id" class="pc-input min-w-[320px] flex-1 rounded-[6px] px-2.5 py-1.5 font-mono text-[12px]" />
+					<Pressable tone="secondary" disabled={busy} onclick={linkPortal}>{pod.portalClientId ? 'Update link' : 'Link portal'}</Pressable>
+				</div>
+				<p class="bn-dim mt-1 font-mono text-[11px]">{pod.portalClientId ? 'Linked: the client sees status, approvals and activity in their portal, synced every 2 minutes.' : 'Not linked yet.'}</p>
+				<p class="bn-dim mt-3 mb-1 font-mono text-[10px] uppercase tracking-[0.15em]">Client approvals</p>
+				{#each approvals as a (a.kind + a.ref)}
+					<div class="flex flex-wrap items-center justify-between gap-2 py-0.5">
+						<span class="text-[12px]">{a.title}</span>
+						<Badge tone={APPROVAL_BADGE[a.status].tone}>{APPROVAL_BADGE[a.status].label}</Badge>
+					</div>
+				{:else}
+					<p class="bn-dim font-mono text-[12px]">Nothing sent for approval yet.</p>
+				{/each}
+				<p class="bn-dim mt-3 mb-1 font-mono text-[10px] uppercase tracking-[0.15em]">Propose a target list</p>
+				<input bind:value={list.title} placeholder="List name (e.g. Multi-site warehouses)" aria-label="Target list name" class="pc-input mb-2 w-full rounded-[6px] px-2.5 py-1.5 text-[12px]" />
+				<textarea bind:value={list.domains} rows="4" placeholder="Company domains or websites, one per line" aria-label="Target list domains" class="pc-input w-full resize-y rounded-[6px] px-2.5 py-2 text-[12px]"></textarea>
+				<div class="mt-2 flex items-center gap-2">
+					<Pressable tone="secondary" disabled={busy || !list.title.trim() || parseDomains(list.domains).length === 0} onclick={proposeList}>Send to client for approval</Pressable>
+					<span class="bn-dim font-mono text-[11px]">{parseDomains(list.domains).length} companies</span>
 				</div>
 			</Slab>
 

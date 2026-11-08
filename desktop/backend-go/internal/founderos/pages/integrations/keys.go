@@ -82,6 +82,9 @@ var KeySlots = []KeySlot{
 	{EnvVar: "HERMES_GATEWAY_URL", Label: "Hermes gateway URL", Group: "Agents", Hint: "the worker-pool gateway the stack check pings; loopback :8642 on the mini", ConnectorID: "local-stack"},
 	{EnvVar: "TYPEFORM_API_KEY", Label: "Typeform personal token", Group: "CRM", Hint: "Typeform → Account → Personal tokens; scopes forms:read + responses:read", ConnectorID: "typeform"},
 	{EnvVar: "FATHOM_API_KEY", Label: "Fathom API key", Group: "CRM", Hint: "Fathom → Settings → API; sent as X-Api-Key", ConnectorID: "fathom"},
+	// The client portal (Supabase tfg-backend): TFG OS syncs each client's AI SDR there (docs/tfg/CLIENT-PODS.md M2).
+	{EnvVar: "PORTAL_SUPABASE_URL", Label: "Client portal URL", Group: "CRM", Hint: "https://<project>.supabase.co"},
+	{EnvVar: "PORTAL_SUPABASE_SERVICE_KEY", Label: "Client portal service key", Group: "CRM", Hint: "Supabase project settings, API, service_role key; stays on this Mac"},
 	{EnvVar: "VIDALYTICS_API_KEY", Label: "Vidalytics API key", Group: "Content", Hint: "Account Settings → Global Settings → API (Premium+); sent as X-API-Key", ConnectorID: "vidalytics"},
 	{EnvVar: "PLAUD_REFRESH_TOKEN", Label: "Plaud refresh token", Group: "Knowledge", Hint: "refresh_token from ~/.plaud/tokens-mcp.json after `claude mcp` signs in; the OS mints its own access tokens", ConnectorID: "plaud"},
 	{EnvVar: "BEEHIIV_PUBLICATION_ID", Label: "Beehiiv publication ID", Group: "Content", Hint: "The publication this OS reads; required alongside its API key", ConnectorID: "beehiiv"},

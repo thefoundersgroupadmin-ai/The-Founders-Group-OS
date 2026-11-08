@@ -22,6 +22,7 @@ export type Pod = {
 	calendarProvider: string;
 	bookingUrl: string;
 	pausedReason: string;
+	portalClientId: string;
 	wentLiveAt: string | null;
 	missingToGoLive?: string[];
 };
@@ -30,3 +31,4 @@ export type PodDoc = { key: string; body: string; version: number; approvedAt: s
 export type Mailbox = { configured: boolean; host: string; user: string; from: string; fromName: string; smtpHost: string; smtpPort: string; pass: string };
 export type Activity = { at: string; kind: string; summary: string; ref: string };
 export type AgentBinding = { projectId: string; agentId: string; researchRoutineId: string; outreachRoutineId: string; routinesActive: boolean };
+export type ClientApproval = { kind: string; ref: string; title: string; status: 'pending' | 'approved' | 'changes_requested' | 'withdrawn' };

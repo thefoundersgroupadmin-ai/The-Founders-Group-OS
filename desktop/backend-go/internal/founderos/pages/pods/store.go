@@ -267,8 +267,10 @@ func (s *Store) SetDoc(ctx context.Context, slug, key, body string) error {
 		if _, err := s.Get(ctx, slug); err != nil {
 			return err
 		}
+		return nil
 	}
-	return nil
+	// The client approves each version of a document in the portal.
+	return s.fileDocApproval(ctx, slug, key, body)
 }
 
 // ApproveDoc records the client's sign-off on the current version.

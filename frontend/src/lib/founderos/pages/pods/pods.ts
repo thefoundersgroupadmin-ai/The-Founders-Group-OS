@@ -1,6 +1,6 @@
 // Pure helpers for /os/pods (client AI SDR pods, docs/tfg/CLIENT-PODS.md).
 import type { BadgeTone } from '$lib/founderos/kit';
-import type { Pod, PodStatus } from './types';
+import type { ClientApproval, Pod, PodStatus } from './types';
 
 export const STATUS_BADGE: Record<PodStatus, { tone: BadgeTone; label: string }> = {
 	setup: { tone: 'default', label: 'Setting up' },
@@ -98,4 +98,21 @@ export function waitingReason(err: string | null): string {
 	if (!err) return '';
 	for (const [re, text] of REASONS) if (re.test(err)) return text;
 	return err;
+}
+
+export const APPROVAL_BADGE: Record<ClientApproval['status'], { tone: BadgeTone; label: string }> = {
+	pending: { tone: 'accent', label: 'Waiting for client' },
+	approved: { tone: 'ok', label: 'Approved' },
+	changes_requested: { tone: 'warn', label: 'Changes requested' },
+	withdrawn: { tone: 'default', label: 'Withdrawn' }
+};
+
+/** Company domains from pasted text: commas, spaces, lines or URLs; lower-cased, de-duplicated, in order. */
+export function parseDomains(text: string): string[] {
+	const out: string[] = [];
+	for (const raw of text.split(/[\s,;]+/)) {
+		const host = raw.trim().toLowerCase().replace(/^https?:\/\//, '').replace(/^www\./, '').split('/')[0];
+		if (host && host.includes('.') && !out.includes(host)) out.push(host);
+	}
+	return out;
 }

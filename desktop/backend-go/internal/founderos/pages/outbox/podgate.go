@@ -49,14 +49,14 @@ var (
 var nowFunc = time.Now
 
 type podRules struct {
-	ID, Slug, Status, AccountID, Sink, Timezone, Policy string
-	Start, End                                          int
-	Weekends                                            bool
-	FirstCap, FollowCap                                 int
+	ID, Slug, Status, AccountID, Sink, Timezone, Policy, SenderName string
+	Start, End                                                      int
+	Weekends                                                        bool
+	FirstCap, FollowCap                                             int
 }
 
 const podRulesSQL = `SELECT id::text, slug, status, coalesce(sending_account_id, ''), dry_run_inbox, timezone,
-	send_window_start, send_window_end, send_weekends, first_email_daily_cap, follow_up_daily_cap, approval_policy
+	send_window_start, send_window_end, send_weekends, first_email_daily_cap, follow_up_daily_cap, approval_policy, sender_name
 	FROM founderos_client_pods WHERE workspace_id = $1`
 
 type querier interface {
@@ -67,7 +67,7 @@ func loadPodRules(ctx context.Context, q querier, ws string) (*podRules, error) 
 	var r podRules
 	var s, e int16
 	err := q.QueryRow(ctx, podRulesSQL, ws).Scan(&r.ID, &r.Slug, &r.Status, &r.AccountID, &r.Sink, &r.Timezone,
-		&s, &e, &r.Weekends, &r.FirstCap, &r.FollowCap, &r.Policy)
+		&s, &e, &r.Weekends, &r.FirstCap, &r.FollowCap, &r.Policy, &r.SenderName)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, nil
 	}

@@ -29,25 +29,32 @@ func ContentHash(subject, body string) string {
 	return hex.EncodeToString(h[:])
 }
 
-var placeholderRe = regexp.MustCompile(`\{[a-z_]{1,40}\}`)
+var placeholderRe = regexp.MustCompile(`\{([a-z_]{1,40})\}`)
 
-// MatchesTemplate reports whether text is tmpl with each {placeholder} replaced
-// by a short phrase (1-80 characters, no line break, no . ! or ?, so a fill
-// cannot add a sentence of its own), and nothing else changed.
-func MatchesTemplate(tmpl, text string) bool {
-	tmpl, text = strings.TrimSpace(tmpl), strings.TrimSpace(text)
-	parts := placeholderRe.Split(tmpl, -1)
-	var b strings.Builder
-	b.WriteString(`^`)
-	for i, p := range parts {
-		if i > 0 {
-			b.WriteString(`[^\n.!?]{1,80}?`)
+// TypedFields are the only placeholders an approved sequence step may use: the
+// OS fills them from its own records, never from agent text.
+var TypedFields = []string{"first_name", "company", "sender_name"}
+
+// RenderTemplate fills tmpl from fields. ok is false if it uses any placeholder
+// that is not a typed field, or a typed field with no value.
+func RenderTemplate(tmpl string, fields map[string]string) (string, bool) {
+	ok := true
+	out := placeholderRe.ReplaceAllStringFunc(tmpl, func(m string) string {
+		v := strings.TrimSpace(fields[m[1:len(m)-1]])
+		if v == "" {
+			ok = false
 		}
-		b.WriteString(regexp.QuoteMeta(p))
+		return v
+	})
+	return strings.TrimSpace(out), ok
+}
+
+func normalizeSpace(s string) string {
+	lines := strings.Split(strings.ReplaceAll(strings.TrimSpace(s), "\r\n", "\n"), "\n")
+	for i, l := range lines {
+		lines[i] = strings.Join(strings.Fields(l), " ")
 	}
-	b.WriteString(`$`)
-	re, err := regexp.Compile(b.String())
-	return err == nil && re.MatchString(text)
+	return strings.Join(lines, "\n")
 }
 
 // clientApproval returns "" when the send is covered, else why it waits (and
@@ -72,8 +79,25 @@ func clientApproval(ctx context.Context, tx pgx.Tx, r *podRules, it Item, c Cont
 		if err != nil && !errors.Is(err, pgx.ErrNoRows) {
 			return "", err
 		}
-		if err == nil && MatchesTemplate(subj, c.Subject) && MatchesTemplate(body, c.Body) {
-			return "", nil
+		if err == nil {
+			// Codex M1 review #5: filled by the OS from the contact's record and
+			// the pod's sender, then compared exactly.
+			fields := map[string]string{"sender_name": r.SenderName}
+			if it.ContactID != nil {
+				var person, company string
+				_ = tx.QueryRow(ctx, `SELECT coalesce(person, ''), coalesce(company, '') FROM founderos_funnel_contacts
+					WHERE id = $1 AND workspace_id = (SELECT workspace_id FROM founderos_client_pods WHERE id = $2)`,
+					*it.ContactID, r.ID).Scan(&person, &company)
+				fields["company"] = company
+				if f := strings.Fields(person); len(f) > 0 {
+					fields["first_name"] = f[0]
+				}
+			}
+			ws, okS := RenderTemplate(subj, fields)
+			wb, okB := RenderTemplate(body, fields)
+			if okS && okB && normalizeSpace(ws) == normalizeSpace(c.Subject) && normalizeSpace(wb) == normalizeSpace(c.Body) {
+				return "", nil
+			}
 		}
 	}
 	hash := ContentHash(c.Subject, c.Body)

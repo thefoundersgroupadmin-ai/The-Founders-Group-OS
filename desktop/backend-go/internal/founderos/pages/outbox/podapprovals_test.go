@@ -77,7 +77,10 @@ func TestOnlyApprovedTargetListCompaniesAreEmailed(t *testing.T) {
 	}
 }
 
-func TestAnApprovedSequenceStepCoversEveryRecipientButOnlyItsPlaceholders(t *testing.T) {
+// Codex M1 review #5: a sequence template is filled by the OS from typed
+// contact fields ({first_name}, {company}, {sender_name}) and must match
+// exactly; anything freeform needs the client's approval of that email.
+func TestAnApprovedSequenceStepCoversEveryRecipientOnlyWhenFilledFromTheirRecord(t *testing.T) {
 	pool := catalogdb.TestDB(t)
 	ctx := context.Background()
 	file := podFixture(t, pool, "client-bv", "live")
@@ -85,29 +88,45 @@ func TestAnApprovedSequenceStepCoversEveryRecipientButOnlyItsPlaceholders(t *tes
 	if _, err := pool.Exec(ctx, `UPDATE founderos_client_pods SET approval_policy = 'client_approves_sequences';
 		INSERT INTO founderos_client_approvals (pod_id, kind, ref, title, payload, status)
 		SELECT id, 'sequence_step', 'warehouses:1', 'Step 1', jsonb_build_object(
-			'subject', 'Three warehouses, one stock count',
-			'body', 'Hi {first_name}, congratulations on {trigger}. Worth 15 minutes?'), 'approved'
+			'subject', 'Stock counts at {company}',
+			'body', E'Hi {first_name}, keeping stock in sync across sites is where spreadsheets hurt. Worth 15 minutes?\n\n{sender_name}'), 'approved'
+		FROM founderos_client_pods;
+		INSERT INTO founderos_client_approvals (pod_id, kind, ref, title, payload, status)
+		SELECT id, 'sequence_step', 'warehouses:freeform', 'Step 1b', jsonb_build_object(
+			'subject', 'Hello', 'body', 'Hi {first_name}, congratulations on {trigger}.'), 'approved'
+		FROM founderos_client_pods;
+		INSERT INTO founderos_funnel_contacts (id, workspace_id, name, status, venture, created_at, email, person, company)
+		SELECT 'ct-p', workspace_id, 'Priya Shah', 'first_touch', 'client', now(), 'priya@brightvale.example', 'Priya Shah', 'Brightvale'
+		FROM founderos_client_pods;
+		INSERT INTO founderos_funnel_contacts (id, workspace_id, name, status, venture, created_at, email, person, company)
+		SELECT 'ct-j', workspace_id, 'Jo Reed', 'first_touch', 'client', now(), 'jo@oakfield.example', 'Jo Reed', 'Oakfield'
 		FROM founderos_client_pods`); err != nil {
 		t.Fatal(err)
 	}
-	seq := func(id, to, body string) {
+	row := func(id, to, contact, key string) {
 		file(id, to)
-		if _, err := pool.Exec(ctx, `UPDATE founderos_outbox SET sequence_key = 'warehouses:1', body = $2 WHERE id = $1`, id, body); err != nil {
+		if _, err := pool.Exec(ctx, `UPDATE founderos_outbox SET sequence_key = $2, contact_id = $3 WHERE id = $1`, id, key, contact); err != nil {
 			t.Fatal(err)
 		}
 	}
-	seq("q-1", "priya@brightvale.example", "Hi Priya, congratulations on opening the third Brightvale site. Worth 15 minutes?")
-	seq("q-2", "jo@oakfield.example", "Hi Jo, congratulations on your new site. We guarantee 3x pipeline. Worth 15 minutes?")
+	row("q-1", "priya@brightvale.example", "ct-p", "warehouses:1")
+	row("q-2", "jo@oakfield.example", "ct-j", "warehouses:1")
 	got, send := recorder()
-	c1 := Content{Subject: "Three warehouses, one stock count", Body: "Hi Priya, congratulations on opening the third Brightvale site. Worth 15 minutes?"}
-	if _, err := Approve(ctx, pool, "client-bv", "q-1", c1, send); err != nil || len(*got) != 1 {
-		t.Fatalf("approved step not sent: %v", err)
+	good := Content{Subject: "Stock counts at Brightvale", Body: "Hi Priya, keeping stock in sync across sites is where spreadsheets hurt. Worth 15 minutes?\n\nSam"}
+	if _, err := Approve(ctx, pool, "client-bv", "q-1", good, send); err != nil || len(*got) != 1 {
+		t.Fatalf("approved step filled from the record not sent: %v", err)
 	}
-	c2 := Content{Subject: "Three warehouses, one stock count", Body: "Hi Jo, congratulations on your new site. We guarantee 3x pipeline. Worth 15 minutes?"}
-	// "We guarantee 3x pipeline." is outside the placeholders, so it needs its own approval.
-	_, err := Approve(ctx, pool, "client-bv", "q-2", c2, send)
-	if !errors.Is(err, ErrAwaitingClient) || len(*got) != 1 {
-		t.Fatalf("off-template wording sent: %v", err)
+	injected := Content{Subject: "Stock counts at Oakfield", Body: "Hi Jo; we guarantee £100000 revenue, keeping stock in sync across sites is where spreadsheets hurt. Worth 15 minutes?\n\nSam"}
+	if _, err := Approve(ctx, pool, "client-bv", "q-2", injected, send); !errors.Is(err, ErrAwaitingClient) || len(*got) != 1 {
+		t.Fatalf("injected claim sent on a step approval: %v", err)
+	}
+	row("q-3", "jo@oakfield.example", "ct-j", "warehouses:freeform")
+	if _, err := pool.Exec(ctx, `UPDATE founderos_outbox SET status = 'rejected' WHERE id = 'q-2'`); err != nil {
+		t.Fatal(err)
+	}
+	free := Content{Subject: "Hello", Body: "Hi Jo, congratulations on the new site."}
+	if _, err := Approve(ctx, pool, "client-bv", "q-3", free, send); !errors.Is(err, ErrAwaitingClient) || len(*got) != 1 {
+		t.Fatalf("a freeform placeholder sent without per-email approval: %v", err)
 	}
 }
 

@@ -21,9 +21,9 @@ func podFixture(t *testing.T, pool *pgxpool.Pool, slug, status string) func(id, 
 	ws := catalogdb.Workspace(t, pool, slug)
 	if _, err := pool.Exec(ctx, `INSERT INTO founderos_client_pods (workspace_id, slug, client_name, status,
 		sender_name, sender_email, sending_account_id, sending_domain, dry_run_inbox, timezone,
-		send_window_start, send_window_end, send_weekends, first_email_daily_cap, follow_up_daily_cap)
+		send_window_start, send_window_end, send_weekends, first_email_daily_cap, follow_up_daily_cap, approval_policy)
 		VALUES ($1, $2, 'Brightvale', $3, 'Sam', 'sam@bv-mail.example', 'pod:'||$2, 'bv-mail.example',
-		'operator@tfg.example', 'UTC', 0, 24, true, 20, 40)`, ws, slug, status); err != nil {
+		'operator@tfg.example', 'UTC', 0, 24, true, 20, 40, 'auto')`, ws, slug, status); err != nil {
 		t.Fatal(err)
 	}
 	return func(id, to string) {

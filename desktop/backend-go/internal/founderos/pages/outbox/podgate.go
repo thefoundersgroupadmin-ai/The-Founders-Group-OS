@@ -35,20 +35,23 @@ var (
 	ErrSuppressed = errors.New("suppressed")
 	// ErrForeignAccount: the row names a sending identity that is not the pod's.
 	ErrForeignAccount = errors.New("names another sending account")
+	// ErrAwaitingClient: the client has not approved this exact wording, its
+	// sequence step, or the company's place on a target list. Still pending.
+	ErrAwaitingClient = errors.New("awaiting client approval")
 )
 
 // nowFunc is swapped in tests.
 var nowFunc = time.Now
 
 type podRules struct {
-	ID, Slug, Status, AccountID, Sink, Timezone string
-	Start, End                                  int
-	Weekends                                    bool
-	FirstCap, FollowCap                         int
+	ID, Slug, Status, AccountID, Sink, Timezone, Policy string
+	Start, End                                          int
+	Weekends                                            bool
+	FirstCap, FollowCap                                 int
 }
 
 const podRulesSQL = `SELECT id::text, slug, status, coalesce(sending_account_id, ''), dry_run_inbox, timezone,
-	send_window_start, send_window_end, send_weekends, first_email_daily_cap, follow_up_daily_cap
+	send_window_start, send_window_end, send_weekends, first_email_daily_cap, follow_up_daily_cap, approval_policy
 	FROM founderos_client_pods WHERE workspace_id = $1`
 
 type querier interface {
@@ -59,7 +62,7 @@ func loadPodRules(ctx context.Context, q querier, ws string) (*podRules, error) 
 	var r podRules
 	var s, e int16
 	err := q.QueryRow(ctx, podRulesSQL, ws).Scan(&r.ID, &r.Slug, &r.Status, &r.AccountID, &r.Sink, &r.Timezone,
-		&s, &e, &r.Weekends, &r.FirstCap, &r.FollowCap)
+		&s, &e, &r.Weekends, &r.FirstCap, &r.FollowCap, &r.Policy)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, nil
 	}
@@ -144,6 +147,16 @@ func approvePod(ctx context.Context, pool *pgxpool.Pool, ws, id string, content 
 	}
 	if inFlight {
 		return nil, held("another email to this person is sending or its delivery is uncertain")
+	}
+
+	if why, err := clientApproval(ctx, tx, r, it, content, domain); err != nil {
+		return nil, err
+	} else if why != "" {
+		// The approval request is kept even though nothing is sent.
+		if err := tx.Commit(ctx); err != nil {
+			return nil, err
+		}
+		return nil, fmt.Errorf("%w: %s", ErrAwaitingClient, why)
 	}
 
 	dry := r.Status == "dry_run"

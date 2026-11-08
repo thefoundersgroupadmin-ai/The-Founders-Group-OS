@@ -44,22 +44,23 @@ var Statuses = []string{"pending", "sending", "sent", "rejected", "failed", "unc
 
 // Item is one outbox row.
 type Item struct {
-	ID        string     `json:"id"`
-	Source    string     `json:"source"`
-	SourceRef *string    `json:"sourceRef"`
-	ContactID *string    `json:"contactId"`
-	AccountID *string    `json:"accountId"`
-	To        string     `json:"to"`
-	ToName    *string    `json:"toName"`
-	Company   *string    `json:"company"`
-	Subject   string     `json:"subject"`
-	Body      string     `json:"body"`
-	Status    string     `json:"status"`
-	Error     *string    `json:"error"`
-	Attempt   int        `json:"attempt"`
-	CreatedAt time.Time  `json:"createdAt"`
-	DecidedAt *time.Time `json:"decidedAt"`
-	SentAt    *time.Time `json:"sentAt"`
+	ID          string     `json:"id"`
+	Source      string     `json:"source"`
+	SourceRef   *string    `json:"sourceRef"`
+	ContactID   *string    `json:"contactId"`
+	AccountID   *string    `json:"accountId"`
+	To          string     `json:"to"`
+	ToName      *string    `json:"toName"`
+	Company     *string    `json:"company"`
+	Subject     string     `json:"subject"`
+	Body        string     `json:"body"`
+	Status      string     `json:"status"`
+	Error       *string    `json:"error"`
+	Attempt     int        `json:"attempt"`
+	CreatedAt   time.Time  `json:"createdAt"`
+	DecidedAt   *time.Time `json:"decidedAt"`
+	SentAt      *time.Time `json:"sentAt"`
+	SequenceKey *string    `json:"sequenceKey"`
 	// RequireAccount: send only from AccountID, never a default inbox (pods).
 	RequireAccount bool `json:"-"`
 }
@@ -86,12 +87,12 @@ type Content struct {
 type SendFunc func(ctx context.Context, it Item) error
 
 const cols = `id, source, source_ref, contact_id, account_id, to_address, to_name, company,
-	subject, body, status, error, attempt, created_at, decided_at, sent_at`
+	subject, body, status, error, attempt, created_at, decided_at, sent_at, sequence_key`
 
 func scan(row pgx.Row) (Item, error) {
 	var it Item
 	err := row.Scan(&it.ID, &it.Source, &it.SourceRef, &it.ContactID, &it.AccountID, &it.To, &it.ToName, &it.Company,
-		&it.Subject, &it.Body, &it.Status, &it.Error, &it.Attempt, &it.CreatedAt, &it.DecidedAt, &it.SentAt)
+		&it.Subject, &it.Body, &it.Status, &it.Error, &it.Attempt, &it.CreatedAt, &it.DecidedAt, &it.SentAt, &it.SequenceKey)
 	return it, err
 }
 

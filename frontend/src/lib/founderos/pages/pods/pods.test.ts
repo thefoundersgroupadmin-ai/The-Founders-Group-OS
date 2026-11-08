@@ -5,7 +5,7 @@ import type { Pod } from './types';
 const pod = (over: Partial<Pod> = {}): Pod => ({
 	slug: 'client-brightvale', clientName: 'Brightvale', package: 'core', reps: 6, status: 'setup',
 	senderName: '', senderEmail: '', sendingDomain: '', approvalPolicy: 'client_approves_each',
-	firstEmailDailyCap: 20, followUpDailyCap: 40, timezone: 'Europe/London', sendWindow: [9, 17], sendWeekends: false,
+	firstEmailDailyCap: 20, followUpDailyCap: 40, timezone: 'Europe/London', sendWindow: [9, 17], sendWeekends: false, dryRunInbox: '',
 	crmProvider: '', calendarProvider: '', bookingUrl: '', pausedReason: '', wentLiveAt: null, ...over
 });
 

@@ -106,6 +106,16 @@ func TestPodAPIWalksAPodFromSetupToLive(t *testing.T) {
 			t.Fatalf("%s %s: %d %v", s.method, s.path, code, body)
 		}
 	}
+	if code, body := podsDo(t, h, http.MethodPut, base+"/settings", `{"approvalPolicy":"client_approves_each","firstEmailDailyCap":25,
+		"followUpDailyCap":50,"timezone":"America/New_York","sendWindow":[9,17],"dryRunInbox":"ops@tfg.example"}`); code != http.StatusOK ||
+		body["pod"].(map[string]any)["dryRunInbox"] != "ops@tfg.example" {
+		t.Fatalf("settings: %d %v", code, body)
+	}
+	if _, err := pool.Exec(context.Background(), `UPDATE founderos_client_pods SET sending_account_id = 'pod:client-oakfield' WHERE slug = 'client-oakfield';
+		INSERT INTO founderos_outbox (id, workspace_id, source, to_address, subject, body, status, sent_at)
+		SELECT 'sim-1', workspace_id, 'paperclip', 'a@b.example', 's', 'b', 'simulated', now() FROM founderos_client_pods WHERE slug = 'client-oakfield'`); err != nil {
+		t.Fatal(err)
+	}
 	code, body := podsDo(t, h, http.MethodPost, base+"/status", `{"status":"live"}`)
 	if code != http.StatusOK || body["pod"].(map[string]any)["status"] != "live" {
 		t.Fatalf("go live: %d %v", code, body)

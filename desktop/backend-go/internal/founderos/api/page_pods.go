@@ -35,6 +35,7 @@ type podJSON struct {
 	Timezone           string     `json:"timezone"`
 	SendWindow         [2]int     `json:"sendWindow"`
 	SendWeekends       bool       `json:"sendWeekends"`
+	DryRunInbox        string     `json:"dryRunInbox"`
 	CRMProvider        string     `json:"crmProvider"`
 	CalendarProvider   string     `json:"calendarProvider"`
 	BookingURL         string     `json:"bookingUrl"`
@@ -47,7 +48,7 @@ func podOut(p pods.Pod) podJSON {
 	return podJSON{Slug: p.Slug, ClientName: p.ClientName, Package: p.Package, Reps: p.Reps, Status: p.Status,
 		SenderName: p.SenderName, SenderEmail: p.SenderEmail, SendingDomain: p.SendingDomain,
 		ApprovalPolicy: p.ApprovalPolicy, FirstEmailDailyCap: p.FirstEmailDailyCap, FollowUpDailyCap: p.FollowUpDailyCap,
-		Timezone: p.Timezone, SendWindow: [2]int{p.SendWindowStart, p.SendWindowEnd}, SendWeekends: p.SendWeekends,
+		Timezone: p.Timezone, SendWindow: [2]int{p.SendWindowStart, p.SendWindowEnd}, SendWeekends: p.SendWeekends, DryRunInbox: p.DryRunInbox,
 		CRMProvider: p.CRMProvider, CalendarProvider: p.CalendarProvider, BookingURL: p.BookingURL,
 		PausedReason: p.PausedReason, WentLiveAt: p.WentLiveAt}
 }
@@ -177,6 +178,43 @@ func registerPods(s *gin.RouterGroup, d *Deps) {
 		if err := st.SetSender(c.Request.Context(), p.Slug, pods.Sender{Name: in.Name, Email: in.Email, Domain: in.Domain, AccountID: in.AccountID}); err != nil {
 			podError(c, err)
 			return
+		}
+		reply(c, st, p.Slug)
+	})
+	s.PUT("/pods/:slug/settings", func(c *gin.Context) {
+		st, p, ok := pod(c)
+		if !ok {
+			return
+		}
+		if who, _ := personOf(c); !who.Owner {
+			c.JSON(http.StatusForbidden, gin.H{"error": "only the TFG owner changes a client's sending rules"})
+			return
+		}
+		var in struct {
+			ApprovalPolicy     string `json:"approvalPolicy"`
+			FirstEmailDailyCap int    `json:"firstEmailDailyCap"`
+			FollowUpDailyCap   int    `json:"followUpDailyCap"`
+			Timezone           string `json:"timezone"`
+			SendWindow         [2]int `json:"sendWindow"`
+			SendWeekends       bool   `json:"sendWeekends"`
+			DryRunInbox        string `json:"dryRunInbox"`
+			BookingURL         string `json:"bookingUrl"`
+			CRMProvider        string `json:"crmProvider"`
+			CalendarProvider   string `json:"calendarProvider"`
+		}
+		if err := c.ShouldBindJSON(&in); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "settings expected"})
+			return
+		}
+		if err := st.UpdateSettings(c.Request.Context(), p.Slug, pods.Settings{ApprovalPolicy: in.ApprovalPolicy,
+			FirstEmailDailyCap: in.FirstEmailDailyCap, FollowUpDailyCap: in.FollowUpDailyCap, Timezone: in.Timezone,
+			SendWindowStart: in.SendWindow[0], SendWindowEnd: in.SendWindow[1], SendWeekends: in.SendWeekends,
+			DryRunInbox: in.DryRunInbox, BookingURL: in.BookingURL, CRMProvider: in.CRMProvider, CalendarProvider: in.CalendarProvider}); err != nil {
+			podError(c, err)
+			return
+		}
+		if warn := resyncPodAgent(c.Request.Context(), d, st, p.Slug); warn != "" {
+			c.Header("X-Pod-Warning", warn)
 		}
 		reply(c, st, p.Slug)
 	})

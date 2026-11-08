@@ -28,12 +28,18 @@
 	let note = $state('');
 	let busy = $state(false);
 	let openDoc = $state('icp');
+	let rules = $state<{ approvalPolicy: string; firstEmailDailyCap: number; followUpDailyCap: number; timezone: string; sendWindow: [number, number]; sendWeekends: boolean; dryRunInbox: string; bookingUrl: string; crmProvider: string; calendarProvider: string } | null>(null);
 
 	const err = (e: unknown) => (e instanceof Error ? e.message : 'request failed');
 
 	async function load() {
 		try {
 			pod = (await founderosFetch<{ pod: Pod }>(base)).pod;
+			rules ??= {
+				approvalPolicy: pod.approvalPolicy, firstEmailDailyCap: pod.firstEmailDailyCap, followUpDailyCap: pod.followUpDailyCap,
+				timezone: pod.timezone, sendWindow: [...pod.sendWindow] as [number, number], sendWeekends: pod.sendWeekends,
+				dryRunInbox: pod.dryRunInbox, bookingUrl: pod.bookingUrl, crmProvider: pod.crmProvider, calendarProvider: pod.calendarProvider
+			};
 		} catch (e) {
 			failure = err(e);
 			return;
@@ -76,6 +82,7 @@
 			await founderosFetch(`${base}/mailbox`, { method: 'PUT', json: mb });
 			mb = { ...mb, pass: '' };
 		});
+	const saveRules = () => act(() => founderosFetch(`${base}/settings`, { method: 'PUT', json: rules }));
 	const saveDoc = (key: string) => act(() => founderosFetch(`${base}/docs/${key}`, { method: 'PUT', json: { body: drafts[key] ?? '' } }));
 	const recordApproval = (key: string) => {
 		const by = prompt('Who approved it, and how? (e.g. "Priya Shah by email, 9 Nov")');
@@ -148,6 +155,40 @@
 					</div>
 				{/each}
 			</Slab>
+
+			{#if rules}
+				<Slab>
+					<p class="bn-dim mb-2 font-mono text-[10px] uppercase tracking-[0.15em]">Sending rules</p>
+					<div class="grid grid-cols-1 gap-2 md:grid-cols-3">
+						<label class="text-[11px]">Client approval
+							<select bind:value={rules.approvalPolicy} class="pc-input mt-1 w-full rounded-[6px] px-2 py-1.5 text-[12px]">
+								<option value="client_approves_each">Every email</option>
+								<option value="client_approves_sequences">Approved sequences</option>
+								<option value="auto">Automatic (no client approval)</option>
+							</select>
+						</label>
+						<label class="text-[11px]">First emails a day<input type="number" min="0" max="500" bind:value={rules.firstEmailDailyCap} class="pc-input mt-1 w-full rounded-[6px] px-2 py-1.5 text-[12px]" /></label>
+						<label class="text-[11px]">Follow-ups a day<input type="number" min="0" max="1000" bind:value={rules.followUpDailyCap} class="pc-input mt-1 w-full rounded-[6px] px-2 py-1.5 text-[12px]" /></label>
+						<label class="text-[11px]">Timezone<input bind:value={rules.timezone} class="pc-input mt-1 w-full rounded-[6px] px-2 py-1.5 text-[12px]" /></label>
+						<label class="text-[11px]">Sending from (hour)<input type="number" min="0" max="23" bind:value={rules.sendWindow[0]} class="pc-input mt-1 w-full rounded-[6px] px-2 py-1.5 text-[12px]" /></label>
+						<label class="text-[11px]">Sending until (hour)<input type="number" min="1" max="24" bind:value={rules.sendWindow[1]} class="pc-input mt-1 w-full rounded-[6px] px-2 py-1.5 text-[12px]" /></label>
+						<label class="text-[11px]">Test-run inbox<input bind:value={rules.dryRunInbox} placeholder="where test emails go" class="pc-input mt-1 w-full rounded-[6px] px-2 py-1.5 text-[12px]" /></label>
+						<label class="text-[11px]">Booking link<input bind:value={rules.bookingUrl} placeholder="https://cal.com/…" class="pc-input mt-1 w-full rounded-[6px] px-2 py-1.5 text-[12px]" /></label>
+						<label class="text-[11px]">CRM
+							<select bind:value={rules.crmProvider} class="pc-input mt-1 w-full rounded-[6px] px-2 py-1.5 text-[12px]">
+								<option value="">None yet</option><option value="hubspot">HubSpot</option><option value="pipedrive">Pipedrive</option><option value="salesforce">Salesforce</option>
+							</select>
+						</label>
+						<label class="text-[11px]">Calendar
+							<select bind:value={rules.calendarProvider} class="pc-input mt-1 w-full rounded-[6px] px-2 py-1.5 text-[12px]">
+								<option value="">None yet</option><option value="calcom">Cal.com</option><option value="google">Google Calendar</option><option value="microsoft">Outlook</option>
+							</select>
+						</label>
+						<label class="flex items-center gap-2 text-[11px]"><input type="checkbox" bind:checked={rules.sendWeekends} /> Send at weekends</label>
+					</div>
+					<div class="mt-2"><Pressable tone="secondary" disabled={busy} onclick={saveRules}>Save rules</Pressable></div>
+				</Slab>
+			{/if}
 
 			<Slab>
 				<p class="bn-dim mb-2 font-mono text-[10px] uppercase tracking-[0.15em]">Sending mailbox</p>

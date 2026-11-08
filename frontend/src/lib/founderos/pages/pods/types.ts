@@ -17,6 +17,7 @@ export type Pod = {
 	timezone: string;
 	sendWindow: [number, number];
 	sendWeekends: boolean;
+	dryRunInbox: string;
 	crmProvider: string;
 	calendarProvider: string;
 	bookingUrl: string;

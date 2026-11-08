@@ -283,6 +283,17 @@ func (s *Store) Readiness(ctx context.Context, p Pod) ([]string, error) {
 	if p.SenderEmail == "" {
 		missing = append(missing, "a sender email")
 	}
+	if p.SendingAccountID == nil || *p.SendingAccountID != "pod:"+p.Slug {
+		missing = append(missing, "the client's own connected sending mailbox")
+	}
+	var simulated bool
+	if err := s.Pool.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM founderos_outbox WHERE workspace_id = $1 AND status = 'simulated')`,
+		p.WorkspaceID).Scan(&simulated); err != nil {
+		return nil, err
+	}
+	if !simulated {
+		missing = append(missing, "a successful test run (at least one email delivered to the test inbox)")
+	}
 	for _, k := range requiredToGoLive {
 		d, err := s.Doc(ctx, p.Slug, k)
 		switch {
@@ -422,4 +433,67 @@ func prefixed(cols string) string {
 		parts[i] = "p." + strings.TrimSpace(c)
 	}
 	return strings.Join(parts, ", ")
+}
+
+// Settings are the pod's sending rules, editable by the owner.
+type Settings struct {
+	ApprovalPolicy                       string
+	FirstEmailDailyCap, FollowUpDailyCap int
+	Timezone                             string
+	SendWindowStart, SendWindowEnd       int
+	SendWeekends                         bool
+	DryRunInbox, BookingURL              string
+	CRMProvider, CalendarProvider        string
+}
+
+// UpdateSettings validates and saves the pod's sending rules.
+func (s *Store) UpdateSettings(ctx context.Context, slug string, in Settings) error {
+	bad := func(why string) error { return fmt.Errorf("%w: %s", ErrInvalid, why) }
+	switch in.ApprovalPolicy {
+	case "client_approves_each", "client_approves_sequences", "auto":
+	default:
+		return bad("approval policy must be client_approves_each, client_approves_sequences or auto")
+	}
+	if _, err := time.LoadLocation(in.Timezone); err != nil || in.Timezone == "" {
+		return bad("timezone must be an IANA name such as Europe/London")
+	}
+	if in.SendWindowStart < 0 || in.SendWindowEnd > 24 || in.SendWindowStart >= in.SendWindowEnd {
+		return bad("sending hours must be 0-24 with the start before the end")
+	}
+	if in.FirstEmailDailyCap < 0 || in.FirstEmailDailyCap > 500 || in.FollowUpDailyCap < 0 || in.FollowUpDailyCap > 1000 {
+		return bad("daily caps must be 0-500 first emails and 0-1000 follow-ups")
+	}
+	sink := strings.TrimSpace(strings.ToLower(in.DryRunInbox))
+	if sink != "" && (!strings.Contains(sink, "@") || strings.ContainsAny(sink, " <>")) {
+		return bad("the test-run inbox must be an email address")
+	}
+	booking := strings.TrimSpace(in.BookingURL)
+	if booking != "" && !strings.HasPrefix(booking, "https://") {
+		return bad("the booking link must start with https://")
+	}
+	switch in.CRMProvider {
+	case "", "hubspot", "pipedrive", "salesforce":
+	default:
+		return bad("CRM must be hubspot, pipedrive or salesforce")
+	}
+	switch in.CalendarProvider {
+	case "", "calcom", "google", "microsoft":
+	default:
+		return bad("calendar must be calcom, google or microsoft")
+	}
+	tag, err := s.Pool.Exec(ctx, `UPDATE founderos_client_pods SET approval_policy = $2, first_email_daily_cap = $3,
+		follow_up_daily_cap = $4, timezone = $5, send_window_start = $6, send_window_end = $7, send_weekends = $8,
+		dry_run_inbox = $9, booking_url = $10, crm_provider = $11, calendar_provider = $12, updated_at = now() WHERE slug = $1`,
+		slug, in.ApprovalPolicy, in.FirstEmailDailyCap, in.FollowUpDailyCap, in.Timezone, in.SendWindowStart, in.SendWindowEnd,
+		in.SendWeekends, sink, booking, in.CRMProvider, in.CalendarProvider)
+	if err == nil && tag.RowsAffected() == 0 {
+		return ErrNotFound
+	}
+	if err == nil {
+		var id string
+		if s.Pool.QueryRow(ctx, `SELECT id::text FROM founderos_client_pods WHERE slug = $1`, slug).Scan(&id) == nil {
+			_ = s.Log(ctx, id, "settings", "Sending rules updated", "")
+		}
+	}
+	return err
 }

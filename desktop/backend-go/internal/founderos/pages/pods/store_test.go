@@ -3,6 +3,7 @@ package pods
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 
 	"github.com/rhl/businessos-backend/internal/founderos/pages/catalogdb"
@@ -60,7 +61,8 @@ func TestGoingLiveNeedsADryRunASenderAndApprovedTargetingAndVoice(t *testing.T) 
 	if _, err := s.SetStatus(ctx, p.Slug, StatusLive, ""); !errors.Is(err, ErrNotReady) {
 		t.Fatalf("live without sender/docs: %v", err)
 	}
-	if err := s.SetSender(ctx, p.Slug, Sender{Name: "Sam at Brightvale", Email: "sam@brightvale-mail.com", Domain: "brightvale-mail.com"}); err != nil {
+	if err := s.SetSender(ctx, p.Slug, Sender{Name: "Sam at Brightvale", Email: "sam@brightvale-mail.com", Domain: "brightvale-mail.com",
+		AccountID: "pod:" + p.Slug}); err != nil {
 		t.Fatal(err)
 	}
 	for _, k := range []string{"icp", "voice"} {
@@ -75,6 +77,15 @@ func TestGoingLiveNeedsADryRunASenderAndApprovedTargetingAndVoice(t *testing.T) 
 		if err := s.ApproveDoc(ctx, p.Slug, k, "client:priya"); err != nil {
 			t.Fatal(err)
 		}
+	}
+	// Codex M1 review: going live also needs a successful test run.
+	if _, err := s.SetStatus(ctx, p.Slug, StatusLive, ""); !errors.Is(err, ErrNotReady) || !strings.Contains(err.Error(), "test run") {
+		t.Fatalf("live without a test-run email: %v", err)
+	}
+	if _, err := s.Pool.Exec(ctx, `INSERT INTO founderos_outbox (id, workspace_id, source, to_address, subject, body, status, sent_at)
+		SELECT 'sim-1', workspace_id, 'paperclip', 'priya@brightvale.example', 's', 'b', 'simulated', now()
+		FROM founderos_client_pods WHERE slug = $1`, p.Slug); err != nil {
+		t.Fatal(err)
 	}
 	live, err := s.SetStatus(ctx, p.Slug, StatusLive, "")
 	if err != nil || live.Status != StatusLive || live.WentLiveAt == nil {
@@ -147,5 +158,33 @@ func TestAPodCanOnlyBeBoundToItsOwnMailbox(t *testing.T) {
 	}
 	if err := s.SetSender(ctx, p.Slug, Sender{Name: "Sam", Email: "sam@bv.example", AccountID: "pod:" + p.Slug}); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestSettingsAreValidated(t *testing.T) {
+	s := &Store{Pool: catalogdb.TestDB(t)}
+	ctx := context.Background()
+	p := newPod(t, s, "Brightvale")
+	good := Settings{ApprovalPolicy: "client_approves_sequences", FirstEmailDailyCap: 30, FollowUpDailyCap: 60,
+		Timezone: "America/New_York", SendWindowStart: 8, SendWindowEnd: 18, DryRunInbox: "ops@tfg.example",
+		BookingURL: "https://cal.com/brightvale/demo", CRMProvider: "hubspot", CalendarProvider: "google"}
+	if err := s.UpdateSettings(ctx, p.Slug, good); err != nil {
+		t.Fatal(err)
+	}
+	got, _ := s.Get(ctx, p.Slug)
+	if got.ApprovalPolicy != "client_approves_sequences" || got.Timezone != "America/New_York" || got.SendWindowEnd != 18 || got.DryRunInbox != "ops@tfg.example" || got.CRMProvider != "hubspot" {
+		t.Fatalf("settings not saved: %+v", got)
+	}
+	for name, bad := range map[string]Settings{
+		"policy":   {ApprovalPolicy: "yolo", Timezone: "UTC", SendWindowEnd: 17, FirstEmailDailyCap: 1, FollowUpDailyCap: 1},
+		"timezone": {ApprovalPolicy: "auto", Timezone: "Mars/Olympus", SendWindowEnd: 17, FirstEmailDailyCap: 1, FollowUpDailyCap: 1},
+		"window":   {ApprovalPolicy: "auto", Timezone: "UTC", SendWindowStart: 17, SendWindowEnd: 9, FirstEmailDailyCap: 1, FollowUpDailyCap: 1},
+		"sink":     {ApprovalPolicy: "auto", Timezone: "UTC", SendWindowEnd: 17, DryRunInbox: "not an email", FirstEmailDailyCap: 1, FollowUpDailyCap: 1},
+		"booking":  {ApprovalPolicy: "auto", Timezone: "UTC", SendWindowEnd: 17, BookingURL: "javascript:alert(1)", FirstEmailDailyCap: 1, FollowUpDailyCap: 1},
+		"cap":      {ApprovalPolicy: "auto", Timezone: "UTC", SendWindowEnd: 17, FirstEmailDailyCap: 10000, FollowUpDailyCap: 1},
+	} {
+		if err := s.UpdateSettings(ctx, p.Slug, bad); !errors.Is(err, ErrInvalid) {
+			t.Errorf("%s accepted: %v", name, err)
+		}
 	}
 }

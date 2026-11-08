@@ -2,6 +2,7 @@ package pods
 
 import (
 	"context"
+	"errors"
 	"strings"
 	"testing"
 
@@ -157,5 +158,40 @@ func TestPodRoutinesRunOnlyWhileThePodDoes(t *testing.T) {
 	}
 	if _, err := s.PodForProject(ctx, "some-other-project"); err != ErrNotFound {
 		t.Fatalf("unknown project: %v", err)
+	}
+}
+
+type flakyTriggers struct {
+	*fakeBoard
+	fail int
+}
+
+func (f *flakyTriggers) AddScheduleTrigger(ctx context.Context, id, cron, tz string) error {
+	if f.fail > 0 {
+		f.fail--
+		return errors.New("board timeout")
+	}
+	return f.fakeBoard.AddScheduleTrigger(ctx, id, cron, tz)
+}
+
+// Codex M1 review #10: a routine created without its schedule gets one on
+// the next provisioning instead of staying unscheduled forever.
+func TestAMissingScheduleIsRepairedOnTheNextSync(t *testing.T) {
+	s := &Store{Pool: catalogdb.TestDB(t)}
+	ctx := context.Background()
+	b := &flakyTriggers{fakeBoard: newFakeBoard(), fail: 1}
+	p := readyPod(t, s, "Brightvale")
+	if _, err := s.Provision(ctx, b, p.Slug); err == nil {
+		t.Fatal("a failed schedule was not reported")
+	}
+	bind, err := s.Provision(ctx, b, p.Slug)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(b.triggers[bind.ResearchRoutineID]) != 1 || len(b.triggers[bind.OutreachRoutineID]) != 1 || len(b.routines) != 2 {
+		t.Fatalf("schedules after repair: %v (%d routines)", b.triggers, len(b.routines))
+	}
+	if _, err := s.Provision(ctx, b, p.Slug); err != nil || len(b.triggers[bind.ResearchRoutineID]) != 1 {
+		t.Fatalf("schedule added twice: %v %v", b.triggers, err)
 	}
 }

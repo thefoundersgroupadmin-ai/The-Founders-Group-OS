@@ -37,6 +37,7 @@ type BoardRoutine struct {
 type Binding struct {
 	ProjectID, AgentID, ResearchRoutineID, OutreachRoutineID, BriefHash string
 	RoutinesActive                                                      bool
+	ResearchScheduled, OutreachScheduled                                bool
 }
 
 func (b Binding) withHash(h string) Binding { b.BriefHash = h; return b }
@@ -97,7 +98,9 @@ func Instructions(p Pod, docs map[string]string) string {
 		"evidence; cite sources in evidence.\n" +
 		"- Outreach: a task document with key \"outbox\": a JSON array of {\"to\", \"toName\", \"company\", \"subject\", " +
 		"\"body\", \"sequenceKey\" (optional)}. Plain text, under 150 words, one question, a specific reason for writing. " +
-		"Sign every email as " + p.SenderName + " and end it with exactly this line:\n" + optOutLine + "\n")
+		"Sign every email as " + p.SenderName + " and end it with exactly this line:\n" + optOutLine + "\n" +
+		"- Using an approved sequence step (\"sequenceKey\"): copy the step word for word, filling only {first_name}, " +
+		"{company} and {sender_name}. Any other change makes it a new email that needs the client's approval.\n")
 	return b.String()
 }
 
@@ -149,19 +152,32 @@ func (s *Store) Provision(ctx context.Context, b Board, slug string) (Binding, e
 	if docs["icp"] == "" {
 		return Binding{}, fmt.Errorf("%w: the pod needs its icp document before its agent can work", ErrInvalid)
 	}
+	// One provisioning per pod at a time: the lock lives as long as this transaction.
+	lock, err := s.Pool.Begin(ctx)
+	if err != nil {
+		return Binding{}, err
+	}
+	defer lock.Rollback(ctx)
+	if _, err := lock.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtext('founderos-pod-provision:' || $1))`, p.ID); err != nil {
+		return Binding{}, err
+	}
 	var bind Binding
-	err = s.Pool.QueryRow(ctx, `SELECT project_id, agent_id, research_routine_id, outreach_routine_id, brief_hash, routines_active
+	err = s.Pool.QueryRow(ctx, `SELECT project_id, agent_id, research_routine_id, outreach_routine_id, brief_hash, routines_active,
+		research_trigger_ok, outreach_trigger_ok
 		FROM founderos_pod_agents WHERE pod_id = $1`, p.ID).Scan(&bind.ProjectID, &bind.AgentID, &bind.ResearchRoutineID,
-		&bind.OutreachRoutineID, &bind.BriefHash, &bind.RoutinesActive)
+		&bind.OutreachRoutineID, &bind.BriefHash, &bind.RoutinesActive, &bind.ResearchScheduled, &bind.OutreachScheduled)
 	if err != nil && !errors.Is(err, pgx.ErrNoRows) {
 		return bind, err
 	}
 	save := func() error {
 		_, err := s.Pool.Exec(ctx, `INSERT INTO founderos_pod_agents (pod_id, project_id, agent_id, research_routine_id,
-			outreach_routine_id, brief_hash, routines_active, synced_at) VALUES ($1, $2, $3, $4, $5, $6, $7, now())
+			outreach_routine_id, brief_hash, routines_active, research_trigger_ok, outreach_trigger_ok, synced_at)
+			VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, now())
 			ON CONFLICT (pod_id) DO UPDATE SET project_id = $2, agent_id = $3, research_routine_id = $4,
-			outreach_routine_id = $5, brief_hash = $6, routines_active = $7, synced_at = now()`,
-			p.ID, bind.ProjectID, bind.AgentID, bind.ResearchRoutineID, bind.OutreachRoutineID, bind.BriefHash, bind.RoutinesActive)
+			outreach_routine_id = $5, brief_hash = $6, routines_active = $7, research_trigger_ok = $8,
+			outreach_trigger_ok = $9, synced_at = now()`,
+			p.ID, bind.ProjectID, bind.AgentID, bind.ResearchRoutineID, bind.OutreachRoutineID, bind.BriefHash, bind.RoutinesActive,
+			bind.ResearchScheduled, bind.OutreachScheduled)
 		return err
 	}
 	instructions := Instructions(p, docs)
@@ -191,13 +207,14 @@ func (s *Store) Provision(ctx context.Context, b Board, slug string) (Binding, e
 		status = "active"
 	}
 	routines := []struct {
-		id    *string
-		title string
-		brief string
-		cron  string
+		id        *string
+		scheduled *bool
+		title     string
+		brief     string
+		cron      string
 	}{
-		{&bind.ResearchRoutineID, p.ClientName + ": daily prospect research", researchBrief(p, docs), "0 7 * * " + cronDays(p)},
-		{&bind.OutreachRoutineID, p.ClientName + ": daily outreach", outreachBrief(p, docs), "0 8 * * " + cronDays(p)},
+		{&bind.ResearchRoutineID, &bind.ResearchScheduled, p.ClientName + ": daily prospect research", researchBrief(p, docs), "0 7 * * " + cronDays(p)},
+		{&bind.OutreachRoutineID, &bind.OutreachScheduled, p.ClientName + ": daily outreach", outreachBrief(p, docs), "0 8 * * " + cronDays(p)},
 	}
 	for _, r := range routines {
 		br := BoardRoutine{ProjectID: bind.ProjectID, AssigneeAgentID: bind.AgentID, Title: r.title, Description: r.brief, Status: status}
@@ -208,13 +225,18 @@ func (s *Store) Provision(ctx context.Context, b Board, slug string) (Binding, e
 			if err := save(); err != nil {
 				return bind, err
 			}
+		} else if err := b.UpdateRoutine(ctx, *r.id, br); err != nil {
+			return bind, err
+		}
+		// Codex M1 review #10: a routine without its schedule is repaired here.
+		if !*r.scheduled {
 			if err := b.AddScheduleTrigger(ctx, *r.id, r.cron, p.Timezone); err != nil {
 				return bind, err
 			}
-			continue
-		}
-		if err := b.UpdateRoutine(ctx, *r.id, br); err != nil {
-			return bind, err
+			*r.scheduled = true
+			if err := save(); err != nil {
+				return bind, err
+			}
 		}
 	}
 	bind.BriefHash = hashOf(instructions, routines[0].brief, routines[1].brief, status)
@@ -245,9 +267,10 @@ func (s *Store) HasAgent(ctx context.Context, slug string) (bool, error) {
 // GetBinding returns the pod's board binding, or ok=false before provisioning.
 func (s *Store) GetBinding(ctx context.Context, podID string) (Binding, bool, error) {
 	var b Binding
-	err := s.Pool.QueryRow(ctx, `SELECT project_id, agent_id, research_routine_id, outreach_routine_id, brief_hash, routines_active
+	err := s.Pool.QueryRow(ctx, `SELECT project_id, agent_id, research_routine_id, outreach_routine_id, brief_hash, routines_active,
+		research_trigger_ok, outreach_trigger_ok
 		FROM founderos_pod_agents WHERE pod_id = $1`, podID).Scan(&b.ProjectID, &b.AgentID, &b.ResearchRoutineID,
-		&b.OutreachRoutineID, &b.BriefHash, &b.RoutinesActive)
+		&b.OutreachRoutineID, &b.BriefHash, &b.RoutinesActive, &b.ResearchScheduled, &b.OutreachScheduled)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return b, false, nil
 	}

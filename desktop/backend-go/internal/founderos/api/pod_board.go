@@ -33,8 +33,15 @@ func (p podBoard) UpdateScheduleTrigger(ctx context.Context, triggerID, cron, tz
 	return p.b.UpdateScheduleTrigger(ctx, triggerID, cron, tz)
 }
 
+func (p podBoard) CreateTask(ctx context.Context, projectID, agentID, title, description string) (string, error) {
+	return p.b.CreateTask(ctx, projectID, agentID, title, description)
+}
+
 // podBoardFor is swapped in tests.
 var podBoardFor = func(d *Deps) pods.Board { return podBoard{paperclip.PodBoard{C: paperclip.New(d.Resolver)}} }
+
+// podTasksFor is swapped in tests.
+var podTasksFor = func(d *Deps) pods.TaskBoard { return podBoard{paperclip.PodBoard{C: paperclip.New(d.Resolver)}} }
 
 // resyncPodAgent refreshes a provisioned pod's agent and routines after a
 // status or document change; a pod without an agent yet is left alone.

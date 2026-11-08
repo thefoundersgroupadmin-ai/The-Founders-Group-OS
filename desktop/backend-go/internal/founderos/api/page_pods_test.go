@@ -7,7 +7,9 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"os"
+	"strings"
 	"testing"
 
 	"github.com/gin-gonic/gin"
@@ -23,7 +25,12 @@ func podsRouter(t *testing.T, pool *pgxpool.Pool, user *middleware.BetterAuthUse
 	t.Helper()
 	gin.SetMode(gin.TestMode)
 	r := gin.New()
-	r.Use(func(c *gin.Context) { c.Set(middleware.UserContextKey, user); c.Next() })
+	r.Use(func(c *gin.Context) {
+		if user != nil {
+			c.Set(middleware.UserContextKey, user)
+		}
+		c.Next()
+	})
 	Register(r.Group("/api"), &Deps{Pool: pool}, func(c *gin.Context) { c.Next() })
 	return r
 }
@@ -299,5 +306,48 @@ func TestTheCommsReplyBoxCannotSendAsAClientPod(t *testing.T) {
 		`{"source":"email","account":"pod:client-brightvale","to":"priya@brightvale.example","subject":"Hi","text":"Hello"}`)
 	if code != http.StatusForbidden || len(sent) != 0 {
 		t.Fatalf("comms reply sent as a pod: %d, %d sends", code, len(sent))
+	}
+}
+
+func TestAWebsiteFormPostsEnquiriesThroughThePodsPrivateLink(t *testing.T) {
+	t.Setenv("FOUNDEROS_OWNER_EMAIL", "owner@tfg.example")
+	pool := catalogdb.TestDB(t)
+	owner := podsRouter(t, pool, &middleware.BetterAuthUser{ID: "u-owner", Email: "owner@tfg.example"})
+	podsDo(t, owner, http.MethodPost, "/api/founderos/pods", `{"clientName":"Brightvale"}`)
+	if _, err := pool.Exec(context.Background(), `UPDATE founderos_client_pods SET status = 'live'`); err != nil {
+		t.Fatal(err)
+	}
+	code, body := podsDo(t, owner, http.MethodPost, "/api/founderos/pods/client-brightvale/inbound-link", "")
+	endpoint, _ := body["endpoint"].(string)
+	if code != http.StatusOK || !strings.Contains(endpoint, "/api/founderos/inbound/") || !strings.Contains(body["snippet"].(string), `name="website"`) {
+		t.Fatalf("link: %d %v", code, body)
+	}
+	path := endpoint[strings.Index(endpoint, "/api/founderos/inbound/"):]
+	// No session at all: the public route stands on the token.
+	anon := podsRouter(t, pool, nil)
+	req := httptest.NewRequest(http.MethodPost, path, strings.NewReader(`{"name":"Tom","email":"tom@harbour.example","message":"Two warehouses?"}`))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	anon.ServeHTTP(w, req)
+	if w.Code != http.StatusAccepted || w.Header().Get("Access-Control-Allow-Origin") != "*" {
+		t.Fatalf("json enquiry: %d %s", w.Code, w.Body)
+	}
+	form := url.Values{"email": {"jo@oakfield.example"}, "message": {"Pricing?"}, "_redirect": {"https://brightvale.example/thanks"}}
+	req = httptest.NewRequest(http.MethodPost, path, strings.NewReader(form.Encode()))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	w = httptest.NewRecorder()
+	anon.ServeHTTP(w, req)
+	if w.Code != http.StatusSeeOther || w.Header().Get("Location") != "https://brightvale.example/thanks" {
+		t.Fatalf("form enquiry: %d %v", w.Code, w.Header())
+	}
+	w = httptest.NewRecorder()
+	anon.ServeHTTP(w, httptest.NewRequest(http.MethodPost, "/api/founderos/inbound/nope", strings.NewReader(`{}`)))
+	if w.Code != http.StatusNotFound {
+		t.Fatalf("bad link: %d", w.Code)
+	}
+	var n int
+	_ = pool.QueryRow(context.Background(), `SELECT count(*) FROM founderos_pod_inbound`).Scan(&n)
+	if n != 2 || !CSRFExempt(path) {
+		t.Fatalf("enquiries %d, csrf-exempt %v", n, CSRFExempt(path))
 	}
 }

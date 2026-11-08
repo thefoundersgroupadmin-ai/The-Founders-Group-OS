@@ -52,13 +52,14 @@ var nowFunc = time.Now
 
 type podRules struct {
 	ID, Slug, Status, AccountID, Sink, Timezone, Policy, SenderName, SenderEmail string
+	InboundAutoReply                                                             bool
 	Start, End                                                                   int
 	Weekends                                                                     bool
 	FirstCap, FollowCap                                                          int
 }
 
 const podRulesSQL = `SELECT id::text, slug, status, coalesce(sending_account_id, ''), dry_run_inbox, timezone,
-	send_window_start, send_window_end, send_weekends, first_email_daily_cap, follow_up_daily_cap, approval_policy, sender_name, sender_email
+	send_window_start, send_window_end, send_weekends, first_email_daily_cap, follow_up_daily_cap, approval_policy, sender_name, sender_email, inbound_auto_reply
 	FROM founderos_client_pods WHERE workspace_id = $1`
 
 type querier interface {
@@ -69,7 +70,7 @@ func loadPodRules(ctx context.Context, q querier, ws string) (*podRules, error) 
 	var r podRules
 	var s, e int16
 	err := q.QueryRow(ctx, podRulesSQL, ws).Scan(&r.ID, &r.Slug, &r.Status, &r.AccountID, &r.Sink, &r.Timezone,
-		&s, &e, &r.Weekends, &r.FirstCap, &r.FollowCap, &r.Policy, &r.SenderName, &r.SenderEmail)
+		&s, &e, &r.Weekends, &r.FirstCap, &r.FollowCap, &r.Policy, &r.SenderName, &r.SenderEmail, &r.InboundAutoReply)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, nil
 	}
@@ -219,7 +220,10 @@ func approvePod(ctx context.Context, pool *pgxpool.Pool, ws, id string, content 
 		}
 	}
 
-	if why, err := clientApproval(ctx, tx, r, it, content, domain); err != nil {
+	// A conversation reply skips the client's approval only when they chose so.
+	if reply && r.InboundAutoReply {
+		// screened and gated as usual, below
+	} else if why, err := clientApproval(ctx, tx, r, it, content, domain); err != nil {
 		return nil, err
 	} else if why != "" {
 		// The approval request is kept even though nothing is sent.
@@ -240,7 +244,8 @@ func approvePod(ctx context.Context, pool *pgxpool.Pool, ws, id string, content 
 		if r.AccountID == "" {
 			return nil, held("pod has no sending account")
 		}
-		if !r.inWindow(nowFunc()) {
+		// Conversations are answered any time of day; outreach keeps to the window.
+		if !reply && !r.inWindow(nowFunc()) {
 			return nil, held("outside the pod's sending hours")
 		}
 		// Caps count every delivery that may have happened (Codex M1 review #9):
@@ -323,7 +328,7 @@ func dispatchPodSend(ctx context.Context, pool *pgxpool.Pool, ws string, r *podR
 		stop = "pod is " + strings.ReplaceAll(now.Status, "_", " ")
 	case now.AccountID != r.AccountID:
 		stop = "the pod's mailbox changed"
-	case !dry && !now.inWindow(nowFunc()):
+	case !dry && !isReply(it) && !now.inWindow(nowFunc()):
 		stop = "outside the pod's sending hours"
 	case !dry && (now.FirstCap < r.FirstCap || now.FollowCap < r.FollowCap):
 		stop = "the pod's daily caps were lowered; trying again on the next pass"
@@ -335,6 +340,8 @@ func dispatchPodSend(ctx context.Context, pool *pgxpool.Pool, ws string, r *podR
 		}
 		if suppressed {
 			stop = "they were put on the do-not-email list"
+		} else if isReply(it) && now.InboundAutoReply {
+			// no client approval needed for this conversation
 		} else if why, err := clientApproval(ctx, tx, now, it, content, domain); err != nil {
 			return nil, err
 		} else if why != "" {
@@ -416,3 +423,5 @@ func dispatchPodSend(ctx context.Context, pool *pgxpool.Pool, ws string, r *podR
 	}
 	return &it, nil
 }
+
+func isReply(it Item) bool { return it.SequenceKey != nil && *it.SequenceKey == "reply" }

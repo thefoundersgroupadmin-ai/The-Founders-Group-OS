@@ -69,6 +69,9 @@ type Pod struct {
 	CreatedAt, UpdatedAt              time.Time
 	WentLiveAt                        *time.Time
 	ConfigChangedAt                   time.Time
+	HandoffEmail                      string
+	InboundAutoReply                  bool
+	InboundLinkSet                    bool
 }
 
 type NewPod struct {
@@ -96,7 +99,7 @@ const podCols = `id::text, workspace_id::text, slug, client_name, portal_client_
 	sender_name, sender_email, sending_account_id, sending_domain, dry_run_inbox, approval_policy,
 	first_email_daily_cap, follow_up_daily_cap, timezone, send_window_start, send_window_end,
 	send_weekends, crm_provider, calendar_provider, booking_url, paused_reason, created_at,
-	updated_at, went_live_at, config_changed_at`
+	updated_at, went_live_at, config_changed_at, handoff_email, inbound_auto_reply, inbound_token_hash <> ''`
 
 func scanPod(row pgx.Row) (Pod, error) {
 	var p Pod
@@ -105,7 +108,7 @@ func scanPod(row pgx.Row) (Pod, error) {
 		&p.Status, &p.SenderName, &p.SenderEmail, &p.SendingAccountID, &p.SendingDomain, &p.DryRunInbox,
 		&p.ApprovalPolicy, &p.FirstEmailDailyCap, &p.FollowUpDailyCap, &p.Timezone, &ws, &we,
 		&p.SendWeekends, &p.CRMProvider, &p.CalendarProvider, &p.BookingURL, &p.PausedReason,
-		&p.CreatedAt, &p.UpdatedAt, &p.WentLiveAt, &p.ConfigChangedAt)
+		&p.CreatedAt, &p.UpdatedAt, &p.WentLiveAt, &p.ConfigChangedAt, &p.HandoffEmail, &p.InboundAutoReply, &p.InboundLinkSet)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return p, ErrNotFound
 	}
@@ -486,6 +489,8 @@ type Settings struct {
 	SendWeekends                         bool
 	DryRunInbox, BookingURL              string
 	CRMProvider, CalendarProvider        string
+	HandoffEmail                         string
+	InboundAutoReply                     bool
 }
 
 // UpdateSettings validates and saves the pod's sending rules.
@@ -509,6 +514,10 @@ func (s *Store) UpdateSettings(ctx context.Context, slug string, in Settings) er
 	if sink != "" && (!strings.Contains(sink, "@") || strings.ContainsAny(sink, " <>")) {
 		return bad("the test-run inbox must be an email address")
 	}
+	handoff := strings.TrimSpace(strings.ToLower(in.HandoffEmail))
+	if handoff != "" && (!strings.Contains(handoff, "@") || strings.ContainsAny(handoff, " <>")) {
+		return bad("the hand-off email must be an email address")
+	}
 	booking := strings.TrimSpace(in.BookingURL)
 	if booking != "" && !strings.HasPrefix(booking, "https://") {
 		return bad("the booking link must start with https://")
@@ -525,10 +534,10 @@ func (s *Store) UpdateSettings(ctx context.Context, slug string, in Settings) er
 	}
 	n, err := s.lockedExec(ctx, slug, `UPDATE founderos_client_pods SET approval_policy = $2, first_email_daily_cap = $3,
 		follow_up_daily_cap = $4, timezone = $5, send_window_start = $6, send_window_end = $7, send_weekends = $8,
-		dry_run_inbox = $9, booking_url = $10, crm_provider = $11, calendar_provider = $12, updated_at = now(),
-		config_changed_at = now() WHERE slug = $1`,
+		dry_run_inbox = $9, booking_url = $10, crm_provider = $11, calendar_provider = $12, handoff_email = $13,
+		inbound_auto_reply = $14, updated_at = now(), config_changed_at = now() WHERE slug = $1`,
 		slug, in.ApprovalPolicy, in.FirstEmailDailyCap, in.FollowUpDailyCap, in.Timezone, in.SendWindowStart, in.SendWindowEnd,
-		in.SendWeekends, sink, booking, in.CRMProvider, in.CalendarProvider)
+		in.SendWeekends, sink, booking, in.CRMProvider, in.CalendarProvider, handoff, in.InboundAutoReply)
 	if err == nil && n == 0 {
 		return ErrNotFound
 	}

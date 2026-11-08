@@ -147,3 +147,34 @@ func TestTheWindowIsCheckedAgainAtDispatch(t *testing.T) {
 		t.Fatalf("sent outside the window set before dispatch: %v", err)
 	}
 }
+
+// M3: a conversation is answered any time of day; with inbound auto-reply on,
+// it does not wait for the client's approval (every other check still applies).
+func TestConversationRepliesIgnoreHoursAndMaySkipClientApproval(t *testing.T) {
+	pool := catalogdb.TestDB(t)
+	ctx := context.Background()
+	file := podFixture(t, pool, "client-bv", "live")
+	if _, err := pool.Exec(ctx, `UPDATE founderos_client_pods SET approval_policy = 'client_approves_each', inbound_auto_reply = true,
+		send_window_start = 9, send_window_end = 10, send_weekends = false;
+		INSERT INTO founderos_funnel_contacts (id, workspace_id, name, status, venture, created_at, email)
+		SELECT 'ct-q', workspace_id, 'Tom', 'engaged', 'client', now(), 'tom@harbour.example' FROM founderos_client_pods;
+		INSERT INTO founderos_pod_conversations (issue_id, workspace_id, contact_id) SELECT 'iss-q', workspace_id, 'ct-q' FROM founderos_client_pods`); err != nil {
+		t.Fatal(err)
+	}
+	prev := nowFunc
+	t.Cleanup(func() { nowFunc = prev })
+	nowFunc = func() time.Time { return time.Date(2026, 11, 8, 23, 30, 0, 0, time.UTC) } // Sunday night
+	file("q-1", "tom@harbour.example")
+	if _, err := pool.Exec(ctx, `UPDATE founderos_outbox SET sequence_key = 'reply', contact_id = 'ct-q' WHERE id = 'q-1'`); err != nil {
+		t.Fatal(err)
+	}
+	got, send := recorder()
+	if _, err := Approve(ctx, pool, "client-bv", "q-1", Content{Subject: "Re: two warehouses", Body: "Yes, we do. Sam"}, send); err != nil || len(*got) != 1 {
+		t.Fatalf("Sunday-night reply blocked: %v", err)
+	}
+	// Outreach still keeps to the window and the client's approval.
+	file("q-2", "jo@oakfield.example")
+	if _, err := Approve(ctx, pool, "client-bv", "q-2", podReviewed, send); err == nil || len(*got) != 1 {
+		t.Fatalf("outreach sent out of hours: %v", err)
+	}
+}

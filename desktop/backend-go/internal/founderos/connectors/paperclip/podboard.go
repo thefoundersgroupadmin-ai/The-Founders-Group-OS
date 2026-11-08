@@ -119,3 +119,21 @@ func (b PodBoard) UpdateScheduleTrigger(ctx context.Context, triggerID, cron, ti
 		map[string]any{"cronExpression": cron, "timezone": timezone})
 	return err
 }
+
+// CreateTask opens a task for an agent in a project (a pod's enquiry or reply).
+func (b PodBoard) CreateTask(ctx context.Context, projectID, agentID, title, description string) (string, error) {
+	co, err := b.company()
+	if err != nil {
+		return "", err
+	}
+	out, err := b.C.send(ctx, "paperclip.pod.task", http.MethodPost, "/api/companies/"+co+"/issues", map[string]any{
+		"title": title, "description": description, "status": "todo", "priority": "high", "workMode": "standard",
+		"projectId": projectID, "assigneeAgentId": agentID})
+	if err != nil {
+		return "", err
+	}
+	if id := idOf(out); id != "" {
+		return id, nil
+	}
+	return "", errors.New("board did not return a task id")
+}

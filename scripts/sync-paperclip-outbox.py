@@ -33,6 +33,7 @@ PIPELINE_SLUG = "vantage"  # displayed as "Sales System Build", as in sync-paper
 OWN_DOMAIN = "@thefoundersgroup.net"
 EMAIL = re.compile(r"^[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}$")
 FENCE = re.compile(r"```(?:json)?\s*(\[.*?\])\s*```", re.S)
+FENCE_OBJ = re.compile(r"```(?:json)?\s*(\{.*?\})\s*```", re.S)
 
 
 def read_env(path):
@@ -148,6 +149,38 @@ def withdraw_moved_query(ident, workspace_id):
             f"WHERE source = 'paperclip' AND source_ref = {sql(ident)} AND status = 'pending' AND workspace_id <> {sql(workspace_id)}")
 
 
+def handoff_query(workspace_id, issue_id, body):
+    """A buyer ready for a person: queued for the client's rep (TFG OS emails it)."""
+    return ("INSERT INTO founderos_pod_handoffs (pod_id, issue_id, contact_id, summary) "
+            f"SELECT p.id, {sql(issue_id)}, (SELECT contact_id FROM founderos_pod_conversations WHERE issue_id = {sql(issue_id)}), "
+            f"{sql(body.strip()[:4000])} FROM founderos_client_pods p WHERE p.workspace_id = {sql(workspace_id)} "
+            "ON CONFLICT (issue_id) DO NOTHING")
+
+
+def qualification_update(workspace_id, issue_id, body):
+    """What the agent learned (budget, timing, who decides, fit) onto the lead's pipeline record."""
+    m = FENCE_OBJ.search(body or "")
+    try:
+        q = json.loads(m.group(1) if m else (body or "").strip())
+    except json.JSONDecodeError:
+        return None
+    if not isinstance(q, dict):
+        return None
+    try:
+        fit = max(0, min(100, int(q.get("fit")))) if q.get("fit") not in (None, "") else None
+    except (TypeError, ValueError):
+        fit = None
+    parts = [f"{label}: {str(q.get(key)).strip()[:200]}" for key, label in
+             (("budget", "Budget"), ("timing", "Timing"), ("decisionMaker", "Decides"), ("notes", "Notes")) if q.get(key)]
+    sets = [f"next_action = {sql(('Qualified. ' + '; '.join(parts))[:900])}"] if parts else []
+    if fit is not None:
+        sets.append(f"likelihood = {fit}")
+    if not sets:
+        return None
+    return (f"UPDATE founderos_funnel_contacts SET {', '.join(sets)} WHERE workspace_id = {sql(workspace_id)} "
+            f"AND id = (SELECT contact_id FROM founderos_pod_conversations WHERE issue_id = {sql(issue_id)})")
+
+
 def recipient_matches_query(addr):
     """HQ drafts with no command binding find their pipeline by recipient, never inside a client pod."""
     return ("SELECT DISTINCT c.workspace_id::text AS workspace_id,w.slug FROM founderos_funnel_contacts c JOIN workspaces w ON w.id=c.workspace_id "
@@ -251,6 +284,15 @@ def main():
         outbox_ws = rt["outbox_ws"] or ws
         docs = paperclip(pc, "GET", f"/api/issues/{issue['id']}/documents")
         docs = docs.get("documents", docs) if isinstance(docs, dict) else docs
+        if rt["pod"] and not dry:
+            for d in docs:
+                text = d.get("body") or (d.get("latestRevision") or {}).get("body") or ""
+                if d.get("key") == "handoff" and text.strip():
+                    psql(db, handoff_query(rt["outbox_ws"], issue["id"], text))
+                elif d.get("key") == "qualification":
+                    upd = qualification_update(rt["outbox_ws"], issue["id"], text)
+                    if upd:
+                        psql(db, upd)
         doc = next((d for d in docs if d.get("key") == "outbox"), None)
         if not doc:
             continue

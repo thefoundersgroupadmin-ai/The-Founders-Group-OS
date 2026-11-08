@@ -238,6 +238,8 @@ func Register(api *gin.RouterGroup, d *Deps, auth ...gin.HandlerFunc) {
 	registerLaptop(b, d)
 	// Twilio and Apollo call back here; each request proves itself (dialer_hooks.go).
 	registerDialerHooks(b, d)
+	// Client websites post enquiries here; the link's token is the proof (pod_inbound.go).
+	registerPodInbound(b, d)
 
 	s := b.Group("")
 	s.Use(noBadGateway)
@@ -305,7 +307,9 @@ var machineRoutes = map[string]bool{
 }
 
 // CSRFExempt reports whether a request path is a FounderOS machine route.
-func CSRFExempt(path string) bool { return machineRoutes[path] }
+func CSRFExempt(path string) bool {
+	return machineRoutes[path] || strings.HasPrefix(path, "/api/founderos/inbound/") || strings.HasPrefix(path, "/api/v1/founderos/inbound/")
+}
 
 // BodyLimit is the request body cap for the operator routes that need more than the
 // server's global 10MB (bank/card statement uploads); 0 means the default.

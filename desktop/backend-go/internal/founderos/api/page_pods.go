@@ -41,6 +41,9 @@ type podJSON struct {
 	BookingURL         string     `json:"bookingUrl"`
 	PausedReason       string     `json:"pausedReason"`
 	PortalClientID     string     `json:"portalClientId"`
+	HandoffEmail       string     `json:"handoffEmail"`
+	InboundAutoReply   bool       `json:"inboundAutoReply"`
+	InboundLinkSet     bool       `json:"inboundLinkSet"`
 	WentLiveAt         *time.Time `json:"wentLiveAt"`
 	Missing            []string   `json:"missingToGoLive,omitempty"`
 }
@@ -51,11 +54,13 @@ func podOut(p pods.Pod) podJSON {
 		ApprovalPolicy: p.ApprovalPolicy, FirstEmailDailyCap: p.FirstEmailDailyCap, FollowUpDailyCap: p.FollowUpDailyCap,
 		Timezone: p.Timezone, SendWindow: [2]int{p.SendWindowStart, p.SendWindowEnd}, SendWeekends: p.SendWeekends, DryRunInbox: p.DryRunInbox,
 		CRMProvider: p.CRMProvider, CalendarProvider: p.CalendarProvider, BookingURL: p.BookingURL,
-		PausedReason: p.PausedReason, WentLiveAt: p.WentLiveAt, PortalClientID: deref(p.PortalClientID)}
+		PausedReason: p.PausedReason, WentLiveAt: p.WentLiveAt, PortalClientID: deref(p.PortalClientID),
+		HandoffEmail: p.HandoffEmail, InboundAutoReply: p.InboundAutoReply, InboundLinkSet: p.InboundLinkSet}
 }
 
 func registerPods(s *gin.RouterGroup, d *Deps) {
 	startPortalSync(d)
+	startPodLoops(d)
 	store := func(c *gin.Context) (*pods.Store, pods.Viewer, bool) {
 		p, ok := personOf(c)
 		if !ok {
@@ -203,6 +208,8 @@ func registerPods(s *gin.RouterGroup, d *Deps) {
 			BookingURL         string `json:"bookingUrl"`
 			CRMProvider        string `json:"crmProvider"`
 			CalendarProvider   string `json:"calendarProvider"`
+			HandoffEmail       string `json:"handoffEmail"`
+			InboundAutoReply   bool   `json:"inboundAutoReply"`
 		}
 		if err := c.ShouldBindJSON(&in); err != nil {
 			c.JSON(http.StatusBadRequest, gin.H{"error": "settings expected"})
@@ -211,7 +218,8 @@ func registerPods(s *gin.RouterGroup, d *Deps) {
 		if err := st.UpdateSettings(c.Request.Context(), p.Slug, pods.Settings{ApprovalPolicy: in.ApprovalPolicy,
 			FirstEmailDailyCap: in.FirstEmailDailyCap, FollowUpDailyCap: in.FollowUpDailyCap, Timezone: in.Timezone,
 			SendWindowStart: in.SendWindow[0], SendWindowEnd: in.SendWindow[1], SendWeekends: in.SendWeekends,
-			DryRunInbox: in.DryRunInbox, BookingURL: in.BookingURL, CRMProvider: in.CRMProvider, CalendarProvider: in.CalendarProvider}); err != nil {
+			DryRunInbox: in.DryRunInbox, BookingURL: in.BookingURL, CRMProvider: in.CRMProvider, CalendarProvider: in.CalendarProvider,
+			HandoffEmail: in.HandoffEmail, InboundAutoReply: in.InboundAutoReply}); err != nil {
 			podError(c, err)
 			return
 		}
@@ -485,6 +493,26 @@ func registerPods(s *gin.RouterGroup, d *Deps) {
 			out = append(out, gin.H{"kind": a.Kind, "ref": a.Ref, "title": a.Title, "status": a.Status})
 		}
 		c.JSON(http.StatusOK, gin.H{"approvals": out})
+	})
+	// A new private form link for the client's website (replaces the old one). Owner only.
+	s.POST("/pods/:slug/inbound-link", func(c *gin.Context) {
+		st, p, ok := pod(c)
+		if !ok {
+			return
+		}
+		if who, _ := personOf(c); !who.Owner {
+			c.JSON(http.StatusForbidden, gin.H{"error": "only the TFG owner makes a client's form link"})
+			return
+		}
+		token, err := st.NewInboundToken(c.Request.Context(), p.Slug)
+		if err != nil {
+			podError(c, err)
+			return
+		}
+		endpoint := inboundBase() + "/api/founderos/inbound/" + token
+		_ = st.Log(c.Request.Context(), p.ID, "settings", "New website form link made", "")
+		c.Header("Cache-Control", "no-store")
+		c.JSON(http.StatusOK, gin.H{"endpoint": endpoint, "snippet": InboundSnippet(endpoint)})
 	})
 	s.GET("/pods/:slug/activity", func(c *gin.Context) {
 		st, p, ok := pod(c)

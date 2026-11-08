@@ -31,7 +31,8 @@
 	let approvals = $state<ClientApproval[]>([]);
 	let portalId = $state('');
 	let list = $state({ title: '', domains: '' });
-	let rules = $state<{ approvalPolicy: string; firstEmailDailyCap: number; followUpDailyCap: number; timezone: string; sendWindow: [number, number]; sendWeekends: boolean; dryRunInbox: string; bookingUrl: string; crmProvider: string; calendarProvider: string } | null>(null);
+	let rules = $state<{ approvalPolicy: string; firstEmailDailyCap: number; followUpDailyCap: number; timezone: string; sendWindow: [number, number]; sendWeekends: boolean; dryRunInbox: string; bookingUrl: string; crmProvider: string; calendarProvider: string; handoffEmail: string; inboundAutoReply: boolean } | null>(null);
+	let formLink = $state<{ endpoint: string; snippet: string } | null>(null);
 
 	const err = (e: unknown) => (e instanceof Error ? e.message : 'request failed');
 
@@ -41,7 +42,8 @@
 			rules ??= {
 				approvalPolicy: pod.approvalPolicy, firstEmailDailyCap: pod.firstEmailDailyCap, followUpDailyCap: pod.followUpDailyCap,
 				timezone: pod.timezone, sendWindow: [...pod.sendWindow] as [number, number], sendWeekends: pod.sendWeekends,
-				dryRunInbox: pod.dryRunInbox, bookingUrl: pod.bookingUrl, crmProvider: pod.crmProvider, calendarProvider: pod.calendarProvider
+				dryRunInbox: pod.dryRunInbox, bookingUrl: pod.bookingUrl, crmProvider: pod.crmProvider, calendarProvider: pod.calendarProvider,
+				handoffEmail: pod.handoffEmail, inboundAutoReply: pod.inboundAutoReply
 			};
 		} catch (e) {
 			failure = err(e);
@@ -92,6 +94,10 @@
 		act(async () => {
 			await founderosFetch(`${base}/target-lists`, { method: 'POST', json: { title: list.title, domains: parseDomains(list.domains) } });
 			list = { title: '', domains: '' };
+		});
+	const makeFormLink = () =>
+		act(async () => {
+			formLink = await founderosFetch<{ endpoint: string; snippet: string }>(`${base}/inbound-link`, { method: 'POST' });
 		});
 	const saveRules = () => act(() => founderosFetch(`${base}/settings`, { method: 'PUT', json: rules }));
 	const saveDoc = (key: string) => act(() => founderosFetch(`${base}/docs/${key}`, { method: 'PUT', json: { body: drafts[key] ?? '' } }));
@@ -195,7 +201,9 @@
 								<option value="">None yet</option><option value="calcom">Cal.com</option><option value="google">Google Calendar</option><option value="microsoft">Outlook</option>
 							</select>
 						</label>
+						<label class="text-[11px]">Hand-off email (client's rep)<input bind:value={rules.handoffEmail} placeholder="rep@client.com" class="pc-input mt-1 w-full rounded-[6px] px-2 py-1.5 text-[12px]" /></label>
 						<label class="flex items-center gap-2 text-[11px]"><input type="checkbox" bind:checked={rules.sendWeekends} /> Send at weekends</label>
+						<label class="flex items-center gap-2 text-[11px]"><input type="checkbox" bind:checked={rules.inboundAutoReply} /> Answer enquiries and replies without waiting for client approval</label>
 					</div>
 					<div class="mt-2"><Pressable tone="secondary" disabled={busy} onclick={saveRules}>Save rules</Pressable></div>
 				</Slab>
@@ -259,6 +267,17 @@
 					<Pressable tone="secondary" disabled={busy || !list.title.trim() || parseDomains(list.domains).length === 0} onclick={proposeList}>Send to client for approval</Pressable>
 					<span class="bn-dim font-mono text-[11px]">{parseDomains(list.domains).length} companies</span>
 				</div>
+			</Slab>
+
+			<Slab>
+				<p class="bn-dim mb-2 font-mono text-[10px] uppercase tracking-[0.15em]">Website form</p>
+				<p class="mb-2 text-[12px]">Enquiries from the client's website form go straight to their AI SDR, which researches the person and replies within minutes, day or night, asking about budget, timing and who decides.</p>
+				<Pressable tone="secondary" disabled={busy} onclick={makeFormLink}>{pod.inboundLinkSet ? 'Make a new form link (replaces the old one)' : 'Make form link'}</Pressable>
+				{#if formLink}
+					<p class="bn-dim mt-2 font-mono text-[11px]">Shown once. Give this to the client's web developer:</p>
+					<input readonly value={formLink.endpoint} aria-label="Form link" class="pc-input mt-1 w-full rounded-[6px] px-2.5 py-1.5 font-mono text-[11px]" />
+					<textarea readonly rows="10" aria-label="Form code" class="pc-input mt-2 w-full rounded-[6px] px-2.5 py-2 font-mono text-[11px]">{formLink.snippet}</textarea>
+				{/if}
 			</Slab>
 
 			<Slab>

@@ -23,6 +23,9 @@ export type Pod = {
 	bookingUrl: string;
 	pausedReason: string;
 	portalClientId: string;
+	handoffEmail: string;
+	inboundAutoReply: boolean;
+	inboundLinkSet: boolean;
 	wentLiveAt: string | null;
 	missingToGoLive?: string[];
 };

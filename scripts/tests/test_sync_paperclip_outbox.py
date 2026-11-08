@@ -126,6 +126,18 @@ class PodRoutingTest(unittest.TestCase):
         self.assertIn("workspace_id <> 'w-bv'", q)
         self.assertIn("status = 'pending'", q)
 
+    def test_handoff_and_qualification_documents(self):
+        q = sync.handoff_query("w-bv", "issue-9", "Tom Reid at Harbourline wants a call this week.")
+        self.assertIn("INSERT INTO founderos_pod_handoffs", q)
+        self.assertIn("ON CONFLICT (issue_id) DO NOTHING", q)
+        self.assertIn("founderos_pod_conversations", q)
+        upd = sync.qualification_update("w-bv", "issue-9", '{"budget": "£40k this year", "timing": "Q1", "decisionMaker": "COO", "fit": 85}')
+        self.assertIn("likelihood = 85", upd)
+        self.assertIn("Budget: £40k this year", upd)
+        self.assertIn("workspace_id = 'w-bv'", upd)
+        self.assertIsNone(sync.qualification_update("w-bv", "issue-9", "not json"))
+        self.assertIn("likelihood = 100", sync.qualification_update("w-bv", "i", '{"fit": 400}'))
+
     def test_sequence_key_is_kept(self):
         got = sync.entries('[{"to": "a@b.co", "subject": "s", "body": "b", "sequenceKey": "warehouses:1"}]')
         self.assertEqual(got[0]["sequenceKey"], "warehouses:1")

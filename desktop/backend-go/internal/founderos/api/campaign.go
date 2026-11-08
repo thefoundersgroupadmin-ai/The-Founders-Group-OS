@@ -1,6 +1,7 @@
 package api
 
-// The pre-approved outreach campaign (FOUNDEROS_CAMPAIGN=<task identifier>):
+// The pre-approved outreach campaign (FOUNDEROS_CAMPAIGN=<task identifier>,
+// or * for first emails filed on any agent task, e.g. each day's outreach):
 // its first emails go out without a click, one per five-minute pass, inside
 // US business hours, up to FOUNDEROS_CAMPAIGN_DAILY_CAP (20) a day and
 // FOUNDEROS_CAMPAIGN_TOTAL (50) in all. Two failed sends in a row stop it

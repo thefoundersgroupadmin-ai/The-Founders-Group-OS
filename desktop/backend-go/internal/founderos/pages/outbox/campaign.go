@@ -21,7 +21,10 @@ import (
 
 // Campaign is one pre-approved outreach run.
 type Campaign struct {
-	Ref      string // the Paperclip task identifier, e.g. THE-21
+	// Ref is the Paperclip task identifier, e.g. THE-21, or "*" for every
+	// task the agents file first emails on (the owner, 2026-11-08: fully
+	// automatic outreach). Caps then count across all of them.
+	Ref      string
 	DailyCap int
 	TotalCap int
 	// Window says whether now is a sending time (weekday US business hours).
@@ -64,7 +67,7 @@ func Screen(it Item, ownDomain string) error {
 // emailed, never rejected, whose pipeline contact (if any) is still untouched.
 const campaignDue = `
 	SELECT ` + cols + ` FROM founderos_outbox o
-	WHERE o.workspace_id = $1 AND o.status = 'pending' AND o.source = 'paperclip' AND o.source_ref = $2
+	WHERE o.workspace_id = $1 AND o.status = 'pending' AND o.source = 'paperclip' AND ($2 = '*' OR o.source_ref = $2)
 	  AND NOT EXISTS (SELECT 1 FROM founderos_outbox p WHERE p.workspace_id = o.workspace_id AND p.id <> o.id
 	       AND p.status IN ('sent', 'sending', 'uncertain', 'rejected')
 	       AND (lower(p.to_address) = lower(o.to_address)
@@ -75,7 +78,7 @@ const campaignDue = `
 const campaignSent = `SELECT
 	count(*) FILTER (WHERE sent_at > now() - interval '24 hours'),
 	count(*)
-	FROM founderos_outbox WHERE workspace_id = $1 AND source = 'paperclip' AND source_ref = $2 AND status = 'sent'`
+	FROM founderos_outbox WHERE workspace_id = $1 AND source = 'paperclip' AND ($2 = '*' OR source_ref = $2) AND status = 'sent'`
 
 // CampaignResult is one pass.
 type CampaignResult struct {

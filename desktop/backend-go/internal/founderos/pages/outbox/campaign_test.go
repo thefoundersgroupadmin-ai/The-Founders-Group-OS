@@ -133,3 +133,42 @@ func TestUSBusinessHours(t *testing.T) {
 		}
 	}
 }
+
+// The owner, 2026-11-08: "you dont need my approval just go ahead" (fully
+// automatic). Ref "*" pre-approves the first emails the agents file on ANY
+// task, so each day's outreach task qualifies; caps count across all of them,
+// and rows from other sources (the dialer, the owner) still need a click.
+func TestAnyTaskCampaignSendsAgentFirstEmailsFromEveryTaskWithinSharedCaps(t *testing.T) {
+	pool := catalogdb.TestDB(t)
+	ctx := context.Background()
+	ws := catalogdb.Workspace(t, pool, "founderos")
+	campaignRow(t, pool, ws, "a", "THE-81", "dana@reyes.co", "pending")
+	campaignRow(t, pool, ws, "bb", "THE-90", "kim@other.example", "pending")
+	if _, err := pool.Exec(ctx, `INSERT INTO founderos_outbox (id, workspace_id, source, source_ref, to_address, subject, body, status, created_at)
+		VALUES ('ccc', $1, 'dialer', 'call-1', 'lee@third.example', 'Hello', $2, 'pending', now())`, ws, goodBody); err != nil {
+		t.Fatal(err)
+	}
+	var sent []string
+	send := func(_ context.Context, it Item) error { sent = append(sent, it.To); return nil }
+	c := Campaign{Ref: "*", DailyCap: 20, TotalCap: 50}
+	now := time.Now()
+	for i := 0; i < 5; i++ {
+		if _, err := AutoSendCampaign(ctx, pool, "founderos", c, "thefoundersgroup.net", now, send); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if strings.Join(sent, ",") != "dana@reyes.co,kim@other.example" {
+		t.Fatalf("sent %v", sent)
+	}
+	if got := status(t, pool, "ccc"); got != "pending" {
+		t.Fatalf("a dialer email went out without a click: %s", got)
+	}
+	// The daily cap counts sends from every task together.
+	campaignRow(t, pool, ws, "dddd", "THE-95", "max@fourth.example", "pending")
+	if _, err := AutoSendCampaign(ctx, pool, "founderos", Campaign{Ref: "*", DailyCap: 2, TotalCap: 50}, "", now, send); err != nil {
+		t.Fatal(err)
+	}
+	if len(sent) != 2 || status(t, pool, "dddd") != "pending" {
+		t.Fatalf("daily cap not shared across tasks: sent %v", sent)
+	}
+}

@@ -134,3 +134,18 @@ func TestActivityIsRecordedPerPodNewestFirst(t *testing.T) {
 		t.Fatalf("recent: %+v %v", got, err)
 	}
 }
+
+// Codex M1 review #2: a pod can be bound only to its own mailbox.
+func TestAPodCanOnlyBeBoundToItsOwnMailbox(t *testing.T) {
+	s := &Store{Pool: catalogdb.TestDB(t)}
+	ctx := context.Background()
+	p := newPod(t, s, "Brightvale")
+	for _, foreign := range []string{"pod:client-kestrel", "inbox-1", "pod:"} {
+		if err := s.SetSender(ctx, p.Slug, Sender{Name: "Sam", Email: "sam@bv.example", AccountID: foreign}); !errors.Is(err, ErrInvalid) {
+			t.Fatalf("bound to %q: %v", foreign, err)
+		}
+	}
+	if err := s.SetSender(ctx, p.Slug, Sender{Name: "Sam", Email: "sam@bv.example", AccountID: "pod:" + p.Slug}); err != nil {
+		t.Fatal(err)
+	}
+}

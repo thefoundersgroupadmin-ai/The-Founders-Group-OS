@@ -205,6 +205,10 @@ func (s *Store) SetSender(ctx context.Context, slug string, snd Sender) error {
 	}
 	var acct any
 	if snd.AccountID != "" {
+		// Codex M1 review #2: only the pod's own mailbox, never another pod's or HQ's.
+		if snd.AccountID != "pod:"+slug {
+			return fmt.Errorf("%w: a pod sends only from its own mailbox (pod:%s)", ErrInvalid, slug)
+		}
 		acct = snd.AccountID
 	}
 	tag, err := s.Pool.Exec(ctx, `UPDATE founderos_client_pods SET sender_name = $2, sender_email = $3,

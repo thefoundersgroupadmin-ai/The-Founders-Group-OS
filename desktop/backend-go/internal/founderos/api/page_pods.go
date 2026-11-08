@@ -163,6 +163,10 @@ func registerPods(s *gin.RouterGroup, d *Deps) {
 		if !ok {
 			return
 		}
+		if who, _ := personOf(c); !who.Owner {
+			c.JSON(http.StatusForbidden, gin.H{"error": "only the TFG owner changes a client's sender"})
+			return
+		}
 		var in struct {
 			Name, Email, Domain, AccountID string
 		}

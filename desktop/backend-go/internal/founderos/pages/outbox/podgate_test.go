@@ -231,3 +231,18 @@ func TestNoFollowUpAfterAReplyOrABooking(t *testing.T) {
 		t.Fatalf("followed up an engaged contact: %v sent=%d %s", err, len(*got), status(t, pool, "f-1"))
 	}
 }
+
+// Codex M1 review #2: even a tampered binding cannot send as someone else.
+func TestAPodBoundToAnotherAccountNeverSends(t *testing.T) {
+	pool := catalogdb.TestDB(t)
+	ctx := context.Background()
+	file := podFixture(t, pool, "client-bv", "live")
+	if _, err := pool.Exec(ctx, `UPDATE founderos_client_pods SET sending_account_id = 'pod:client-kestrel'`); err != nil {
+		t.Fatal(err)
+	}
+	file("fa-1", "priya@brightvale.example")
+	got, send := recorder()
+	if _, err := Approve(ctx, pool, "client-bv", "fa-1", podReviewed, send); !errors.Is(err, ErrHeld) || len(*got) != 0 {
+		t.Fatalf("sent through a foreign binding: %v %d", err, len(*got))
+	}
+}

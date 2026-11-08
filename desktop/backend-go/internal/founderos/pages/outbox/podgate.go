@@ -181,6 +181,9 @@ func approvePod(ctx context.Context, pool *pgxpool.Pool, ws, id string, content 
 	if dry && strings.TrimSpace(r.Sink) == "" {
 		return nil, held("dry run has no approved sink inbox")
 	}
+	if r.AccountID != "" && r.AccountID != "pod:"+r.Slug {
+		return nil, held("pod is bound to a mailbox that is not its own")
+	}
 	if !dry {
 		if r.AccountID == "" {
 			return nil, held("pod has no sending account")

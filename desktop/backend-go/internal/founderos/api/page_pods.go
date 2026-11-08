@@ -12,6 +12,8 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"github.com/rhl/businessos-backend/internal/founderos/connectors/email"
+	"github.com/rhl/businessos-backend/internal/founderos/pages/integrations"
 	"github.com/rhl/businessos-backend/internal/founderos/pages/pods"
 )
 
@@ -218,6 +220,72 @@ func registerPods(s *gin.RouterGroup, d *Deps) {
 			podError(c, err)
 			return
 		}
+		reply(c, st, p.Slug)
+	})
+	// The pod's own mailbox: owner-only, saved as POD_<SLUG>_* keys in the
+	// protected env file, never echoed. Saving binds the pod's sender to it.
+	s.GET("/pods/:slug/mailbox", func(c *gin.Context) {
+		_, p, ok := pod(c)
+		if !ok {
+			return
+		}
+		get := func(k string) string { return d.Resolver.Resolve(email.PodKeyPrefix(p.Slug) + k) }
+		c.Header("Cache-Control", "no-store")
+		c.JSON(http.StatusOK, gin.H{"mailbox": gin.H{
+			"configured": get("HOST") != "" && get("USER") != "" && get("PASS") != "",
+			"host":       get("HOST"), "user": get("USER"), "from": get("FROM"), "fromName": get("FROM_NAME"),
+			"smtpHost": get("SMTP_HOST"), "smtpPort": get("SMTP_PORT"),
+			"pass": integrations.MaskSecret(get("PASS")),
+		}})
+	})
+	s.PUT("/pods/:slug/mailbox", func(c *gin.Context) {
+		st, p, ok := pod(c)
+		if !ok {
+			return
+		}
+		if who, _ := personOf(c); !who.Owner {
+			c.JSON(http.StatusForbidden, gin.H{"error": "only the TFG owner sets a client mailbox"})
+			return
+		}
+		var in struct {
+			Host, User, Pass, From, FromName, SMTPHost, SMTPPort, SMTPUser, SMTPPass string
+		}
+		if err := c.ShouldBindJSON(&in); err != nil || strings.TrimSpace(in.Host) == "" || strings.TrimSpace(in.User) == "" || strings.TrimSpace(in.Pass) == "" {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "host, user and pass are required"})
+			return
+		}
+		values := map[string]string{}
+		for k, v := range map[string]string{"HOST": in.Host, "USER": in.User, "PASS": in.Pass, "FROM": in.From,
+			"FROM_NAME": in.FromName, "SMTP_HOST": in.SMTPHost, "SMTP_PORT": in.SMTPPort, "SMTP_USER": in.SMTPUser, "SMTP_PASS": in.SMTPPass} {
+			v = strings.TrimSpace(v)
+			if v == "" {
+				continue
+			}
+			if !integrationsSafeValue(v) {
+				c.JSON(http.StatusBadRequest, gin.H{"error": "unsafe value for " + strings.ToLower(k)})
+				return
+			}
+			values[email.PodKeyPrefix(p.Slug)+k] = v
+		}
+		path, ok := integrationsEnvLocal(c, d)
+		if !ok {
+			return
+		}
+		if err := integrations.UpsertEnv(path, values); err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "could not write ~/.founderos/.env"})
+			return
+		}
+		from := strings.TrimSpace(in.From)
+		if from == "" {
+			from = strings.TrimSpace(in.User)
+		}
+		if err := st.SetSender(c.Request.Context(), p.Slug, pods.Sender{Name: in.FromName, Email: from,
+			AccountID: email.PodAccountPrefix + p.Slug}); err != nil {
+			podError(c, err)
+			return
+		}
+		_ = st.Log(c.Request.Context(), p.ID, "mailbox", "Sending mailbox set to "+from, "")
+		c.Header("Cache-Control", "no-store")
 		reply(c, st, p.Slug)
 	})
 	s.GET("/pods/:slug/activity", func(c *gin.Context) {

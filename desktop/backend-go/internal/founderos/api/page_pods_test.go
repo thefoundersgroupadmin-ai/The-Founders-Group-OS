@@ -6,10 +6,12 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"testing"
 
 	"github.com/gin-gonic/gin"
 	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/rhl/businessos-backend/internal/founderos/connectors"
 	"github.com/rhl/businessos-backend/internal/founderos/pages/catalogdb"
 	"github.com/rhl/businessos-backend/internal/middleware"
 )
@@ -115,5 +117,60 @@ func TestPodAPIWalksAPodFromSetupToLive(t *testing.T) {
 	code, body = podsDo(t, h, http.MethodPost, "/api/founderos/pods/client-ridgeway/status", `{"status":"live"}`)
 	if code != http.StatusConflict || body["error"] == nil {
 		t.Fatalf("unready go-live: %d %v", code, body)
+	}
+}
+
+func TestPodMailboxIsSavedAsKeysNeverEchoedAndBindsTheSender(t *testing.T) {
+	t.Setenv("FOUNDEROS_OWNER_EMAIL", "owner@tfg.example")
+	pool := catalogdb.TestDB(t)
+	env := t.TempDir() + "/env"
+	if err := os.WriteFile(env, []byte("EXISTING=1\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	mk := func(u *middleware.BetterAuthUser) http.Handler {
+		gin.SetMode(gin.TestMode)
+		r := gin.New()
+		r.Use(func(c *gin.Context) { c.Set(middleware.UserContextKey, u); c.Next() })
+		Register(r.Group("/api"), &Deps{Pool: pool, Resolver: connectors.Resolver{EnvLocal: env}}, func(c *gin.Context) { c.Next() })
+		return r
+	}
+	owner := mk(&middleware.BetterAuthUser{ID: "u-owner", Email: "owner@tfg.example"})
+	podsDo(t, owner, http.MethodPost, "/api/founderos/pods", `{"clientName":"Brightvale"}`)
+	if _, err := pool.Exec(context.Background(), `INSERT INTO workspace_members (workspace_id, user_id, status, role)
+		SELECT workspace_id, 'u-ilya', 'active', 'member' FROM founderos_client_pods WHERE slug = 'client-brightvale'`); err != nil {
+		t.Fatal(err)
+	}
+	member := mk(&middleware.BetterAuthUser{ID: "u-ilya", Email: "ilya@tfg.example"})
+	body := `{"host":"imap.brightvale-mail.example","user":"sam@brightvale-mail.example","pass":"s3cret-app-pass","fromName":"Sam | Brightvale"}`
+	if code, _ := podsDo(t, member, http.MethodPut, "/api/founderos/pods/client-brightvale/mailbox", body); code != http.StatusForbidden {
+		t.Fatalf("member set a mailbox password: %d", code)
+	}
+	code, out := podsDo(t, owner, http.MethodPut, "/api/founderos/pods/client-brightvale/mailbox", body)
+	if code != http.StatusOK {
+		t.Fatalf("set mailbox: %d %v", code, out)
+	}
+	raw, _ := json.Marshal(out)
+	if bytes.Contains(raw, []byte("s3cret-app-pass")) {
+		t.Fatalf("password echoed: %s", raw)
+	}
+	saved, _ := os.ReadFile(env)
+	for _, want := range []string{"EXISTING=1", "POD_CLIENT_BRIGHTVALE_PASS=s3cret-app-pass", "POD_CLIENT_BRIGHTVALE_USER=sam@brightvale-mail.example"} {
+		if !bytes.Contains(saved, []byte(want)) {
+			t.Fatalf("env lacks %q:\n%s", want, saved)
+		}
+	}
+	p := out["pod"].(map[string]any)
+	if p["senderEmail"] != "sam@brightvale-mail.example" || p["senderName"] != "Sam | Brightvale" || p["sendingDomain"] != "brightvale-mail.example" {
+		t.Fatalf("sender not bound: %v", p)
+	}
+	var acct string
+	_ = pool.QueryRow(context.Background(), `SELECT coalesce(sending_account_id,'') FROM founderos_client_pods WHERE slug='client-brightvale'`).Scan(&acct)
+	if acct != "pod:client-brightvale" {
+		t.Fatalf("account %q", acct)
+	}
+	code, out = podsDo(t, member, http.MethodGet, "/api/founderos/pods/client-brightvale/mailbox", "")
+	mb, _ := out["mailbox"].(map[string]any)
+	if code != http.StatusOK || mb["configured"] != true || mb["pass"] == "s3cret-app-pass" {
+		t.Fatalf("mailbox status: %d %v", code, out)
 	}
 }

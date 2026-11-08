@@ -708,3 +708,37 @@ func TestSendReplyRefusesAnUnknownOrMissingRequiredAccountBeforeSMTP(t *testing.
 		}
 	}
 }
+
+// Client pods send from their own mailbox: AccountID "pod:<slug>" resolves
+// POD_<SLUG>_* keys (slug upper-cased, dashes as underscores). A pod mailbox is
+// never one of the owner's Inboxes(), so HQ's feed never reads client mail.
+func TestSendReplyUsesAPodMailboxAndKeepsItOutOfTheOwnersInboxes(t *testing.T) {
+	t.Setenv("FOUNDEROS_WRITES", "1")
+	srv, addr := startSMTP(t, "sam@brightvale-mail.example", "pod-pass")
+	c := sendConnector(t, "alex@vantage.example", "p1", addr, map[string]string{
+		"POD_CLIENT_BRIGHTVALE_HOST":      "imap.brightvale-mail.example",
+		"POD_CLIENT_BRIGHTVALE_USER":      "sam@brightvale-mail.example",
+		"POD_CLIENT_BRIGHTVALE_PASS":      "pod-pass",
+		"POD_CLIENT_BRIGHTVALE_FROM_NAME": "Sam | Brightvale",
+	})
+	err := c.SendReply(context.Background(), Reply{AccountID: "pod:client-brightvale", RequireAccount: true,
+		To: "alex@vantage.example", Subject: "s", Text: "t"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(srv.got) != 1 || srv.got[0].from != "sam@brightvale-mail.example" || srv.got[0].authUser != "sam@brightvale-mail.example" {
+		t.Fatalf("sent %+v", srv.got)
+	}
+	if !strings.Contains(srv.got[0].data, "Sam | Brightvale") {
+		t.Errorf("display name missing:\n%s", srv.got[0].data)
+	}
+	for _, in := range c.Inboxes() {
+		if strings.HasPrefix(in.ID, "pod:") {
+			t.Fatalf("pod mailbox listed among the owner's inboxes: %+v", in.ID)
+		}
+	}
+	err = c.SendReply(context.Background(), Reply{AccountID: "pod:client-ghost", RequireAccount: true, To: "alex@vantage.example", Subject: "s", Text: "t"})
+	if !errors.Is(err, ErrUnknownAccount) {
+		t.Fatalf("unconfigured pod mailbox: %v", err)
+	}
+}

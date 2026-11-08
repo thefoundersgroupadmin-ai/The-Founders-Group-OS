@@ -148,37 +148,62 @@ func (c *Connector) env(name string) string { return c.res.Resolve(name) }
 func (c *Connector) Inboxes() []InboxConfig {
 	var out []InboxConfig
 	for slot := 1; slot <= MaxInboxes; slot++ {
-		key := func(k string) string { return c.env(fmt.Sprintf("INBOX_%d_%s", slot, k)) }
-		host, user, pass := key("HOST"), key("USER"), key("PASS")
-		if host == "" || user == "" || pass == "" {
-			continue
+		if cfg, ok := c.inboxAt(fmt.Sprintf("INBOX_%d_", slot), fmt.Sprintf("inbox-%d", slot)); ok {
+			out = append(out, cfg)
 		}
-		cfg := InboxConfig{
-			ID:       fmt.Sprintf("inbox-%d", slot),
-			Name:     user,
-			Host:     host,
-			Port:     intOr(key("PORT"), 993),
-			User:     user,
-			Pass:     pass,
-			From:     orDefault(key("FROM"), user),
-			FromName: strings.TrimSpace(key("FROM_NAME")),
-			SMTPHost: key("SMTP_HOST"),
-			SMTPPort: intOr(key("SMTP_PORT"), 465),
-			SMTPUser: orDefault(key("SMTP_USER"), user),
-			SMTPPass: orDefault(key("SMTP_PASS"), pass),
-		}
-		if n := key("NAME"); n != "" {
-			cfg.Name = n
-		}
-		if cfg.SMTPHost == "" {
-			cfg.SMTPHost = host
-			if strings.HasPrefix(host, "imap.") {
-				cfg.SMTPHost = "smtp." + strings.TrimPrefix(host, "imap.")
-			}
-		}
-		out = append(out, cfg)
 	}
 	return out
+}
+
+// PodAccountPrefix is the AccountID prefix of a client pod mailbox.
+const PodAccountPrefix = "pod:"
+
+// PodKeyPrefix is the env prefix of pod slug's mailbox, e.g. POD_CLIENT_ACME_.
+func PodKeyPrefix(slug string) string {
+	return "POD_" + strings.ToUpper(strings.ReplaceAll(slug, "-", "_")) + "_"
+}
+
+// PodInbox resolves a client pod's own mailbox ("pod:<slug>"). It is never part
+// of Inboxes(), so the owner's feed and unread counts never read client mail.
+func (c *Connector) PodInbox(accountID string) (InboxConfig, bool) {
+	slug := strings.TrimPrefix(accountID, PodAccountPrefix)
+	if slug == accountID || slug == "" || strings.ContainsAny(slug, " _/") {
+		return InboxConfig{}, false
+	}
+	return c.inboxAt(PodKeyPrefix(slug), accountID)
+}
+
+// inboxAt reads one mailbox from prefix+HOST, USER, PASS and the optional keys.
+func (c *Connector) inboxAt(prefix, id string) (InboxConfig, bool) {
+	key := func(k string) string { return c.env(prefix + k) }
+	host, user, pass := key("HOST"), key("USER"), key("PASS")
+	if host == "" || user == "" || pass == "" {
+		return InboxConfig{}, false
+	}
+	cfg := InboxConfig{
+		ID:       id,
+		Name:     user,
+		Host:     host,
+		Port:     intOr(key("PORT"), 993),
+		User:     user,
+		Pass:     pass,
+		From:     orDefault(key("FROM"), user),
+		FromName: strings.TrimSpace(key("FROM_NAME")),
+		SMTPHost: key("SMTP_HOST"),
+		SMTPPort: intOr(key("SMTP_PORT"), 465),
+		SMTPUser: orDefault(key("SMTP_USER"), user),
+		SMTPPass: orDefault(key("SMTP_PASS"), pass),
+	}
+	if n := key("NAME"); n != "" {
+		cfg.Name = n
+	}
+	if cfg.SMTPHost == "" {
+		cfg.SMTPHost = host
+		if strings.HasPrefix(host, "imap.") {
+			cfg.SMTPHost = "smtp." + strings.TrimPrefix(host, "imap.")
+		}
+	}
+	return cfg, true
 }
 
 func orDefault(s, def string) string {
@@ -507,17 +532,25 @@ var ErrUnknownAccount = errors.New("unknown sending account")
 // non-nil error to FounderOS v1's { ok: false, error } (the UI then offers a
 // mailto: draft).
 func (c *Connector) SendReply(ctx context.Context, r Reply) error {
-	inboxes := c.Inboxes()
-	if len(inboxes) == 0 {
-		return errors.New("no inbox configured (set INBOX_n_* in ~/.founderos/.env or under API keys)")
-	}
 	if strings.TrimSpace(r.To) == "" {
 		return errors.New("no recipient address")
 	}
-	cfg, found := inboxes[0], r.AccountID == "" && !r.RequireAccount
-	for _, in := range inboxes {
-		if r.AccountID != "" && in.ID == r.AccountID {
-			cfg, found = in, true
+	var cfg InboxConfig
+	found := false
+	if strings.HasPrefix(r.AccountID, PodAccountPrefix) {
+		cfg, found = c.PodInbox(r.AccountID)
+	} else {
+		inboxes := c.Inboxes()
+		if len(inboxes) == 0 && !r.RequireAccount {
+			return errors.New("no inbox configured (set INBOX_n_* in ~/.founderos/.env or under API keys)")
+		}
+		if len(inboxes) > 0 && r.AccountID == "" && !r.RequireAccount {
+			cfg, found = inboxes[0], true
+		}
+		for _, in := range inboxes {
+			if r.AccountID != "" && in.ID == r.AccountID {
+				cfg, found = in, true
+			}
 		}
 	}
 	if !found {

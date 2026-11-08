@@ -101,10 +101,13 @@ type InboxUnread struct {
 
 // Reply is an outbound reply from one of the inboxes.
 type Reply struct {
-	AccountID string // inbox-n; defaults to the first configured inbox
-	To        string
-	Subject   string
-	Text      string
+	AccountID string // inbox-n; empty means the first configured inbox
+	// RequireAccount refuses a send without a known AccountID: client pod
+	// mail must never fall back to the owner's first inbox.
+	RequireAccount bool
+	To             string
+	Subject        string
+	Text           string
 	// RecipientApproved is the mail guard's per-call MAIL_ALLOW_EXTERNAL: set
 	// only when a person approved this exact message and recipient (the
 	// /os/outbox approve), never as a default.
@@ -493,6 +496,10 @@ func setDeadline(ctx context.Context, conn net.Conn) {
 	}
 }
 
+// ErrUnknownAccount: the send named an inbox that is not configured (or a pod
+// send named none). Nothing is dialled.
+var ErrUnknownAccount = errors.New("unknown sending account")
+
 // SendReply sends a plain-text reply from the originating inbox. The mail
 // guard (an earlier incident) is checked first and refuses unapproved recipients; then the
 // send runs only through guard.Outbound("email.send"), so with FOUNDEROS_WRITES
@@ -507,11 +514,14 @@ func (c *Connector) SendReply(ctx context.Context, r Reply) error {
 	if strings.TrimSpace(r.To) == "" {
 		return errors.New("no recipient address")
 	}
-	cfg := inboxes[0]
+	cfg, found := inboxes[0], r.AccountID == "" && !r.RequireAccount
 	for _, in := range inboxes {
-		if in.ID == r.AccountID {
-			cfg = in
+		if r.AccountID != "" && in.ID == r.AccountID {
+			cfg, found = in, true
 		}
+	}
+	if !found {
+		return fmt.Errorf("%w: %q", ErrUnknownAccount, r.AccountID)
 	}
 	env := c.env
 	if r.RecipientApproved {

@@ -691,3 +691,20 @@ func TestSendReplySurfacesSMTPAuthFailure(t *testing.T) {
 		t.Fatal("nothing should have been delivered")
 	}
 }
+
+// Codex review, 8 Nov 2026: an unknown AccountID used to fall back to inbox 1,
+// so a client pod's email could go out under the wrong identity. Now an unknown
+// account is refused before SMTP, and a pod send (RequireAccount) also refuses
+// a missing one. A plain send without an account still uses inbox 1.
+func TestSendReplyRefusesAnUnknownOrMissingRequiredAccountBeforeSMTP(t *testing.T) {
+	t.Setenv("FOUNDEROS_WRITES", "1")
+	c := sendConnector(t, "alex@vantage.example", "p", "", nil)
+	for name, r := range map[string]Reply{
+		"unknown":          {AccountID: "inbox-3", To: "alex@vantage.example", Subject: "s", Text: "t"},
+		"missing required": {RequireAccount: true, To: "alex@vantage.example", Subject: "s", Text: "t"},
+	} {
+		if err := c.SendReply(context.Background(), r); !errors.Is(err, ErrUnknownAccount) {
+			t.Errorf("%s: err = %v, want ErrUnknownAccount", name, err)
+		}
+	}
+}

@@ -1,5 +1,5 @@
 // GET /api/founderos/pages/outbox (internal/founderos/pages/outbox).
-export type OutboxStatus = 'pending' | 'sending' | 'sent' | 'rejected' | 'failed' | 'uncertain';
+export type OutboxStatus = 'pending' | 'sending' | 'sent' | 'rejected' | 'failed' | 'uncertain' | 'simulated';
 
 export type OutboxItem = {
 	id: string;

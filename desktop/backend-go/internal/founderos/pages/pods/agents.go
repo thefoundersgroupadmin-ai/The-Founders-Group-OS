@@ -241,3 +241,15 @@ func (s *Store) HasAgent(ctx context.Context, slug string) (bool, error) {
 		WHERE p.slug = $1 AND a.agent_id <> '')`, slug).Scan(&ok)
 	return ok, err
 }
+
+// GetBinding returns the pod's board binding, or ok=false before provisioning.
+func (s *Store) GetBinding(ctx context.Context, podID string) (Binding, bool, error) {
+	var b Binding
+	err := s.Pool.QueryRow(ctx, `SELECT project_id, agent_id, research_routine_id, outreach_routine_id, brief_hash, routines_active
+		FROM founderos_pod_agents WHERE pod_id = $1`, podID).Scan(&b.ProjectID, &b.AgentID, &b.ResearchRoutineID,
+		&b.OutreachRoutineID, &b.BriefHash, &b.RoutinesActive)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return b, false, nil
+	}
+	return b, err == nil, err
+}

@@ -39,6 +39,7 @@ import {
 	Share2,
 	Sparkles,
 	Stethoscope,
+	Target,
 	Users,
 	Wallet,
 	Waypoints,
@@ -78,6 +79,8 @@ export const NAV_AGENTS: NavItem[] = [
 	{ href: '/os/tasks', label: 'Tasks', icon: icon(ListChecks) },
 	{ href: '/os/approvals', label: 'Approvals', icon: icon(CircleCheck) },
 	{ href: '/os/outbox', label: 'Outbox', icon: icon(Send) },
+	// Client AI SDR pods (docs/tfg/CLIENT-PODS.md).
+	{ href: '/os/pods', label: 'Client AI SDRs', icon: icon(Target) },
 	{ href: '/os/skills', label: 'Skills', icon: icon(Sparkles) },
 	{ href: '/os/org', label: 'Org Chart', icon: icon(Network) },
 	// The system drawn from its own registries.

@@ -8,7 +8,8 @@ export const STATUS_BADGE: Record<OutboxStatus, { tone: BadgeTone; label: string
 	sent: { tone: 'ok', label: 'Sent' },
 	rejected: { tone: 'default', label: 'Rejected' },
 	failed: { tone: 'err', label: 'Failed' },
-	uncertain: { tone: 'warn', label: 'Uncertain' }
+	uncertain: { tone: 'warn', label: 'Uncertain' },
+	simulated: { tone: 'default', label: 'Test run' }
 };
 
 /** "Eren Can · Hitratech <info@hitratech.co.uk>", skipping whatever is unknown. */

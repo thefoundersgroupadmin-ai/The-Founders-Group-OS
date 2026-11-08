@@ -350,6 +350,23 @@ func registerPods(s *gin.RouterGroup, d *Deps) {
 			podError(c, err)
 		}
 	})
+	s.GET("/pods/:slug/agent", func(c *gin.Context) {
+		st, p, ok := pod(c)
+		if !ok {
+			return
+		}
+		bind, found, err := st.GetBinding(c.Request.Context(), p.ID)
+		if err != nil {
+			podError(c, err)
+			return
+		}
+		if !found {
+			c.JSON(http.StatusOK, gin.H{"agent": nil})
+			return
+		}
+		c.JSON(http.StatusOK, gin.H{"agent": gin.H{"projectId": bind.ProjectID, "agentId": bind.AgentID,
+			"researchRoutineId": bind.ResearchRoutineID, "outreachRoutineId": bind.OutreachRoutineID, "routinesActive": bind.RoutinesActive}})
+	})
 	// Provision (or refresh) the pod's AI SDR on the task board. Owner only.
 	s.POST("/pods/:slug/agent", func(c *gin.Context) {
 		st, p, ok := pod(c)

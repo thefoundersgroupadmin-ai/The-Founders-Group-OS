@@ -574,6 +574,7 @@ func registerPods(s *gin.RouterGroup, d *Deps) {
 		}
 		c.JSON(http.StatusOK, gin.H{"meetings": out, "calendarConnected": podCalendarKey(d, p.Slug) != ""})
 	})
+	registerPodCRM(s, d, pod, reply)
 	s.GET("/pods/:slug/activity", func(c *gin.Context) {
 		st, p, ok := pod(c)
 		if !ok {

@@ -131,6 +131,13 @@ func startPodLoops(d *Deps) {
 					}
 					cancel()
 				}
+				if n%20 == 0 {
+					ctx, cancel := context.WithTimeout(context.Background(), 4*time.Minute)
+					if k, err := syncPodCRMs(ctx, d, st); k > 0 || err != nil {
+						slog.Info("client pods: CRM sync", "written", k, "err", err)
+					}
+					cancel()
+				}
 				if n%10 == 0 {
 					ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 					if k, err := readPodCalendars(ctx, d, st); k > 0 || err != nil {

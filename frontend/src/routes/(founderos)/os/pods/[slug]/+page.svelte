@@ -36,6 +36,8 @@
 	let meetings = $state<{ uid: string; title: string; name: string; email: string; startsAt: string | null; brief: string; briefSent: boolean }[]>([]);
 	let calendarConnected = $state(false);
 	let calcomKey = $state('');
+	let crm = $state<{ provider: string; connected: boolean; synced: number } | null>(null);
+	let crmForm = $state({ provider: 'hubspot', token: '', clientId: '', clientSecret: '', refreshToken: '', loginUrl: '' });
 
 	const err = (e: unknown) => (e instanceof Error ? e.message : 'request failed');
 
@@ -57,6 +59,7 @@
 		founderosFetch<{ activity: Activity[] }>(`${base}/activity`).then((b) => (activity = b.activity)).catch(() => {});
 		founderosFetch<{ agent: AgentBinding | null }>(`${base}/agent`).then((b) => (agent = b.agent)).catch(() => {});
 		founderosFetch<{ approvals: ClientApproval[] }>(`${base}/approvals`).then((b) => (approvals = b.approvals)).catch(() => {});
+		founderosFetch<{ provider: string; connected: boolean; synced: number }>(`${base}/crm`).then((b) => (crm = b)).catch(() => {});
 		founderosFetch<{ meetings: typeof meetings; calendarConnected: boolean }>(`${base}/meetings`)
 			.then((b) => {
 				meetings = b.meetings;
@@ -103,6 +106,11 @@
 		act(async () => {
 			await founderosFetch(`${base}/target-lists`, { method: 'POST', json: { title: list.title, domains: parseDomains(list.domains) } });
 			list = { title: '', domains: '' };
+		});
+	const connectCRM = () =>
+		act(async () => {
+			await founderosFetch(`${base}/crm`, { method: 'PUT', json: crmForm });
+			crmForm = { ...crmForm, token: '', clientSecret: '', refreshToken: '' };
 		});
 	const connectCalendar = () =>
 		act(async () => {
@@ -292,6 +300,27 @@
 					<input readonly value={formLink.endpoint} aria-label="Form link" class="pc-input mt-1 w-full rounded-[6px] px-2.5 py-1.5 font-mono text-[11px]" />
 					<textarea readonly rows="10" aria-label="Form code" class="pc-input mt-2 w-full rounded-[6px] px-2.5 py-2 font-mono text-[11px]">{formLink.snippet}</textarea>
 				{/if}
+			</Slab>
+
+			<Slab>
+				<p class="bn-dim mb-2 font-mono text-[10px] uppercase tracking-[0.15em]">Client CRM</p>
+				<p class="mb-2 text-[12px]">
+					{crm?.connected ? `Connected to ${crm.provider}: contacts, every email sent, meetings with briefs and qualification notes are written there every 10 minutes (${crm.synced} records so far).` : "Connect the client's CRM so everything the AI SDR does is logged there."}
+				</p>
+				<div class="grid grid-cols-1 gap-2 md:grid-cols-3">
+					<select bind:value={crmForm.provider} aria-label="CRM" class="pc-input rounded-[6px] px-2 py-1.5 text-[12px]">
+						<option value="hubspot">HubSpot</option><option value="pipedrive">Pipedrive</option><option value="salesforce">Salesforce</option>
+					</select>
+					{#if crmForm.provider === 'salesforce'}
+						<input bind:value={crmForm.clientId} placeholder="Connected app client id" aria-label="Client id" class="pc-input rounded-[6px] px-2 py-1.5 text-[12px]" />
+						<input type="password" bind:value={crmForm.clientSecret} placeholder="Client secret" aria-label="Client secret" class="pc-input rounded-[6px] px-2 py-1.5 text-[12px]" />
+						<input type="password" bind:value={crmForm.refreshToken} placeholder="Refresh token" aria-label="Refresh token" class="pc-input rounded-[6px] px-2 py-1.5 text-[12px]" />
+						<input bind:value={crmForm.loginUrl} placeholder="Login URL (optional, e.g. https://test.salesforce.com)" aria-label="Login URL" class="pc-input rounded-[6px] px-2 py-1.5 text-[12px]" />
+					{:else}
+						<input type="password" bind:value={crmForm.token} placeholder={crmForm.provider === 'hubspot' ? 'HubSpot private app token' : 'Pipedrive API token'} aria-label="CRM token" class="pc-input rounded-[6px] px-2 py-1.5 text-[12px]" />
+					{/if}
+				</div>
+				<div class="mt-2"><Pressable tone="secondary" disabled={busy} onclick={connectCRM}>{crm?.connected ? 'Replace CRM connection' : 'Connect CRM'}</Pressable></div>
 			</Slab>
 
 			<Slab>

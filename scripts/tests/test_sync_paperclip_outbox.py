@@ -71,5 +71,36 @@ class ContactTest(unittest.TestCase):
         self.assertFalse(sync.is_own("ben@basalt.health", own))
 
 
+class PodRoutingTest(unittest.TestCase):
+    """Client pods (docs/tfg/CLIENT-PODS.md): a task in a pod's board project
+    goes to that pod only; HQ tasks never land in a pod."""
+    PODS = {"proj-bv": {"project_id": "proj-bv", "workspace_id": "w-bv", "slug": "client-brightvale",
+                        "client_name": "Brightvale", "sender_name": "Sam Reed"}}
+
+    def test_a_pod_project_task_routes_to_the_pod_whatever_else_matches(self):
+        binding = {"workspace_id": "w-hq", "slug": "founderos"}
+        r = sync.route({"id": "i1", "projectId": "proj-bv"}, self.PODS, {"i1": binding}, "w-v")
+        self.assertEqual((r["outbox_ws"], r["pipeline_ws"], r["venture"], r["product"]), ("w-bv", "w-bv", "client", "Brightvale"))
+        self.assertTrue(r["pod"])
+        self.assertEqual(r["sender"], "Sam Reed")
+
+    def test_other_tasks_keep_hq_routing(self):
+        r = sync.route({"id": "i2", "projectId": "proj-tfg"}, self.PODS, {}, "w-v")
+        self.assertFalse(r["pod"])
+        self.assertEqual(r["outbox_ws"], None)  # caller uses HQ
+        self.assertEqual(r["pipeline_ws"], "w-v")
+
+    def test_hq_recipient_matching_never_looks_inside_pods(self):
+        q = sync.recipient_matches_query("priya@brightvale.example")
+        self.assertIn("NOT IN (SELECT workspace_id FROM founderos_client_pods)", q)
+        self.assertIn("'priya@brightvale.example'", q)
+
+    def test_sequence_key_is_kept(self):
+        got = sync.entries('[{"to": "a@b.co", "subject": "s", "body": "b", "sequenceKey": "warehouses:1"}]')
+        self.assertEqual(got[0]["sequenceKey"], "warehouses:1")
+        with self.assertRaises(ValueError):
+            sync.entries('[{"to": "a@b.co", "subject": "s", "body": "b", "sequenceKey": "' + "x" * 101 + '"}]')
+
+
 if __name__ == "__main__":
     unittest.main()

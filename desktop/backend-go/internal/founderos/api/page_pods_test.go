@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -14,6 +15,7 @@ import (
 	"github.com/rhl/businessos-backend/internal/founderos/connectors"
 	"github.com/rhl/businessos-backend/internal/founderos/connectors/email"
 	"github.com/rhl/businessos-backend/internal/founderos/pages/catalogdb"
+	"github.com/rhl/businessos-backend/internal/founderos/pages/pods"
 	"github.com/rhl/businessos-backend/internal/middleware"
 )
 
@@ -209,5 +211,69 @@ func TestAPodsOutboxIsReachableOnlyThroughThePodAndObeysTheGate(t *testing.T) {
 	}
 	if code, _ := podsDo(t, owner, http.MethodPost, "/api/founderos/pods/client-brightvale/outbox/po-1/reject", ``); code != http.StatusOK {
 		t.Fatalf("reject: %d", code)
+	}
+}
+
+type recBoard struct {
+	routines map[string]pods.BoardRoutine
+	n        int
+}
+
+func (b *recBoard) EnsureProject(context.Context, string, string, string) (string, error) {
+	return "proj-1", nil
+}
+func (b *recBoard) EnsureAgent(context.Context, string, string, string) (string, error) {
+	return "agent-1", nil
+}
+func (b *recBoard) PutInstructions(context.Context, string, string) error { return nil }
+func (b *recBoard) CreateRoutine(_ context.Context, r pods.BoardRoutine) (string, error) {
+	b.n++
+	id := fmt.Sprintf("rt-%d", b.n)
+	b.routines[id] = r
+	return id, nil
+}
+func (b *recBoard) UpdateRoutine(_ context.Context, id string, r pods.BoardRoutine) error {
+	b.routines[id] = r
+	return nil
+}
+func (b *recBoard) AddScheduleTrigger(context.Context, string, string, string) error { return nil }
+
+func TestOwnerProvisionsAPodsAISDRAndPausingReachesTheBoard(t *testing.T) {
+	t.Setenv("FOUNDEROS_OWNER_EMAIL", "owner@tfg.example")
+	pool := catalogdb.TestDB(t)
+	board := &recBoard{routines: map[string]pods.BoardRoutine{}}
+	prev := podBoardFor
+	podBoardFor = func(*Deps) pods.Board { return board }
+	t.Cleanup(func() { podBoardFor = prev })
+	owner := podsRouter(t, pool, &middleware.BetterAuthUser{ID: "u-owner", Email: "owner@tfg.example"})
+	base := "/api/founderos/pods/client-brightvale"
+	podsDo(t, owner, http.MethodPost, "/api/founderos/pods", `{"clientName":"Brightvale"}`)
+	if code, _ := podsDo(t, owner, http.MethodPost, base+"/agent", ""); code != http.StatusBadRequest {
+		t.Fatalf("provisioned without sender/icp: %d", code)
+	}
+	podsDo(t, owner, http.MethodPut, base+"/sender", `{"name":"Sam","email":"sam@bv-mail.example"}`)
+	podsDo(t, owner, http.MethodPut, base+"/docs/icp", `{"body":"Warehouse operators"}`)
+	if code, body := podsDo(t, owner, http.MethodPost, base+"/agent", ""); code != http.StatusOK || body["agent"].(map[string]any)["agentId"] != "agent-1" {
+		t.Fatalf("provision: %d %v", code, body)
+	}
+	podsDo(t, owner, http.MethodPost, base+"/status", `{"status":"dry_run"}`)
+	for id, r := range board.routines {
+		if r.Status != "active" {
+			t.Fatalf("%s not active in dry run", id)
+		}
+	}
+	podsDo(t, owner, http.MethodPost, base+"/status", `{"status":"paused","reason":"client holiday"}`)
+	for id, r := range board.routines {
+		if r.Status != "paused" {
+			t.Fatalf("%s still active after pause", id)
+		}
+	}
+	if _, err := pool.Exec(context.Background(), `INSERT INTO workspace_members (workspace_id, user_id, status, role)
+		SELECT workspace_id, 'u-ilya', 'active', 'member' FROM founderos_client_pods`); err != nil {
+		t.Fatal(err)
+	}
+	member := podsRouter(t, pool, &middleware.BetterAuthUser{ID: "u-ilya", Email: "ilya@tfg.example"})
+	if code, _ := podsDo(t, member, http.MethodPost, base+"/agent", ""); code != http.StatusForbidden {
+		t.Fatalf("member provisioned an agent: %d", code)
 	}
 }

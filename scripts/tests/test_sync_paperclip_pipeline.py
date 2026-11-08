@@ -81,5 +81,27 @@ class AddressMatchTest(unittest.TestCase):
         self.assertTrue(sync.address_for_company("Polyphasic Developers", row, "info@polyphasicdevs.com"))
 
 
+class PodRoutingTest(unittest.TestCase):
+    """Client pods: research from a pod's board project lands in that pod's
+    pipeline as venture 'client' selling the client's product; nothing else does."""
+    PODS = {"proj-bv": {"project_id": "proj-bv", "slug": "client-brightvale", "client_name": "Brightvale"}}
+
+    def test_a_pod_project_task_targets_the_pod(self):
+        self.assertEqual(sync.target_for({"id": "i1", "projectId": "proj-bv"}, self.PODS, {"i1": "founderos"}), "client-brightvale")
+        self.assertEqual(sync.target_for({"id": "i2", "projectId": "x"}, self.PODS, {"i2": "founderos"}), "founderos")
+        self.assertEqual(sync.target_for({"id": "i3"}, self.PODS, {}), sync.WORKSPACE_SLUG)
+
+    def test_pod_contacts_are_client_venture_with_the_clients_product(self):
+        slugs = {"client-brightvale": "Brightvale"}
+        self.assertEqual(sync.venture_for("client-brightvale", slugs), "client")
+        self.assertEqual(sync.product_for("client-brightvale", slugs), "Brightvale")
+        self.assertEqual(sync.venture_for("vantage", slugs), "vantage")
+        self.assertEqual(sync.product_for("vantage", slugs), sync.PRODUCT)
+
+    def test_pod_documents_never_feed_hq_addresses(self):
+        self.assertFalse(sync.scan_for_hq_addresses({"id": "i1", "projectId": "proj-bv"}, self.PODS))
+        self.assertTrue(sync.scan_for_hq_addresses({"id": "i2", "projectId": "other"}, self.PODS))
+
+
 if __name__ == "__main__":
     unittest.main()

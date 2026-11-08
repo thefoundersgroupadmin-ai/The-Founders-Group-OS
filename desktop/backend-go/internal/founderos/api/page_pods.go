@@ -153,6 +153,9 @@ func registerPods(s *gin.RouterGroup, d *Deps) {
 			podError(c, err)
 			return
 		}
+		if warn := resyncPodAgent(c.Request.Context(), d, st, p.Slug); warn != "" {
+			c.Header("X-Pod-Warning", warn)
+		}
 		reply(c, st, p.Slug)
 	})
 	s.PUT("/pods/:slug/sender", func(c *gin.Context) {
@@ -220,6 +223,9 @@ func registerPods(s *gin.RouterGroup, d *Deps) {
 		if err := st.ApproveDoc(c.Request.Context(), p.Slug, c.Param("key"), strings.TrimSpace(in.By)); err != nil {
 			podError(c, err)
 			return
+		}
+		if warn := resyncPodAgent(c.Request.Context(), d, st, p.Slug); warn != "" {
+			c.Header("X-Pod-Warning", warn)
 		}
 		reply(c, st, p.Slug)
 	})
@@ -343,6 +349,24 @@ func registerPods(s *gin.RouterGroup, d *Deps) {
 		default:
 			podError(c, err)
 		}
+	})
+	// Provision (or refresh) the pod's AI SDR on the task board. Owner only.
+	s.POST("/pods/:slug/agent", func(c *gin.Context) {
+		st, p, ok := pod(c)
+		if !ok {
+			return
+		}
+		if who, _ := personOf(c); !who.Owner {
+			c.JSON(http.StatusForbidden, gin.H{"error": "only the TFG owner provisions a pod's AI SDR"})
+			return
+		}
+		bind, err := st.Provision(c.Request.Context(), podBoardFor(d), p.Slug)
+		if err != nil {
+			podError(c, err)
+			return
+		}
+		c.JSON(http.StatusOK, gin.H{"agent": gin.H{"projectId": bind.ProjectID, "agentId": bind.AgentID,
+			"researchRoutineId": bind.ResearchRoutineID, "outreachRoutineId": bind.OutreachRoutineID, "routinesActive": bind.RoutinesActive}})
 	})
 	s.GET("/pods/:slug/activity", func(c *gin.Context) {
 		st, p, ok := pod(c)

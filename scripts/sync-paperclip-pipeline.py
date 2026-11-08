@@ -32,10 +32,37 @@ PRODUCT = "Sales System Build"
 VENTURES = ("vantage", "launchpad-cohort")  # founderos_funnel_contacts.venture CHECK
 
 
-def venture_for(workspace):
-    """The funnel's venture for a command workspace. Other workspaces (TFG HQ,
-    client workspaces) sell PRODUCT, which is Vantage's offer."""
+def venture_for(workspace, pods=None):
+    """The funnel's venture for a target workspace: a client pod's contacts are
+    'client'; other workspaces (TFG HQ, command workspaces) sell PRODUCT,
+    which is Vantage's offer."""
+    if pods and workspace in pods:
+        return "client"
     return workspace if workspace in VENTURES else "vantage"
+
+
+def product_for(workspace, pods=None):
+    """What the contact is being sold: the pod's client, else TFG's PRODUCT."""
+    return pods[workspace] if pods and workspace in pods else PRODUCT
+
+
+POD_ROUTES_QUERY = ("SELECT coalesce(json_agg(json_build_object('project_id', a.project_id, 'slug', p.slug, "
+                    "'client_name', p.client_name)), '[]') FROM founderos_pod_agents a "
+                    "JOIN founderos_client_pods p ON p.id=a.pod_id WHERE a.project_id<>''")
+
+
+def target_for(issue, pods, task_workspaces):
+    """Where a task's research goes: its client pod (by board project, docs/tfg/CLIENT-PODS.md),
+    else its durable command's workspace, else the default pipeline. Never model text."""
+    pod = pods.get(issue.get("projectId") or "")
+    if pod:
+        return pod["slug"]
+    return task_workspaces.get(issue["id"], WORKSPACE_SLUG)
+
+
+def scan_for_hq_addresses(issue, pods):
+    """Only HQ tasks' free-text documents may supply addresses for HQ accounts."""
+    return (issue.get("projectId") or "") not in pods
 EMAIL = re.compile(r"[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}")
 LINK = re.compile(r"\[([^\]]+)\]\(([^)]+)\)")
 FENCE = re.compile(r"```(?:json)?\s*(\[.*?\])\s*```", re.S)
@@ -146,6 +173,9 @@ def main():
     mapping_sql = "SELECT COALESCE(jsonb_object_agg(step->>'taskId',w.slug),'{}'::jsonb) FROM founderos_commands c JOIN workspaces w ON w.id=c.workspace_id CROSS JOIN LATERAL jsonb_array_elements(c.steps) step WHERE step->>'taskId' IS NOT NULL"
     mapped = subprocess.run(["psql", db, "-At", "-c", mapping_sql], capture_output=True, text=True)
     task_workspaces = json.loads(mapped.stdout.strip()) if mapped.returncode == 0 and mapped.stdout.strip() else {}
+    pod_rows = subprocess.run(["psql", db, "-At", "-c", POD_ROUTES_QUERY], capture_output=True, text=True)
+    pods = {p["project_id"]: p for p in json.loads(pod_rows.stdout.strip() or "[]")} if pod_rows.returncode == 0 else {}
+    pod_products = {p["slug"]: p["client_name"] for p in pods.values()}
 
 
     issues = paperclip(pc, f"/api/companies/{company}/issues")
@@ -178,7 +208,8 @@ def main():
         docs = docs.get("documents", docs) if isinstance(docs, dict) else docs
         for d in docs:
             if d.get("key") != "prospects":
-                other_docs.append(d)
+                if scan_for_hq_addresses(issue, pods):
+                    other_docs.append(d)
                 continue
             try:
                 found, bad = json_prospects(doc_body(d))
@@ -187,7 +218,7 @@ def main():
                 continue
             if bad:
                 print(f"{ident} prospects: skipped {bad} entries without a company", file=sys.stderr)
-            target = task_workspaces.get(issue["id"], WORKSPACE_SLUG)
+            target = target_for(issue, pods, task_workspaces)
             known = {(a.get("workspace", WORKSPACE_SLUG), slug(a["name"])) for a in accounts}
             for a in found:
                 a["workspace"] = target
@@ -235,7 +266,7 @@ def main():
         stmts.append(
             "INSERT INTO founderos_funnel_contacts (id, workspace_id, name, venture, status, product, relationship, "
             "likelihood, email, person, company, website, location, buyer_role, research_evidence, next_action, research_source_ref, created_at) VALUES ("
-            f"{sql(cid)}, {sql(ws)}, {sql(a['buyer'] or a['name'])}, {sql(venture_for(target))}, 'first_touch', {sql(PRODUCT)}, 'cold', "
+            f"{sql(cid)}, {sql(ws)}, {sql(a['buyer'] or a['name'])}, {sql(venture_for(target, pod_products))}, 'first_touch', {sql(product_for(target, pod_products))}, 'cold', "
             f"{sql(a['score'])}, {sql(email)}, {sql(a['buyer'])}, {sql(a['name'])}, {sql(a.get('url'))}, {sql(a.get('location'))}, {sql(a.get('buyerRole'))}, {sql(a.get('evidence'))}, {sql(a.get('next'))}, {sql(a.get('sourceRef', 'THE-3'))}, now()) "
             "ON CONFLICT (id) DO UPDATE SET likelihood = EXCLUDED.likelihood, person = EXCLUDED.person, "
             "company = EXCLUDED.company, email = COALESCE(EXCLUDED.email, founderos_funnel_contacts.email), "

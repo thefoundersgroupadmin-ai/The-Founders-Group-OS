@@ -81,6 +81,31 @@ def recipient_workspace(matches, existing):
     return matches[0] if matches else None
 
 
+POD_ROUTES_QUERY = ("SELECT a.project_id, p.workspace_id::text AS workspace_id, p.slug, p.client_name, p.sender_name "
+                    "FROM founderos_pod_agents a JOIN founderos_client_pods p ON p.id=a.pod_id WHERE a.project_id<>''")
+
+
+def route(issue, pods, task_workspaces, default_pipeline_ws):
+    """Where an issue's drafts go. A task in a client pod's board project goes to
+    that pod's workspace and pipeline, whatever else matches (docs/tfg/CLIENT-PODS.md).
+    Otherwise the durable command binding, else the default pipeline; outbox_ws
+    None means HQ."""
+    pod = pods.get(issue.get("projectId") or "")
+    if pod:
+        return {"pod": True, "outbox_ws": pod["workspace_id"], "pipeline_ws": pod["workspace_id"], "pipeline_slug": pod["slug"],
+                "venture": "client", "product": pod["client_name"], "sender": pod["sender_name"], "binding": True}
+    binding = task_workspaces.get(issue["id"])
+    return {"pod": False, "outbox_ws": None, "pipeline_ws": binding["workspace_id"] if binding else default_pipeline_ws,
+            "pipeline_slug": binding["slug"] if binding else PIPELINE_SLUG, "venture": None, "product": "Sales System Build",
+            "sender": None, "binding": bool(binding)}
+
+
+def recipient_matches_query(addr):
+    """HQ drafts with no command binding find their pipeline by recipient, never inside a client pod."""
+    return ("SELECT DISTINCT c.workspace_id::text AS workspace_id,w.slug FROM founderos_funnel_contacts c JOIN workspaces w ON w.id=c.workspace_id "
+            f"WHERE lower(c.email)=lower({sql(addr)}) AND c.workspace_id NOT IN (SELECT workspace_id FROM founderos_client_pods)")
+
+
 def psql_rows(db, query):
     """Rows as dicts: the query is wrapped in json_agg, so tabs or newlines in values are safe."""
     out = psql(db, f"SELECT coalesce(json_agg(q), '[]') FROM ({query}) q").strip()
@@ -123,7 +148,11 @@ def entries(body):
         subject, text = str(e.get("subject", "")).strip(), str(e.get("body", "")).strip()
         if not EMAIL.match(to) or not subject or not text or len(subject) > 300 or len(text) > 20000:
             raise ValueError(f"entry {i}: needs a valid 'to', a subject (1-300) and a body (1-20000)")
-        out.append({"to": to, "toName": e.get("toName"), "company": e.get("company"), "subject": subject, "body": text})
+        seq = e.get("sequenceKey")
+        if seq is not None and (not isinstance(seq, str) or not 0 < len(seq.strip()) <= 100):
+            raise ValueError(f"entry {i}: sequenceKey must be a short string")
+        out.append({"to": to, "toName": e.get("toName"), "company": e.get("company"), "subject": subject, "body": text,
+                    "sequenceKey": seq.strip() if seq else None})
     return out
 
 
@@ -154,10 +183,13 @@ def main():
     task_workspaces = {b["task_id"]: b for b in bindings}
     default_pipeline_ws = pipeline_ws
     imported = 0
+    pods = {p["project_id"]: p for p in psql_rows(db, POD_ROUTES_QUERY)}
+    pod_senders = {p["workspace_id"]: p["sender_name"] for p in pods.values()}
     for issue in issues:
-        binding = task_workspaces.get(issue["id"])
-        pipeline_ws = binding["workspace_id"] if binding else default_pipeline_ws
-        pipeline_slug = binding["slug"] if binding else PIPELINE_SLUG
+        rt = route(issue, pods, task_workspaces, default_pipeline_ws)
+        binding = rt["binding"]
+        pipeline_ws, pipeline_slug = rt["pipeline_ws"], rt["pipeline_slug"]
+        outbox_ws = rt["outbox_ws"] or ws
         docs = paperclip(pc, "GET", f"/api/issues/{issue['id']}/documents")
         docs = docs.get("documents", docs) if isinstance(docs, dict) else docs
         doc = next((d for d in docs if d.get("key") == "outbox"), None)
@@ -172,8 +204,7 @@ def main():
         for it in items:
             oid = "pc-" + ident.lower() + "-" + hashlib.sha1((it["to"].lower() + "\n" + it["subject"]).encode()).hexdigest()[:10]
             if not binding:
-                matches = psql_rows(db, "SELECT DISTINCT c.workspace_id::text AS workspace_id,w.slug FROM founderos_funnel_contacts c JOIN workspaces w ON w.id=c.workspace_id "
-                                    f"WHERE lower(c.email)=lower({sql(it['to'])})")
+                matches = psql_rows(db, recipient_matches_query(it["to"]))
                 existing = psql_rows(db, imported_pipeline_query(oid)) if len(matches) > 1 else []
                 chosen = recipient_workspace(matches, existing)
                 if chosen == "ambiguous":
@@ -189,18 +220,18 @@ def main():
                 # A new recipient becomes a pipeline contact; a known company keeps its row.
                 psql(db, "INSERT INTO founderos_funnel_contacts (id, workspace_id, name, venture, status, product, relationship, "
                          "email, person, company, created_at) "
-                         f"SELECT {cid}, {sql(pipeline_ws)}, {sql(it['toName'] or it['company'] or it['to'])}, {sql(pipeline_slug)}, "
-                         f"'first_touch', 'Sales System Build', 'cold', {to}, {sql(it['toName'])}, {sql(it['company'])}, now() "
+                         f"SELECT {cid}, {sql(pipeline_ws)}, {sql(it['toName'] or it['company'] or it['to'])}, {sql(rt['venture'] or pipeline_slug)}, "
+                         f"'first_touch', {sql(rt['product'])}, 'cold', {to}, {sql(it['toName'])}, {sql(it['company'])}, now() "
                          f"WHERE NOT EXISTS (SELECT 1 FROM founderos_funnel_contacts WHERE workspace_id = {sql(pipeline_ws)} AND lower(email) = lower({to})) "
                          "ON CONFLICT (id) DO UPDATE SET email = COALESCE(founderos_funnel_contacts.email, EXCLUDED.email)")
             link = (f"COALESCE((SELECT id FROM founderos_funnel_contacts WHERE workspace_id = {sql(pipeline_ws)} AND lower(email) = lower({to}) ORDER BY id LIMIT 1), "
                     f"(SELECT id FROM founderos_funnel_contacts WHERE workspace_id = {sql(pipeline_ws)} AND id = {cid}))")
             # A pending row follows the agent's latest wording; decided rows keep theirs.
-            psql(db, "INSERT INTO founderos_outbox (id, workspace_id, source, source_ref, contact_id, to_address, to_name, company, subject, body) "
-                     f"SELECT {sql(oid)}, {sql(ws)}, 'paperclip', {sql(ident)}, {link}, "
-                     f"{to}, {sql(it['toName'])}, {sql(it['company'])}, {sql(it['subject'])}, {sql(it['body'])} "
-                     "ON CONFLICT (id) DO UPDATE SET body = EXCLUDED.body, to_name = EXCLUDED.to_name, company = EXCLUDED.company "
-                     "WHERE founderos_outbox.status = 'pending'")
+            psql(db, "INSERT INTO founderos_outbox (id, workspace_id, source, source_ref, contact_id, to_address, to_name, company, subject, body, sequence_key) "
+                     f"SELECT {sql(oid)}, {sql(outbox_ws)}, 'paperclip', {sql(ident)}, {link}, "
+                     f"{to}, {sql(it['toName'])}, {sql(it['company'])}, {sql(it['subject'])}, {sql(it['body'])}, {sql(it['sequenceKey'])} "
+                     "ON CONFLICT (id) DO UPDATE SET body = EXCLUDED.body, to_name = EXCLUDED.to_name, company = EXCLUDED.company, "
+                     "sequence_key = EXCLUDED.sequence_key WHERE founderos_outbox.status = 'pending'")
             # Rows imported before their contact existed get linked now, whatever their status.
             psql(db, f"UPDATE founderos_outbox SET contact_id = {link} WHERE id = {sql(oid)} AND contact_id IS NULL")
             imported += 1
@@ -209,7 +240,7 @@ def main():
         return
 
     by_ident = {i.get("identifier"): i for i in issues}
-    done = psql_rows(db, "SELECT id, source_ref, status, attempt, to_address, subject, coalesce(error, '') AS error "
+    done = psql_rows(db, "SELECT id, workspace_id::text AS workspace_id, source_ref, status, attempt, to_address, subject, coalesce(error, '') AS error "
                          "FROM founderos_outbox WHERE source = 'paperclip' AND status IN ('sent', 'rejected', 'failed', 'uncertain') "
                          "AND (reported_attempt IS DISTINCT FROM attempt OR reported_status IS DISTINCT FROM status)")
     for r in done:
@@ -217,8 +248,11 @@ def main():
         if not issue:
             continue
         to, subject = r["to_address"], r["subject"]
-        line = {"sent": f"**Sent from TFG OS** ({sender}) to {to}: \"{subject}\".",
-                "rejected": f"**Not sent: the owner rejected** the email to {to}: \"{subject}\". Do not resend it as-is.",
+        who = pod_senders.get(r["workspace_id"]) or sender
+        line = {"sent": f"**Sent from TFG OS** ({who}) to {to}: \"{subject}\".",
+                "simulated": f"**Dry run**: the email to {to} (\"{subject}\") went to the test inbox, not the prospect.",
+                "rejected": (f"**Not sent** to {to}: \"{subject}\": {r['error']}. Do not resend it as-is." if r["error"] else
+                             f"**Not sent: the owner rejected** the email to {to}: \"{subject}\". Do not resend it as-is."),
                 "failed": f"**Send failed** for {to}: \"{subject}\": {r['error']}. The owner can retry from the TFG OS outbox.",
                 "uncertain": f"**Delivery uncertain** for {to}: \"{subject}\": {r['error']}. Do not resend; the owner will check.",
                 }[r["status"]]

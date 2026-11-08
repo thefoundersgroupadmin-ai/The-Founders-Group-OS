@@ -40,7 +40,7 @@ const StaleAfter = 10 * time.Minute
 const sendBudget = 2 * time.Minute
 
 // Statuses are the founderos_outbox CHECK values.
-var Statuses = []string{"pending", "sending", "sent", "rejected", "failed", "uncertain"}
+var Statuses = []string{"pending", "sending", "sent", "rejected", "failed", "uncertain", "simulated"}
 
 // Item is one outbox row.
 type Item struct {
@@ -60,6 +60,8 @@ type Item struct {
 	CreatedAt time.Time  `json:"createdAt"`
 	DecidedAt *time.Time `json:"decidedAt"`
 	SentAt    *time.Time `json:"sentAt"`
+	// RequireAccount: send only from AccountID, never a default inbox (pods).
+	RequireAccount bool `json:"-"`
 }
 
 // Page is the /os/outbox model: everything needing a decision, then the
@@ -169,6 +171,12 @@ func Approve(ctx context.Context, pool *pgxpool.Pool, workspaceSlug, id string, 
 	ws, err := workspaceID(ctx, pool, workspaceSlug)
 	if err != nil {
 		return nil, err
+	}
+	// A client pod's sends go through the pod gate (podgate.go).
+	if rules, err := loadPodRules(ctx, pool, ws); err != nil {
+		return nil, err
+	} else if rules != nil {
+		return approvePod(ctx, pool, ws, id, content, send)
 	}
 	it, err := scan(pool.QueryRow(ctx, `UPDATE founderos_outbox
 		SET status = 'sending', decided_at = now(), error = NULL, attempt = attempt + 1, subject = $3, body = $4

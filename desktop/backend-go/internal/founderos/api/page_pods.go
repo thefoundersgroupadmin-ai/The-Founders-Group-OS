@@ -14,6 +14,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/rhl/businessos-backend/internal/founderos/connectors/email"
 	"github.com/rhl/businessos-backend/internal/founderos/pages/integrations"
+	"github.com/rhl/businessos-backend/internal/founderos/pages/outbox"
 	"github.com/rhl/businessos-backend/internal/founderos/pages/pods"
 )
 
@@ -287,6 +288,61 @@ func registerPods(s *gin.RouterGroup, d *Deps) {
 		_ = st.Log(c.Request.Context(), p.ID, "mailbox", "Sending mailbox set to "+from, "")
 		c.Header("Cache-Control", "no-store")
 		reply(c, st, p.Slug)
+	})
+	// The pod's outbox. Every send, a click included, goes through the pod gate.
+	s.GET("/pods/:slug/outbox", func(c *gin.Context) {
+		_, p, ok := pod(c)
+		if !ok {
+			return
+		}
+		page, err := outbox.Load(c.Request.Context(), d.Pool, p.Slug)
+		if err != nil {
+			podError(c, err)
+			return
+		}
+		c.JSON(http.StatusOK, page)
+	})
+	s.POST("/pods/:slug/outbox/:id/approve", func(c *gin.Context) {
+		_, p, ok := pod(c)
+		if !ok {
+			return
+		}
+		var in outbox.Content
+		if err := c.ShouldBindJSON(&in); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "subject and body expected"})
+			return
+		}
+		it, err := outbox.Approve(c.Request.Context(), d.Pool, p.Slug, c.Param("id"), in, outboxSender(d))
+		switch {
+		case err == nil:
+			c.JSON(http.StatusOK, gin.H{"ok": true, "item": it})
+		case errors.Is(err, outbox.ErrNotFound):
+			c.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
+		case errors.Is(err, outbox.ErrBadContent):
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		case errors.Is(err, outbox.ErrHeld), errors.Is(err, outbox.ErrAwaitingClient), errors.Is(err, outbox.ErrSuppressed),
+			errors.Is(err, outbox.ErrForeignAccount), errors.Is(err, outbox.ErrConversationStarted), errors.Is(err, outbox.ErrNotPending):
+			c.JSON(http.StatusConflict, gin.H{"error": err.Error(), "item": it})
+		default:
+			c.JSON(http.StatusBadGateway, gin.H{"error": err.Error(), "item": it})
+		}
+	})
+	s.POST("/pods/:slug/outbox/:id/reject", func(c *gin.Context) {
+		_, p, ok := pod(c)
+		if !ok {
+			return
+		}
+		it, err := outbox.Reject(c.Request.Context(), d.Pool, p.Slug, c.Param("id"))
+		switch {
+		case err == nil:
+			c.JSON(http.StatusOK, gin.H{"ok": true, "item": it})
+		case errors.Is(err, outbox.ErrNotFound):
+			c.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
+		case errors.Is(err, outbox.ErrNotPending):
+			c.JSON(http.StatusConflict, gin.H{"error": err.Error()})
+		default:
+			podError(c, err)
+		}
 	})
 	s.GET("/pods/:slug/activity", func(c *gin.Context) {
 		st, p, ok := pod(c)

@@ -38,6 +38,9 @@ var (
 	// ErrAwaitingClient: the client has not approved this exact wording, its
 	// sequence step, or the company's place on a target list. Still pending.
 	ErrAwaitingClient = errors.New("awaiting client approval")
+	// ErrConversationStarted: a follow-up to someone who replied, booked or
+	// moved on in the pipeline. Refused: a person takes it from here.
+	ErrConversationStarted = errors.New("the prospect has replied or booked")
 )
 
 // nowFunc is swapped in tests.
@@ -147,6 +150,21 @@ func approvePod(ctx context.Context, pool *pgxpool.Pool, ws, id string, content 
 	}
 	if inFlight {
 		return nil, held("another email to this person is sending or its delivery is uncertain")
+	}
+	var emailedBefore bool
+	if err := tx.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM founderos_outbox WHERE workspace_id = $1 AND id <> $2
+		AND lower(to_address) = $3 AND status = 'sent')`, ws, id, addr).Scan(&emailedBefore); err != nil {
+		return nil, err
+	}
+	if emailedBefore {
+		var moved bool
+		if err := tx.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM founderos_funnel_contacts c WHERE c.workspace_id = $1
+			AND c.status <> 'first_touch' AND (c.id = $2 OR lower(c.email) = $3))`, ws, it.ContactID, addr).Scan(&moved); err != nil {
+			return nil, err
+		}
+		if moved {
+			return refuse(ErrConversationStarted, "they replied, booked or moved on in the pipeline; no automatic follow-up")
+		}
 	}
 
 	if why, err := clientApproval(ctx, tx, r, it, content, domain); err != nil {

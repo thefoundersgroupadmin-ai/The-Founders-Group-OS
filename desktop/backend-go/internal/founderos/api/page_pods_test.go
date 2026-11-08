@@ -12,6 +12,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/rhl/businessos-backend/internal/founderos/connectors"
+	"github.com/rhl/businessos-backend/internal/founderos/connectors/email"
 	"github.com/rhl/businessos-backend/internal/founderos/pages/catalogdb"
 	"github.com/rhl/businessos-backend/internal/middleware"
 )
@@ -172,5 +173,41 @@ func TestPodMailboxIsSavedAsKeysNeverEchoedAndBindsTheSender(t *testing.T) {
 	mb, _ := out["mailbox"].(map[string]any)
 	if code != http.StatusOK || mb["configured"] != true || mb["pass"] == "s3cret-app-pass" {
 		t.Fatalf("mailbox status: %d %v", code, out)
+	}
+}
+
+func TestAPodsOutboxIsReachableOnlyThroughThePodAndObeysTheGate(t *testing.T) {
+	t.Setenv("FOUNDEROS_OWNER_EMAIL", "owner@tfg.example")
+	pool := catalogdb.TestDB(t)
+	var sent []email.Reply
+	prev := commsSourcesFor
+	commsSourcesFor = func(*Deps) *commsSources {
+		return &commsSources{SendEmail: func(_ context.Context, r email.Reply) error { sent = append(sent, r); return nil }}
+	}
+	t.Cleanup(func() { commsSourcesFor = prev })
+	owner := podsRouter(t, pool, &middleware.BetterAuthUser{ID: "u-owner", Email: "owner@tfg.example"})
+	stranger := podsRouter(t, pool, &middleware.BetterAuthUser{ID: "u-x", Email: "x@else.example"})
+	podsDo(t, owner, http.MethodPost, "/api/founderos/pods", `{"clientName":"Brightvale"}`)
+	ctx := context.Background()
+	if _, err := pool.Exec(ctx, `UPDATE founderos_client_pods SET status = 'live', approval_policy = 'client_approves_each',
+		sending_account_id = 'pod:client-brightvale', sender_name = 'Sam', send_window_start = 0, send_window_end = 24, send_weekends = true;
+		INSERT INTO founderos_outbox (id, workspace_id, source, to_address, subject, body)
+		SELECT 'po-1', workspace_id, 'paperclip', 'priya@brightvale.example', 'Hello', 'Body' FROM founderos_client_pods`); err != nil {
+		t.Fatal(err)
+	}
+	if code, _ := podsDo(t, stranger, http.MethodGet, "/api/founderos/pods/client-brightvale/outbox", ""); code != http.StatusNotFound {
+		t.Fatalf("stranger read a client outbox: %d", code)
+	}
+	code, body := podsDo(t, owner, http.MethodGet, "/api/founderos/pods/client-brightvale/outbox", "")
+	if code != http.StatusOK || len(body["pending"].([]any)) != 1 {
+		t.Fatalf("pod outbox: %d %v", code, body)
+	}
+	// Not on an approved target list and not approved by the client: the operator's click waits too.
+	code, body = podsDo(t, owner, http.MethodPost, "/api/founderos/pods/client-brightvale/outbox/po-1/approve", `{"subject":"Hello","body":"Body"}`)
+	if code != http.StatusConflict || len(sent) != 0 {
+		t.Fatalf("operator click bypassed the client: %d %v sent=%d", code, body, len(sent))
+	}
+	if code, _ := podsDo(t, owner, http.MethodPost, "/api/founderos/pods/client-brightvale/outbox/po-1/reject", ``); code != http.StatusOK {
+		t.Fatalf("reject: %d", code)
 	}
 }

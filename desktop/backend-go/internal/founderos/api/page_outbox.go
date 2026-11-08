@@ -120,6 +120,10 @@ func startAutoFollowUps(d *Deps) {
 					continue
 				}
 				sendCampaign(ctx, d, time.Now())
+				// Client pods: each walks its waiting emails through the pod gate.
+				if res, err := outbox.DispatchPods(ctx, d.Pool, ownDomain, outboxSender(d)); res.Sent+res.Simulated > 0 || err != nil {
+					slog.Info("founderos pods: dispatch pass", "sent", res.Sent, "simulated", res.Simulated, "waiting", res.Waiting, "err", err)
+				}
 				limit := autoFollowUpCap()
 				if limit == 0 {
 					cancel()

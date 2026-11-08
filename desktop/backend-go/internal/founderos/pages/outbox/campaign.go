@@ -39,7 +39,11 @@ var (
 // Screen is what a first email must pass to go out unseen: a real address
 // that isn't ours, a subject, a body of a sane length that names the sender,
 // gives an easy way out, and carries no template leftovers.
-func Screen(it Item, ownDomain string) error {
+func Screen(it Item, ownDomain string) error { return ScreenSigned(it, ownDomain, "Nader") }
+
+// ScreenSigned is Screen for a given signer: a client pod's emails must be
+// signed by the pod's own sender, not TFG's.
+func ScreenSigned(it Item, ownDomain, signer string) error {
 	addr, err := mail.ParseAddress(it.To)
 	if err != nil || !strings.Contains(addr.Address, ".") || addr.Address != strings.TrimSpace(it.To) {
 		return fmt.Errorf("address %q is not a plain email address", it.To)
@@ -57,7 +61,7 @@ func Screen(it Item, ownDomain string) error {
 		return errors.New("template placeholder left in the email")
 	case !optOut.MatchString(body):
 		return errors.New("no opt-out line")
-	case !strings.Contains(body, "Nader"):
+	case strings.TrimSpace(signer) == "" || !strings.Contains(body, strings.TrimSpace(signer)):
 		return errors.New("not signed")
 	}
 	return nil

@@ -209,3 +209,25 @@ func TestConcurrentSendsCannotBreakAPodCap(t *testing.T) {
 		t.Fatalf("cap 1, sent %d", sent)
 	}
 }
+
+func TestNoFollowUpAfterAReplyOrABooking(t *testing.T) {
+	pool := catalogdb.TestDB(t)
+	ctx := context.Background()
+	file := podFixture(t, pool, "client-bv", "live")
+	if _, err := pool.Exec(ctx, `INSERT INTO founderos_funnel_contacts (id, workspace_id, name, status, venture, created_at)
+		SELECT 'ct-1', workspace_id, 'Priya Shah', 'engaged', 'client', now() FROM founderos_client_pods`); err != nil {
+		t.Fatal(err)
+	}
+	file("f-0", "priya@brightvale.example")
+	if _, err := pool.Exec(ctx, `UPDATE founderos_outbox SET status = 'sent', sent_at = now() - interval '3 days', contact_id = 'ct-1' WHERE id = 'f-0'`); err != nil {
+		t.Fatal(err)
+	}
+	file("f-1", "priya@brightvale.example")
+	if _, err := pool.Exec(ctx, `UPDATE founderos_outbox SET contact_id = 'ct-1' WHERE id = 'f-1'`); err != nil {
+		t.Fatal(err)
+	}
+	got, send := recorder()
+	if _, err := Approve(ctx, pool, "client-bv", "f-1", podReviewed, send); !errors.Is(err, ErrConversationStarted) || len(*got) != 0 || status(t, pool, "f-1") != "rejected" {
+		t.Fatalf("followed up an engaged contact: %v sent=%d %s", err, len(*got), status(t, pool, "f-1"))
+	}
+}

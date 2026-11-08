@@ -31,6 +31,7 @@ var (
 	ErrNotFound   = errors.New("no such pod")
 	ErrTransition = errors.New("that status change is not allowed")
 	ErrNotReady   = errors.New("pod is not ready to go live")
+	ErrInvalid    = errors.New("invalid")
 )
 
 // DocKeys are the pod documents agents work from.
@@ -126,10 +127,10 @@ func SlugFor(name string) string {
 func (s *Store) Create(ctx context.Context, n NewPod) (Pod, error) {
 	name := strings.Join(strings.Fields(n.ClientName), " ")
 	if name == "" || SlugFor(name) == "client-" {
-		return Pod{}, errors.New("client name is required")
+		return Pod{}, fmt.Errorf("%w: client name is required", ErrInvalid)
 	}
 	if n.OwnerID == "" {
-		return Pod{}, errors.New("owner is required")
+		return Pod{}, fmt.Errorf("%w: owner is required", ErrInvalid)
 	}
 	pkg := n.Package
 	if pkg == "" {
@@ -196,7 +197,7 @@ func (s *Store) List(ctx context.Context) ([]Pod, error) {
 func (s *Store) SetSender(ctx context.Context, slug string, snd Sender) error {
 	email := strings.TrimSpace(strings.ToLower(snd.Email))
 	if !strings.Contains(email, "@") || strings.ContainsAny(email, " <>") {
-		return fmt.Errorf("sender email %q is not valid", snd.Email)
+		return fmt.Errorf("%w: sender email %q is not valid", ErrInvalid, snd.Email)
 	}
 	domain := strings.TrimSpace(strings.ToLower(snd.Domain))
 	if domain == "" {
@@ -227,7 +228,7 @@ func validKey(k string) bool {
 // SetDoc saves a pod document; a changed body is a new version that needs approval again.
 func (s *Store) SetDoc(ctx context.Context, slug, key, body string) error {
 	if !validKey(key) {
-		return fmt.Errorf("unknown document %q", key)
+		return fmt.Errorf("%w: unknown document %q", ErrInvalid, key)
 	}
 	tag, err := s.Pool.Exec(ctx, `INSERT INTO founderos_client_pod_docs (pod_id, key, body)
 		SELECT id, $2, $3 FROM founderos_client_pods WHERE slug = $1
@@ -306,7 +307,7 @@ func (s *Store) SetStatus(ctx context.Context, slug, to, reason string) (Pod, er
 		return p, fmt.Errorf("%w: %s → %s", ErrTransition, p.Status, to)
 	}
 	if to == StatusPaused && strings.TrimSpace(reason) == "" {
-		return p, errors.New("pausing needs a reason")
+		return p, fmt.Errorf("%w: pausing needs a reason", ErrInvalid)
 	}
 	if to == StatusLive {
 		missing, err := s.Readiness(ctx, p)
@@ -356,4 +357,49 @@ func (s *Store) Recent(ctx context.Context, podID string, limit int) ([]Activity
 		out = append(out, a)
 	}
 	return out, rows.Err()
+}
+
+// Viewer is who is asking: the installation owner sees every pod; anyone else
+// sees a pod only as its workspace owner or an active member.
+type Viewer struct {
+	UserID string
+	Owner  bool
+}
+
+const visible = `($2 OR w.owner_id = $1 OR EXISTS (SELECT 1 FROM workspace_members m
+	WHERE m.workspace_id = w.id AND m.user_id = $1 AND m.status = 'active'))`
+
+// ListFor returns the pods v may see.
+func (s *Store) ListFor(ctx context.Context, v Viewer) ([]Pod, error) {
+	rows, err := s.Pool.Query(ctx, `SELECT `+prefixed(podCols)+` FROM founderos_client_pods p
+		JOIN workspaces w ON w.id = p.workspace_id WHERE `+visible+` ORDER BY p.client_name`, v.UserID, v.Owner)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []Pod
+	for rows.Next() {
+		p, err := scanPod(rows)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, p)
+	}
+	return out, rows.Err()
+}
+
+// GetFor returns the pod if v may see it, else ErrNotFound (never "forbidden":
+// a stranger learns nothing about which clients exist).
+func (s *Store) GetFor(ctx context.Context, v Viewer, slug string) (Pod, error) {
+	return scanPod(s.Pool.QueryRow(ctx, `SELECT `+prefixed(podCols)+` FROM founderos_client_pods p
+		JOIN workspaces w ON w.id = p.workspace_id WHERE p.slug = $3 AND `+visible, v.UserID, v.Owner, slug))
+}
+
+// prefixed qualifies the pod columns with p. for joins.
+func prefixed(cols string) string {
+	parts := strings.Split(cols, ",")
+	for i, c := range parts {
+		parts[i] = "p." + strings.TrimSpace(c)
+	}
+	return strings.Join(parts, ", ")
 }

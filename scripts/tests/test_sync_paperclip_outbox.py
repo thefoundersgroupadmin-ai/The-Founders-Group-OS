@@ -95,6 +95,21 @@ class PodRoutingTest(unittest.TestCase):
         self.assertIn("NOT IN (SELECT workspace_id FROM founderos_client_pods)", q)
         self.assertIn("'priya@brightvale.example'", q)
 
+    def test_pod_draft_ids_name_the_pod_and_hq_ids_are_unchanged(self):
+        # Codex M1 review #7: a task moved between pods must not rewrite another pod's draft.
+        it = {"to": "a@b.co", "subject": "Hi"}
+        self.assertTrue(sync.outbox_id("THE-90", it, "client-brightvale").startswith("pc-client-brightvale-the-90-"))
+        self.assertNotEqual(sync.outbox_id("THE-90", it, "client-brightvale"), sync.outbox_id("THE-90", it, "client-kestrel"))
+        self.assertTrue(sync.outbox_id("THE-14", it, None).startswith("pc-the-14-"))
+
+    def test_conflicting_updates_stay_in_their_workspace(self):
+        self.assertIn("founderos_outbox.workspace_id = EXCLUDED.workspace_id", sync.OUTBOX_UPSERT_GUARD)
+
+    def test_drafts_on_a_reply_task_are_conversation_replies(self):
+        self.assertEqual(sync.sequence_key_for({"sequenceKey": "warehouses:1"}, is_reply_task=True), "reply")
+        self.assertEqual(sync.sequence_key_for({"sequenceKey": "warehouses:1"}, is_reply_task=False), "warehouses:1")
+        self.assertIsNone(sync.sequence_key_for({"sequenceKey": None}, is_reply_task=False))
+
     def test_sequence_key_is_kept(self):
         got = sync.entries('[{"to": "a@b.co", "subject": "s", "body": "b", "sequenceKey": "warehouses:1"}]')
         self.assertEqual(got[0]["sequenceKey"], "warehouses:1")

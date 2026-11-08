@@ -98,6 +98,12 @@ class PodRoutingTest(unittest.TestCase):
         self.assertEqual(sync.venture_for("vantage", slugs), "vantage")
         self.assertEqual(sync.product_for("vantage", slugs), sync.PRODUCT)
 
+    def test_a_failed_pod_lookup_stops_the_import(self):
+        # Codex M1 review #6: never fall back to HQ when pods cannot be read.
+        with self.assertRaises(SystemExit):
+            sync.load_pods(lambda: (1, "", "connection refused"))
+        self.assertEqual(sync.load_pods(lambda: (0, "[]", "")), {})
+
     def test_pod_documents_never_feed_hq_addresses(self):
         self.assertFalse(sync.scan_for_hq_addresses({"id": "i1", "projectId": "proj-bv"}, self.PODS))
         self.assertTrue(sync.scan_for_hq_addresses({"id": "i2", "projectId": "other"}, self.PODS))

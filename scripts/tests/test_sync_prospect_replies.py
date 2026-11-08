@@ -43,6 +43,15 @@ class PodRepliesTest(unittest.TestCase):
                          {"host": "imap.bv.example", "port": 993, "user": "sam@bv.example", "pass": "p"})
         self.assertIsNone(sync.pod_mailbox(env, "client-other"))
 
+    def test_a_reply_matches_its_exact_sender_and_engages_the_whole_company(self):
+        # Codex M1 review #8: a colleague's reply stops follow-ups to everyone there.
+        contacts = [("c1", "w", "Brightvale", "priya@brightvale.example"), ("c2", "w", "Brightvale", "tom@brightvale.example"),
+                    ("c3", "w", "Oakfield", "jo@oakfield.example")]
+        self.assertEqual(sync.reply_contact(contacts, "tom@brightvale.example")[0], "c2")
+        self.assertEqual(sync.reply_contact(contacts, "ceo@brightvale.example")[0], "c1")
+        self.assertEqual(sorted(sync.company_contacts(contacts, "ceo@brightvale.example")), ["c1", "c2"])
+        self.assertIsNone(sync.reply_contact(contacts, "x@elsewhere.example"))
+
     def test_opt_outs_are_recognised(self):
         for text in ("No thanks", "Please unsubscribe me", "not interested, remove me from your list", "STOP"):
             self.assertTrue(sync.is_opt_out(text), text)

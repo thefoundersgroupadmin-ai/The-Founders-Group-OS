@@ -51,6 +51,15 @@ POD_ROUTES_QUERY = ("SELECT coalesce(json_agg(json_build_object('project_id', a.
                     "JOIN founderos_client_pods p ON p.id=a.pod_id WHERE a.project_id<>''")
 
 
+def load_pods(run):
+    """Pod bindings by board project. A failed lookup stops the import (Codex M1
+    review #6): client research must never fall back into TFG's pipeline."""
+    code, out, err = run()
+    if code != 0:
+        sys.exit("pod bindings unavailable, nothing imported: " + (err or "").strip()[:200])
+    return {p["project_id"]: p for p in json.loads(out.strip() or "[]")}
+
+
 def target_for(issue, pods, task_workspaces):
     """Where a task's research goes: its client pod (by board project, docs/tfg/CLIENT-PODS.md),
     else its durable command's workspace, else the default pipeline. Never model text."""
@@ -173,8 +182,10 @@ def main():
     mapping_sql = "SELECT COALESCE(jsonb_object_agg(step->>'taskId',w.slug),'{}'::jsonb) FROM founderos_commands c JOIN workspaces w ON w.id=c.workspace_id CROSS JOIN LATERAL jsonb_array_elements(c.steps) step WHERE step->>'taskId' IS NOT NULL"
     mapped = subprocess.run(["psql", db, "-At", "-c", mapping_sql], capture_output=True, text=True)
     task_workspaces = json.loads(mapped.stdout.strip()) if mapped.returncode == 0 and mapped.stdout.strip() else {}
-    pod_rows = subprocess.run(["psql", db, "-At", "-c", POD_ROUTES_QUERY], capture_output=True, text=True)
-    pods = {p["project_id"]: p for p in json.loads(pod_rows.stdout.strip() or "[]")} if pod_rows.returncode == 0 else {}
+    def run_pod_query():
+        r = subprocess.run(["psql", db, "-At", "-c", POD_ROUTES_QUERY], capture_output=True, text=True)
+        return r.returncode, r.stdout, r.stderr
+    pods = load_pods(run_pod_query)
     pod_products = {p["slug"]: p["client_name"] for p in pods.values()}
 
 

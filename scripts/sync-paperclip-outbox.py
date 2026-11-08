@@ -100,6 +100,25 @@ def route(issue, pods, task_workspaces, default_pipeline_ws):
             "sender": None, "binding": bool(binding)}
 
 
+def outbox_id(ident, it, pod_slug):
+    """A draft's stable id. Pod drafts carry the pod's slug (Codex M1 review #7), so a
+    task moved to another pod never rewrites the first pod's draft; HQ ids are unchanged."""
+    h = hashlib.sha1((it["to"].lower() + "\n" + it["subject"]).encode()).hexdigest()[:10]
+    return "pc-" + (pod_slug + "-" if pod_slug else "") + ident.lower() + "-" + h
+
+
+# A re-import refreshes a pending draft's wording only inside its own workspace.
+OUTBOX_UPSERT_GUARD = ("WHERE founderos_outbox.status = 'pending' "
+                       "AND founderos_outbox.workspace_id = EXCLUDED.workspace_id")
+
+CONVERSATIONS_QUERY = "SELECT issue_id FROM founderos_pod_conversations"
+
+
+def sequence_key_for(entry, is_reply_task):
+    """Drafts on a prospect-reply task are conversation replies, whatever the agent wrote."""
+    return "reply" if is_reply_task else entry.get("sequenceKey")
+
+
 def recipient_matches_query(addr):
     """HQ drafts with no command binding find their pipeline by recipient, never inside a client pod."""
     return ("SELECT DISTINCT c.workspace_id::text AS workspace_id,w.slug FROM founderos_funnel_contacts c JOIN workspaces w ON w.id=c.workspace_id "
@@ -184,6 +203,7 @@ def main():
     default_pipeline_ws = pipeline_ws
     imported = 0
     pods = {p["project_id"]: p for p in psql_rows(db, POD_ROUTES_QUERY)}
+    conversations = {r["issue_id"] for r in psql_rows(db, CONVERSATIONS_QUERY)}
     pod_senders = {p["workspace_id"]: p["sender_name"] for p in pods.values()}
     for issue in issues:
         rt = route(issue, pods, task_workspaces, default_pipeline_ws)
@@ -202,7 +222,7 @@ def main():
             print(f"  {ident}: skipped ({e})")
             continue
         for it in items:
-            oid = "pc-" + ident.lower() + "-" + hashlib.sha1((it["to"].lower() + "\n" + it["subject"]).encode()).hexdigest()[:10]
+            oid = outbox_id(ident, it, rt["pipeline_slug"] if rt["pod"] else None)
             if not binding:
                 matches = psql_rows(db, recipient_matches_query(it["to"]))
                 existing = psql_rows(db, imported_pipeline_query(oid)) if len(matches) > 1 else []
@@ -229,9 +249,10 @@ def main():
             # A pending row follows the agent's latest wording; decided rows keep theirs.
             psql(db, "INSERT INTO founderos_outbox (id, workspace_id, source, source_ref, contact_id, to_address, to_name, company, subject, body, sequence_key) "
                      f"SELECT {sql(oid)}, {sql(outbox_ws)}, 'paperclip', {sql(ident)}, {link}, "
-                     f"{to}, {sql(it['toName'])}, {sql(it['company'])}, {sql(it['subject'])}, {sql(it['body'])}, {sql(it['sequenceKey'])} "
+                     f"{to}, {sql(it['toName'])}, {sql(it['company'])}, {sql(it['subject'])}, {sql(it['body'])}, "
+                     f"{sql(sequence_key_for(it, issue['id'] in conversations))} "
                      "ON CONFLICT (id) DO UPDATE SET body = EXCLUDED.body, to_name = EXCLUDED.to_name, company = EXCLUDED.company, "
-                     "sequence_key = EXCLUDED.sequence_key WHERE founderos_outbox.status = 'pending'")
+                     "sequence_key = EXCLUDED.sequence_key " + OUTBOX_UPSERT_GUARD)
             # Rows imported before their contact existed get linked now, whatever their status.
             psql(db, f"UPDATE founderos_outbox SET contact_id = {link} WHERE id = {sql(oid)} AND contact_id IS NULL")
             imported += 1

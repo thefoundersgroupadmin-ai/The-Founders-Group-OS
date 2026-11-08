@@ -62,6 +62,27 @@ def pod_contacts_query(workspace_id):
             f"where workspace_id={sql(workspace_id)} and email is not null")
 
 
+def reply_contact(contacts, sender):
+    """The contact a reply belongs to: the exact sender first, else the first
+    contact at the sender's company domain (Codex M1 review #8)."""
+    sender = sender.strip().lower()
+    exact = next((c for c in contacts if c[3].strip().lower() == sender), None)
+    if exact:
+        return exact
+    domain = sender.rsplit("@", 1)[-1]
+    if domain in FREEMAIL:
+        return None
+    return next((c for c in contacts if c[3].strip().lower().rsplit("@", 1)[-1] == domain), None)
+
+
+def company_contacts(contacts, sender):
+    """Everyone at the replying company: one reply stops follow-ups to all of them."""
+    domain = sender.strip().lower().rsplit("@", 1)[-1]
+    if domain in FREEMAIL:
+        return [c[0] for c in contacts if c[3].strip().lower() == sender.strip().lower()]
+    return [c[0] for c in contacts if c[3].strip().lower().rsplit("@", 1)[-1] == domain]
+
+
 def pod_mailbox(env, slug):
     """The pod's own IMAP login from POD_<SLUG>_* keys (as TFG OS saves them), or None."""
     pre = "POD_" + slug.upper().replace("-", "_") + "_"
@@ -271,7 +292,8 @@ def pod_pass():
         if not box:
             print(f"{slug}: no mailbox configured; replies not checked")
             continue
-        domains = watch_keys(psql(db, pod_contacts_query(ws)), {box["user"].lower()})
+        pod_contacts = psql(db, pod_contacts_query(ws))
+        domains = watch_keys(pod_contacts, {box["user"].lower()})
         if not domains:
             continue
         try:
@@ -281,6 +303,9 @@ def pod_pass():
             continue
         print(f"{slug}: {len(found)} new repl{'y' if len(found) == 1 else 'ies'}")
         for mid, (cid, cws, company), sender, subject, when, body in found:
+            exact = reply_contact(pod_contacts, sender)
+            if exact:
+                cid, company = exact[0], exact[2] or company
             if dry:
                 print(f"  {company}: {sender} | {subject}")
                 continue
@@ -297,12 +322,16 @@ def pod_pass():
             else:
                 issue = paperclip(pc, "POST", f"/api/companies/{pc['PAPERCLIP_COMPANY_ID']}/issues",
                                   pod_reply_task(pod, sender, company, subject, when, body))
+                psql(db, "insert into founderos_pod_conversations (issue_id, workspace_id, contact_id) "
+                         f"values ({sql(issue['id'])}, {sql(ws)}, {sql(cid)}) on conflict do nothing")
                 kind = "handoff_requested" if HUMAN.search((body or "")[:800]) else "reply_received"
                 psql(db, "insert into founderos_client_activity (pod_id, kind, summary, ref) "
                          f"select id, {sql(kind)}, {sql(company + ' replied: ' + subject[:140])}, {sql(issue.get('identifier') or cid)} "
                          f"from founderos_client_pods where slug={sql(slug)}")
-            psql(db, f"update founderos_funnel_contacts set status='engaged', relationship='warm' "
-                     f"where id={sql(cid)} and workspace_id={sql(ws)} and status in ('first_touch','nurtured')")
+            # One reply stops follow-ups to everyone at that company in this pod.
+            ids = company_contacts(pod_contacts, sender) or [cid]
+            psql(db, "update founderos_funnel_contacts set status='engaged', relationship='warm' "
+                     f"where workspace_id={sql(ws)} and id in ({', '.join(sql(i) for i in ids)}) and status in ('first_touch','nurtured')")
             seq = int(psql(db, f"select coalesce(max(seq),0)+1 from founderos_funnel_touches where contact_id={sql(cid)}")[0][0])
             psql(db, "insert into founderos_funnel_touches (id, workspace_id, contact_id, seq, stage, channel, label, source, at) "
                      f"values ({sql(cid + '-reply-' + str(seq))}, {sql(ws)}, {sql(cid)}, {seq}, 'engaged', 'email', "

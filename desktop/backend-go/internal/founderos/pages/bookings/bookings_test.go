@@ -58,3 +58,39 @@ func TestABookedCallMovesTheContactOnOnce(t *testing.T) {
 		t.Fatalf("touches = %d %q %s", n, label, at)
 	}
 }
+
+// Codex review, 8 Nov 2026: TFG's own calendar must never move a client pod's
+// contacts, and a pod's calendar moves only that pod's.
+func TestBookingsStayInsideTheirOwnWorkspaces(t *testing.T) {
+	pool := catalogdb.TestDB(t)
+	ctx := context.Background()
+	hq := catalogdb.Workspace(t, pool, "vantage")
+	podA := catalogdb.Workspace(t, pool, "client-alpha")
+	podB := catalogdb.Workspace(t, pool, "client-beta")
+	for _, w := range []struct{ ws, slug string }{{podA, "client-alpha"}, {podB, "client-beta"}} {
+		if _, err := pool.Exec(ctx, `INSERT INTO founderos_client_pods (workspace_id, slug, client_name) VALUES ($1, $2, $2)`, w.ws, w.slug); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for _, c := range []struct{ id, ws, venture string }{{"c-hq", hq, "vantage"}, {"c-a", podA, "client"}, {"c-b", podB, "client"}} {
+		if _, err := pool.Exec(ctx, `INSERT INTO founderos_funnel_contacts (id, workspace_id, name, venture, status, email, created_at)
+			VALUES ($1, $2, $1, $3, 'first_touch', 'priya@brightvale.example', now())`, c.id, c.ws, c.venture); err != nil {
+			t.Fatal(err)
+		}
+	}
+	list := []caldotcom.Booking{{UID: "b1", Title: "Call", Status: "accepted", Start: "2026-11-09T15:00:00Z",
+		Attendees: []caldotcom.Attendee{{Email: "priya@brightvale.example"}}}}
+	if n, err := MarkBooked(ctx, pool, list); err != nil || n != 1 {
+		t.Fatalf("HQ calendar moved %d (%v)", n, err)
+	}
+	if n, err := MarkBookedIn(ctx, pool, podA, list); err != nil || n != 1 {
+		t.Fatalf("pod A calendar moved %d (%v)", n, err)
+	}
+	st := func(id string) (s string) {
+		_ = pool.QueryRow(ctx, `SELECT status FROM founderos_funnel_contacts WHERE id = $1`, id).Scan(&s)
+		return
+	}
+	if st("c-hq") != "engaged" || st("c-a") != "engaged" || st("c-b") != "first_touch" {
+		t.Fatalf("hq=%s a=%s b=%s", st("c-hq"), st("c-a"), st("c-b"))
+	}
+}

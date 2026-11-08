@@ -13,8 +13,21 @@ import (
 	"github.com/rhl/businessos-backend/internal/founderos/connectors/caldotcom"
 )
 
-// MarkBooked applies bookings to the pipeline and returns how many contacts moved.
+// MarkBooked applies TFG's own calendar to the pipeline (never inside a client
+// pod) and returns how many contacts moved.
 func MarkBooked(ctx context.Context, pool *pgxpool.Pool, list []caldotcom.Booking) (int, error) {
+	return markBooked(ctx, pool, list, "")
+}
+
+// MarkBookedIn applies a client pod's own calendar to that pod's pipeline only.
+func MarkBookedIn(ctx context.Context, pool *pgxpool.Pool, workspaceID string, list []caldotcom.Booking) (int, error) {
+	if workspaceID == "" {
+		return 0, nil
+	}
+	return markBooked(ctx, pool, list, workspaceID)
+}
+
+func markBooked(ctx context.Context, pool *pgxpool.Pool, list []caldotcom.Booking, workspaceID string) (int, error) {
 	moved := 0
 	for _, b := range list {
 		if b.Status == "cancelled" || b.Status == "rejected" {
@@ -26,7 +39,9 @@ func MarkBooked(ctx context.Context, pool *pgxpool.Pool, list []caldotcom.Bookin
 		}
 		for _, a := range b.Attendees {
 			rows, err := pool.Query(ctx, `
-				WITH c AS (SELECT id, workspace_id FROM founderos_funnel_contacts WHERE lower(email) = lower($1)),
+				WITH c AS (SELECT id, workspace_id FROM founderos_funnel_contacts WHERE lower(email) = lower($1)
+					AND CASE WHEN $5 = '' THEN workspace_id NOT IN (SELECT workspace_id FROM founderos_client_pods)
+					         ELSE workspace_id::text = $5 END),
 				touched AS (
 					INSERT INTO founderos_funnel_touches (id, workspace_id, contact_id, seq, stage, channel, label, source, at)
 					SELECT c.id || '-calcom-' || $2, c.workspace_id, c.id,
@@ -35,7 +50,7 @@ func MarkBooked(ctx context.Context, pool *pgxpool.Pool, list []caldotcom.Bookin
 					FROM c ON CONFLICT (id) DO NOTHING RETURNING contact_id)
 				UPDATE founderos_funnel_contacts f SET status = 'engaged', relationship = 'warm'
 				FROM c WHERE f.id = c.id AND f.status = 'first_touch'
-				RETURNING f.id`, a.Email, b.UID, b.Title, day)
+				RETURNING f.id`, a.Email, b.UID, b.Title, day, workspaceID)
 			if err != nil {
 				return moved, err
 			}

@@ -89,3 +89,18 @@ func TestAPodLinksToAPortalClient(t *testing.T) {
 		t.Fatalf("portal link %v", got.PortalClientID)
 	}
 }
+
+// Codex M2-M4 review #4: applying the same decision again is not "stale".
+func TestApplyingTheSameDecisionTwiceIsSafe(t *testing.T) {
+	s := &Store{Pool: catalogdb.TestDB(t)}
+	ctx := context.Background()
+	p := newPod(t, s, "Brightvale")
+	_ = s.SetDoc(ctx, p.Slug, "icp", "Warehouse operators")
+	_, h := approvalRow(t, s, "doc", "icp")
+	for i := 0; i < 2; i++ {
+		applied, err := s.ApplyClientDecision(ctx, p.ID, "doc", "icp", h, "approved", "Priya", "")
+		if err != nil || !applied {
+			t.Fatalf("pass %d: %v %v", i, applied, err)
+		}
+	}
+}

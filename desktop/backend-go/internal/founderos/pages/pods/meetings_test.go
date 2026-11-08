@@ -70,3 +70,30 @@ func TestBookedMeetingsAreRecordedOnceAndGetACallBrief(t *testing.T) {
 		t.Fatal("brief sent twice")
 	}
 }
+
+// Codex M2-M4 review #6: reschedules move the meeting and re-send the brief;
+// cancellations cancel it.
+func TestRescheduledAndCancelledMeetingsAreReconciled(t *testing.T) {
+	s := &Store{Pool: catalogdb.TestDB(t)}
+	ctx := context.Background()
+	p := newPod(t, s, "Brightvale")
+	at := time.Now().Add(48 * time.Hour).UTC().Truncate(time.Second)
+	_, _ = s.RecordMeetings(ctx, p.Slug, []Meeting{{UID: "b-1", Title: "Call", Start: at.Format(time.RFC3339), AttendeeEmail: "a@b.example"}})
+	if _, err := s.Pool.Exec(ctx, `UPDATE founderos_pod_meetings SET brief = 'x', brief_sent_at = now()`); err != nil {
+		t.Fatal(err)
+	}
+	later := at.Add(24 * time.Hour)
+	_, _ = s.RecordMeetings(ctx, p.Slug, []Meeting{{UID: "b-1", Title: "Call", Start: later.Format(time.RFC3339), AttendeeEmail: "a@b.example"}})
+	var got time.Time
+	var sent *time.Time
+	_ = s.Pool.QueryRow(ctx, `SELECT starts_at, brief_sent_at FROM founderos_pod_meetings WHERE booking_uid = 'b-1'`).Scan(&got, &sent)
+	if !got.Equal(later) || sent != nil {
+		t.Fatalf("reschedule: %v sent=%v", got, sent)
+	}
+	_, _ = s.RecordMeetings(ctx, p.Slug, []Meeting{{UID: "b-1", Cancelled: true}})
+	var status string
+	_ = s.Pool.QueryRow(ctx, `SELECT status FROM founderos_pod_meetings WHERE booking_uid = 'b-1'`).Scan(&status)
+	if status != "cancelled" {
+		t.Fatalf("cancellation: %s", status)
+	}
+}

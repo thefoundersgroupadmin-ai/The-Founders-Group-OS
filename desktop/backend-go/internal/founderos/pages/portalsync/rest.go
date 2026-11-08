@@ -116,7 +116,7 @@ func (r *REST) InsertActivity(ctx context.Context, rows []Activity) error {
 
 func (r *REST) OpenRequests(ctx context.Context, client string) ([]Request, error) {
 	var out []Request
-	err := r.do(ctx, http.MethodGet, "sdr_requests?select=id,client_id,kind,reason,requested_by_name&handled_at=is.null&client_id="+eq(client), nil, "", &out)
+	err := r.do(ctx, http.MethodGet, "sdr_requests?select=id,client_id,kind,reason,requested_by_name&handled_at=is.null&order=created_at.asc,id.asc&client_id="+eq(client), nil, "", &out)
 	return out, err
 }
 

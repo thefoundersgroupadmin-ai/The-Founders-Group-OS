@@ -181,6 +181,13 @@ def qualification_update(workspace_id, issue_id, body):
             f"AND id = (SELECT contact_id FROM founderos_pod_conversations WHERE issue_id = {sql(issue_id)})")
 
 
+def takeover_query(workspace_id, issue_id):
+    """Mark the conversation taken over by a person (Codex M2-M4 review #2)."""
+    return ("UPDATE founderos_pod_conversations SET taken_over_at = coalesce(taken_over_at, now()) "
+            f"WHERE workspace_id = {sql(workspace_id)} AND contact_id = "
+            f"(SELECT contact_id FROM founderos_pod_conversations WHERE issue_id = {sql(issue_id)})")
+
+
 def brief_query(issue_id, body):
     """A call brief for the meeting this task was opened for (until it has been sent)."""
     return (f"UPDATE founderos_pod_meetings SET brief = {sql(body.strip()[:8000])} "
@@ -295,6 +302,8 @@ def main():
                 text = d.get("body") or (d.get("latestRevision") or {}).get("body") or ""
                 if d.get("key") == "handoff" and text.strip():
                     psql(db, handoff_query(rt["outbox_ws"], issue["id"], text))
+                    # A person takes it from here: the AI stops replying in this conversation.
+                    psql(db, takeover_query(rt["outbox_ws"], issue["id"]))
                 elif d.get("key") == "brief" and text.strip():
                     psql(db, brief_query(issue["id"], text))
                 elif d.get("key") == "qualification":

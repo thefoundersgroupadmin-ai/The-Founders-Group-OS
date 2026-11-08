@@ -73,14 +73,32 @@ func (s *Store) Intake(ctx context.Context, token string, e Enquiry, source stri
 	}
 	email := strings.ToLower(addr.Address)
 	src := tokenHash("src:" + source)
-	var recent int
-	if err := s.Pool.QueryRow(ctx, `SELECT count(*) FROM founderos_pod_inbound WHERE pod_id = $1
-		AND received_at > now() - interval '1 hour' AND (source_hash = $2 OR email = $3)`, podID, src, email).Scan(&recent); err != nil {
+	// Count and insert under one per-pod lock, so concurrent posts cannot slip past the limit.
+	tx, err := s.Pool.Begin(ctx)
+	if err != nil {
 		return 0, err
 	}
-	if recent >= 5 {
+	defer tx.Rollback(ctx)
+	if _, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtext('founderos-pod-inbound:' || $1))`, podID); err != nil {
+		return 0, err
+	}
+	var recent, podHour int
+	if err := tx.QueryRow(ctx, `SELECT count(*) FILTER (WHERE source_hash = $2 OR email = $3), count(*)
+		FROM founderos_pod_inbound WHERE pod_id = $1 AND received_at > now() - interval '1 hour'`, podID, src, email).Scan(&recent, &podHour); err != nil {
+		return 0, err
+	}
+	if recent >= 5 || podHour >= 200 {
 		return 0, ErrRateLimited
 	}
+	if _, err := tx.Exec(ctx, `INSERT INTO founderos_pod_inbound (pod_id, email, source_hash, status, error)
+		VALUES ($1, $2, $3, 'failed', 'reservation')`, podID, email, src); err != nil {
+		return 0, err
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return 0, err
+	}
+	defer s.Pool.Exec(context.WithoutCancel(ctx), `DELETE FROM founderos_pod_inbound WHERE pod_id = $1 AND email = $2 AND source_hash = $3
+		AND status = 'failed' AND error = 'reservation'`, podID, email, src)
 	name, company := clip(e.Name, 120), clip(e.Company, 120)
 	contactID := "fc-in-" + strings.TrimPrefix(slug, "client-") + "-" + tokenHash(email)[:12]
 	label := name
@@ -193,8 +211,8 @@ func (s *Store) TaskInbound(ctx context.Context, b TaskBoard) (int, error) {
 			errs = append(errs, err)
 			continue
 		}
-		if _, err := s.Pool.Exec(ctx, `INSERT INTO founderos_pod_conversations (issue_id, workspace_id, contact_id)
-			VALUES ($1, $2, $3) ON CONFLICT DO NOTHING`, issue, p.WorkspaceID, j.contact); err != nil {
+		if _, err := s.Pool.Exec(ctx, `INSERT INTO founderos_pod_conversations (issue_id, workspace_id, contact_id, source)
+			VALUES ($1, $2, $3, 'form') ON CONFLICT DO NOTHING`, issue, p.WorkspaceID, j.contact); err != nil {
 			errs = append(errs, err)
 			continue
 		}
@@ -217,7 +235,7 @@ type Handoff struct {
 // PendingHandoffs lists hand-offs not yet emailed.
 func (s *Store) PendingHandoffs(ctx context.Context) ([]Handoff, error) {
 	rows, err := s.Pool.Query(ctx, `SELECT h.id, p.id::text, p.client_name, p.handoff_email, h.summary FROM founderos_pod_handoffs h
-		JOIN founderos_client_pods p ON p.id = h.pod_id WHERE h.notified_at IS NULL AND h.error = '' ORDER BY h.created_at LIMIT 20`)
+		JOIN founderos_client_pods p ON p.id = h.pod_id WHERE h.notified_at IS NULL AND h.attempts < 5 ORDER BY h.created_at LIMIT 20`)
 	if err != nil {
 		return nil, err
 	}
@@ -236,7 +254,9 @@ func (s *Store) PendingHandoffs(ctx context.Context) ([]Handoff, error) {
 // MarkHandoff records that a hand-off was emailed (why == "") or why it was not.
 func (s *Store) MarkHandoff(ctx context.Context, id int64, why string) error {
 	var podID, summary string
-	err := s.Pool.QueryRow(ctx, `UPDATE founderos_pod_handoffs SET notified_at = CASE WHEN $2 = '' THEN now() END, error = $2
+	// A failure is retried (up to five times); a missing rep email waits for one (Codex M2-M4 #7).
+	err := s.Pool.QueryRow(ctx, `UPDATE founderos_pod_handoffs SET notified_at = CASE WHEN $2 = '' THEN now() END, error = $2,
+		attempts = attempts + CASE WHEN $2 = '' OR $2 = 'no hand-off email set for this client' THEN 0 ELSE 1 END
 		WHERE id = $1 RETURNING pod_id::text, summary`, id, clip(why, 300)).Scan(&podID, &summary)
 	if err != nil || why != "" {
 		return err

@@ -175,18 +175,23 @@ func approvePod(ctx context.Context, pool *pgxpool.Pool, ws, id string, content 
 			return nil, err
 		}
 	}
-	var conversation bool
+	var conversation, takenOver, verified bool
 	if reply {
-		if err := tx.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM founderos_pod_conversations v WHERE v.workspace_id = $1
-			AND (v.contact_id = $2 OR v.contact_id IN (SELECT id FROM founderos_funnel_contacts
-				WHERE workspace_id = $1 AND lower(email) = $3)))`, ws, it.ContactID, addr).Scan(&conversation); err != nil {
+		// The conversation must be with exactly this address (Codex M2-M4 #3), and
+		// no person may have taken it over (#2).
+		if err := tx.QueryRow(ctx, `SELECT count(*) > 0, coalesce(bool_or(v.taken_over_at IS NOT NULL), false),
+			coalesce(bool_or(v.source = 'email'), false)
+			FROM founderos_pod_conversations v JOIN founderos_funnel_contacts c ON c.id = v.contact_id
+			WHERE v.workspace_id = $1 AND c.workspace_id = $1 AND lower(c.email) = $2`, ws, addr).Scan(&conversation, &takenOver, &verified); err != nil {
 			return nil, err
 		}
 	}
 	var step string
 	switch {
 	case reply && !conversation:
-		return nil, held("a conversation reply needs the prospect's recorded reply first")
+		return nil, held("a conversation reply goes only to someone who wrote in, and needs their recorded message")
+	case reply && takenOver:
+		return nil, held("a person has taken over this conversation")
 	case reply:
 		step = "reply:" + id
 	case moved:
@@ -221,7 +226,9 @@ func approvePod(ctx context.Context, pool *pgxpool.Pool, ws, id string, content 
 	}
 
 	// A conversation reply skips the client's approval only when they chose so.
-	if reply && r.InboundAutoReply {
+	// Without the client's approval only in a verified email conversation, never
+	// on the strength of a web form anyone could fill in (Codex M2-M4 #3).
+	if reply && r.InboundAutoReply && verified {
 		// screened and gated as usual, below
 	} else if why, err := clientApproval(ctx, tx, r, it, content, domain); err != nil {
 		return nil, err
@@ -328,6 +335,8 @@ func dispatchPodSend(ctx context.Context, pool *pgxpool.Pool, ws string, r *podR
 		stop = "pod is " + strings.ReplaceAll(now.Status, "_", " ")
 	case now.AccountID != r.AccountID:
 		stop = "the pod's mailbox changed"
+	case isReply(it) && takenOverNow(ctx, tx, ws, addr):
+		stop = "a person has taken over this conversation"
 	case !dry && !isReply(it) && !now.inWindow(nowFunc()):
 		stop = "outside the pod's sending hours"
 	case !dry && (now.FirstCap < r.FirstCap || now.FollowCap < r.FollowCap):
@@ -340,7 +349,7 @@ func dispatchPodSend(ctx context.Context, pool *pgxpool.Pool, ws string, r *podR
 		}
 		if suppressed {
 			stop = "they were put on the do-not-email list"
-		} else if isReply(it) && now.InboundAutoReply {
+		} else if isReply(it) && now.InboundAutoReply && verifiedNow(ctx, tx, ws, addr) {
 			// no client approval needed for this conversation
 		} else if why, err := clientApproval(ctx, tx, now, it, content, domain); err != nil {
 			return nil, err
@@ -425,3 +434,17 @@ func dispatchPodSend(ctx context.Context, pool *pgxpool.Pool, ws string, r *podR
 }
 
 func isReply(it Item) bool { return it.SequenceKey != nil && *it.SequenceKey == "reply" }
+
+func takenOverNow(ctx context.Context, q querier, ws, addr string) bool {
+	var v bool
+	_ = q.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM founderos_pod_conversations v JOIN founderos_funnel_contacts c ON c.id = v.contact_id
+		WHERE v.workspace_id = $1 AND lower(c.email) = $2 AND v.taken_over_at IS NOT NULL)`, ws, addr).Scan(&v)
+	return v
+}
+
+func verifiedNow(ctx context.Context, q querier, ws, addr string) bool {
+	var v bool
+	_ = q.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM founderos_pod_conversations v JOIN founderos_funnel_contacts c ON c.id = v.contact_id
+		WHERE v.workspace_id = $1 AND lower(c.email) = $2 AND v.source = 'email')`, ws, addr).Scan(&v)
+	return v
+}

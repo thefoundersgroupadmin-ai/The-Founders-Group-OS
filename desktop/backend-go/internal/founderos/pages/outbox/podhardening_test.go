@@ -178,3 +178,47 @@ func TestConversationRepliesIgnoreHoursAndMaySkipClientApproval(t *testing.T) {
 		t.Fatalf("outreach sent out of hours: %v", err)
 	}
 }
+
+// Codex M2-M4 review #2/#3: once a person takes over, the AI stops replying;
+// a reply goes only to the person who wrote in; auto-reply without client
+// approval applies only to verified (email) conversations, not form submissions.
+func TestTakeoverStopsRepliesAndFormConversationsNeedApproval(t *testing.T) {
+	pool := catalogdb.TestDB(t)
+	ctx := context.Background()
+	file := podFixture(t, pool, "client-bv", "live")
+	if _, err := pool.Exec(ctx, `UPDATE founderos_client_pods SET approval_policy = 'client_approves_each', inbound_auto_reply = true;
+		INSERT INTO founderos_funnel_contacts (id, workspace_id, name, status, venture, created_at, email)
+		SELECT 'ct-f', workspace_id, 'Tom', 'engaged', 'client', now(), 'tom@harbour.example' FROM founderos_client_pods;
+		INSERT INTO founderos_pod_conversations (issue_id, workspace_id, contact_id, source)
+		SELECT 'iss-f', workspace_id, 'ct-f', 'form' FROM founderos_client_pods`); err != nil {
+		t.Fatal(err)
+	}
+	reply := func(id, to string) {
+		file(id, to)
+		if _, err := pool.Exec(ctx, `UPDATE founderos_outbox SET sequence_key = 'reply', contact_id = 'ct-f' WHERE id = $1`, id); err != nil {
+			t.Fatal(err)
+		}
+	}
+	got, send := recorder()
+	reply("f-1", "tom@harbour.example")
+	if _, err := Approve(ctx, pool, "client-bv", "f-1", Content{Subject: "Re", Body: "Hello Tom. Sam"}, send); !errors.Is(err, ErrAwaitingClient) || len(*got) != 0 {
+		t.Fatalf("form conversation auto-replied without approval: %v", err)
+	}
+	reply("f-2", "victim@elsewhere.example")
+	if _, err := Approve(ctx, pool, "client-bv", "f-2", Content{Subject: "Re", Body: "Hi. Sam"}, send); err == nil || len(*got) != 0 {
+		t.Fatalf("a reply went to someone who never wrote in: %v", err)
+	}
+	if _, err := pool.Exec(ctx, `UPDATE founderos_pod_conversations SET source = 'email', taken_over_at = now()`); err != nil {
+		t.Fatal(err)
+	}
+	reply("f-3", "tom@harbour.example")
+	if _, err := Approve(ctx, pool, "client-bv", "f-3", Content{Subject: "Re", Body: "More. Sam"}, send); !errors.Is(err, ErrHeld) || len(*got) != 0 {
+		t.Fatalf("AI replied after a person took over: %v", err)
+	}
+	if _, err := pool.Exec(ctx, `UPDATE founderos_pod_conversations SET taken_over_at = NULL`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Approve(ctx, pool, "client-bv", "f-3", Content{Subject: "Re", Body: "More. Sam"}, send); err != nil || len(*got) != 1 {
+		t.Fatalf("verified conversation auto-reply blocked: %v", err)
+	}
+}

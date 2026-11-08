@@ -138,6 +138,11 @@ class PodRoutingTest(unittest.TestCase):
         self.assertIsNone(sync.qualification_update("w-bv", "issue-9", "not json"))
         self.assertIn("likelihood = 100", sync.qualification_update("w-bv", "i", '{"fit": 400}'))
 
+    def test_a_handoff_takes_the_conversation_over(self):
+        q = sync.takeover_query("w-bv", "issue-9")
+        self.assertIn("taken_over_at = coalesce(taken_over_at, now())", q)
+        self.assertIn("workspace_id = 'w-bv'", q)
+
     def test_a_brief_document_fills_its_meeting(self):
         q = sync.brief_query("issue-7", "Priya runs operations at Brightvale.")
         self.assertIn("UPDATE founderos_pod_meetings SET brief =", q)

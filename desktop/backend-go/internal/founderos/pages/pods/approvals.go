@@ -87,8 +87,16 @@ func (s *Store) ApplyClientDecision(ctx context.Context, podID, kind, ref, hash,
 		client_note = $7, decided_at = now()
 		WHERE pod_id = $1 AND kind = $2 AND ref = $3 AND payload->>'hash' = $4 AND status = 'pending'`,
 		podID, kind, ref, hash, decision, "client:"+strings.TrimSpace(by), strings.TrimSpace(note))
-	if err != nil || tag.RowsAffected() == 0 {
+	if err != nil {
 		return false, err
+	}
+	if tag.RowsAffected() == 0 {
+		// Already applied (a retry after a lost acknowledgement) is success, not
+		// stale wording (Codex M2-M4 #4).
+		var already bool
+		err := s.Pool.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM founderos_client_approvals WHERE pod_id = $1 AND kind = $2
+			AND ref = $3 AND payload->>'hash' = $4 AND status = $5)`, podID, kind, ref, hash, decision).Scan(&already)
+		return already, err
 	}
 	if kind == "doc" && decision == "approved" {
 		var slug, body string

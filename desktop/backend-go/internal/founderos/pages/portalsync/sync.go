@@ -62,6 +62,7 @@ type Meeting struct {
 	Attendee string  `json:"attendee"`
 	StartsAt *string `json:"starts_at"`
 	Brief    string  `json:"brief"`
+	Status   string  `json:"status"`
 }
 
 type Request struct {
@@ -303,7 +304,7 @@ func pushMeetings(ctx context.Context, s *pods.Store, portal Portal, p pods.Pod,
 			v := m.StartsAt.UTC().Format(time.RFC3339)
 			at = &v
 		}
-		out = append(out, Meeting{ClientID: client, OSID: m.ID, Title: m.Title, Attendee: m.Attendee, StartsAt: at, Brief: m.Brief})
+		out = append(out, Meeting{ClientID: client, OSID: m.ID, Title: m.Title, Attendee: m.Attendee, StartsAt: at, Brief: m.Brief, Status: m.Status})
 	}
 	return portal.UpsertMeetings(ctx, out)
 }

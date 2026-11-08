@@ -29,8 +29,32 @@ func (s *Store) RecordMeetings(ctx context.Context, slug string, list []Meeting)
 	}
 	added := 0
 	for _, m := range list {
-		if m.Cancelled || m.UID == "" {
+		if m.UID == "" {
 			continue
+		}
+		if m.Cancelled {
+			// Codex M2-M4 #6: a cancellation cancels the meeting we have.
+			tag, err := s.Pool.Exec(ctx, `UPDATE founderos_pod_meetings SET status = 'cancelled'
+				WHERE pod_id = $1 AND booking_uid = $2 AND status <> 'cancelled'`, p.ID, m.UID)
+			if err != nil {
+				return added, err
+			}
+			if tag.RowsAffected() > 0 {
+				_ = s.Log(ctx, p.ID, "meeting_cancelled", "Meeting cancelled: "+m.UID, m.UID)
+			}
+			continue
+		}
+		if t, err := time.Parse(time.RFC3339, m.Start); err == nil {
+			// A reschedule moves the meeting and sends the brief again with the new time.
+			tag, err := s.Pool.Exec(ctx, `UPDATE founderos_pod_meetings SET starts_at = $3, status = 'booked',
+				brief_sent_at = CASE WHEN brief <> '' THEN NULL ELSE brief_sent_at END
+				WHERE pod_id = $1 AND booking_uid = $2 AND (starts_at IS DISTINCT FROM $3 OR status <> 'booked')`, p.ID, m.UID, t)
+			if err != nil {
+				return added, err
+			}
+			if tag.RowsAffected() > 0 {
+				_ = s.Log(ctx, p.ID, "meeting_moved", "Meeting moved to "+t.Format("Mon 2 Jan 15:04 MST"), m.UID)
+			}
 		}
 		email := strings.ToLower(strings.TrimSpace(m.AttendeeEmail))
 		var start any
@@ -53,6 +77,11 @@ func (s *Store) RecordMeetings(ctx context.Context, slug string, list []Meeting)
 		if contact != nil {
 			if _, err := s.Pool.Exec(ctx, `UPDATE founderos_funnel_contacts SET status = 'engaged', relationship = 'warm'
 				WHERE id = $1 AND workspace_id = $2 AND status IN ('first_touch', 'nurtured')`, *contact, p.WorkspaceID); err != nil {
+				return added, err
+			}
+			// A booked meeting is a person taking over: the AI stops replying (Codex M2-M4 #2).
+			if _, err := s.Pool.Exec(ctx, `UPDATE founderos_pod_conversations SET taken_over_at = coalesce(taken_over_at, now())
+				WHERE workspace_id = $1 AND contact_id = $2`, p.WorkspaceID, *contact); err != nil {
 				return added, err
 			}
 		}
@@ -154,7 +183,7 @@ func (s *Store) BriefsToSend(ctx context.Context) ([]Brief, error) {
 	rows, err := s.Pool.Query(ctx, `SELECT m.id, p.id::text, p.client_name, p.handoff_email, m.title,
 		coalesce(nullif(m.attendee_name, ''), m.attendee_email), m.brief, m.starts_at
 		FROM founderos_pod_meetings m JOIN founderos_client_pods p ON p.id = m.pod_id
-		WHERE m.brief <> '' AND m.brief_sent_at IS NULL ORDER BY m.starts_at LIMIT 20`)
+		WHERE m.brief <> '' AND m.brief_sent_at IS NULL AND m.status = 'booked' ORDER BY m.starts_at LIMIT 20`)
 	if err != nil {
 		return nil, err
 	}
@@ -186,15 +215,15 @@ func (s *Store) MarkBriefSent(ctx context.Context, id int64, why string) error {
 
 // MeetingRow is a meeting as the portal shows it.
 type MeetingRow struct {
-	ID                     int64
-	Title, Attendee, Brief string
-	StartsAt               *time.Time
+	ID                             int64
+	Title, Attendee, Brief, Status string
+	StartsAt                       *time.Time
 }
 
 // MeetingsForPortal lists the pod's meetings, newest first.
 func (s *Store) MeetingsForPortal(ctx context.Context, podID string) ([]MeetingRow, error) {
-	rows, err := s.Pool.Query(ctx, `SELECT id, title, coalesce(nullif(attendee_name, ''), attendee_email), brief, starts_at
-		FROM founderos_pod_meetings WHERE pod_id = $1 AND status = 'booked' ORDER BY starts_at DESC NULLS LAST LIMIT 40`, podID)
+	rows, err := s.Pool.Query(ctx, `SELECT id, title, coalesce(nullif(attendee_name, ''), attendee_email), brief, status, starts_at
+		FROM founderos_pod_meetings WHERE pod_id = $1 ORDER BY starts_at DESC NULLS LAST LIMIT 40`, podID)
 	if err != nil {
 		return nil, err
 	}
@@ -202,7 +231,7 @@ func (s *Store) MeetingsForPortal(ctx context.Context, podID string) ([]MeetingR
 	var out []MeetingRow
 	for rows.Next() {
 		var m MeetingRow
-		if err := rows.Scan(&m.ID, &m.Title, &m.Attendee, &m.Brief, &m.StartsAt); err != nil {
+		if err := rows.Scan(&m.ID, &m.Title, &m.Attendee, &m.Brief, &m.Status, &m.StartsAt); err != nil {
 			return nil, err
 		}
 		out = append(out, m)

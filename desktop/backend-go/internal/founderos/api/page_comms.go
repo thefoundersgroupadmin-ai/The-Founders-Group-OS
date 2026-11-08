@@ -657,6 +657,11 @@ func commsRoutes(s *gin.RouterGroup, d *Deps) {
 				c.JSON(http.StatusBadRequest, gin.H{"error": "email reply needs a valid to address, 1-20000 characters of text and a subject under 300"})
 				return
 			}
+			if strings.HasPrefix(body.Account, email.PodAccountPrefix) {
+				// Codex M1 review #1: client mail goes only through the pod's outbox gate.
+				c.JSON(http.StatusForbidden, gin.H{"ok": false, "error": "a client pod's mailbox sends only from that pod's outbox"})
+				return
+			}
 			subject := "(no subject)"
 			if body.Subject != nil {
 				subject = *body.Subject

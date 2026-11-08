@@ -721,7 +721,7 @@ func TestSendReplyUsesAPodMailboxAndKeepsItOutOfTheOwnersInboxes(t *testing.T) {
 		"POD_CLIENT_BRIGHTVALE_PASS":      "pod-pass",
 		"POD_CLIENT_BRIGHTVALE_FROM_NAME": "Sam | Brightvale",
 	})
-	err := c.SendReply(context.Background(), Reply{AccountID: "pod:client-brightvale", RequireAccount: true,
+	err := c.SendReply(context.Background(), Reply{AccountID: "pod:client-brightvale", RequireAccount: true, ViaPodGate: true,
 		To: "alex@vantage.example", Subject: "s", Text: "t"})
 	if err != nil {
 		t.Fatal(err)
@@ -737,8 +737,21 @@ func TestSendReplyUsesAPodMailboxAndKeepsItOutOfTheOwnersInboxes(t *testing.T) {
 			t.Fatalf("pod mailbox listed among the owner's inboxes: %+v", in.ID)
 		}
 	}
-	err = c.SendReply(context.Background(), Reply{AccountID: "pod:client-ghost", RequireAccount: true, To: "alex@vantage.example", Subject: "s", Text: "t"})
+	err = c.SendReply(context.Background(), Reply{AccountID: "pod:client-ghost", RequireAccount: true, ViaPodGate: true, To: "alex@vantage.example", Subject: "s", Text: "t"})
 	if !errors.Is(err, ErrUnknownAccount) {
 		t.Fatalf("unconfigured pod mailbox: %v", err)
+	}
+}
+
+// Codex M1 review #1: a pod mailbox sends only for the pod gate. Any other
+// caller (the comms reply box, a script) naming pod:<slug> is refused before SMTP.
+func TestAPodMailboxRefusesEverySendThatDidNotComeThroughThePodGate(t *testing.T) {
+	t.Setenv("FOUNDEROS_WRITES", "1")
+	c := sendConnector(t, "alex@vantage.example", "p1", "", map[string]string{
+		"POD_CLIENT_BRIGHTVALE_HOST": "imap.bv.example", "POD_CLIENT_BRIGHTVALE_USER": "sam@bv.example", "POD_CLIENT_BRIGHTVALE_PASS": "pp",
+	})
+	err := c.SendReply(context.Background(), Reply{AccountID: "pod:client-brightvale", To: "x@y.example", Subject: "s", Text: "t", RecipientApproved: true})
+	if !errors.Is(err, ErrPodGateOnly) {
+		t.Fatalf("pod mailbox used outside the gate: %v", err)
 	}
 }

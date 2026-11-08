@@ -277,3 +277,14 @@ func TestOwnerProvisionsAPodsAISDRAndPausingReachesTheBoard(t *testing.T) {
 		t.Fatalf("member provisioned an agent: %d", code)
 	}
 }
+
+func TestTheCommsReplyBoxCannotSendAsAClientPod(t *testing.T) {
+	pool := catalogdb.TestDB(t)
+	var sent []email.Reply
+	h := commsRouter(t, pool, &commsSources{SendEmail: func(_ context.Context, r email.Reply) error { sent = append(sent, r); return nil }})
+	code, _ := commsDo(t, h, http.MethodPost, "/api/founderos/pages/comms/reply",
+		`{"source":"email","account":"pod:client-brightvale","to":"priya@brightvale.example","subject":"Hi","text":"Hello"}`)
+	if code != http.StatusForbidden || len(sent) != 0 {
+		t.Fatalf("comms reply sent as a pod: %d, %d sends", code, len(sent))
+	}
+}

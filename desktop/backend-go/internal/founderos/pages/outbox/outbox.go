@@ -63,6 +63,8 @@ type Item struct {
 	SequenceKey *string    `json:"sequenceKey"`
 	// RequireAccount: send only from AccountID, never a default inbox (pods).
 	RequireAccount bool `json:"-"`
+	// ViaPodGate marks a send the pod gate cleared (pod mailboxes need it).
+	ViaPodGate bool `json:"-"`
 }
 
 // Page is the /os/outbox model: everything needing a decision, then the

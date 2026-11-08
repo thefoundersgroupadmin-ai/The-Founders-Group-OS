@@ -227,6 +227,7 @@ func approvePod(ctx context.Context, pool *pgxpool.Pool, ws, id string, content 
 		acct := r.AccountID
 		out.AccountID, out.RequireAccount = &acct, true
 	}
+	out.ViaPodGate = true
 	if dry {
 		out.To = r.Sink
 		out.Subject = "[DRY RUN → " + it.To + "] " + it.Subject

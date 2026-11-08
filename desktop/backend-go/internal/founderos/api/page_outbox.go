@@ -34,7 +34,7 @@ const outboxWorkspace = "founderos"
 // call's recipient sign-off.
 func outboxSender(d *Deps) outbox.SendFunc {
 	return func(ctx context.Context, it outbox.Item) error {
-		r := email.Reply{To: it.To, Subject: it.Subject, Text: it.Body, RecipientApproved: true, RequireAccount: it.RequireAccount}
+		r := email.Reply{To: it.To, Subject: it.Subject, Text: it.Body, RecipientApproved: true, RequireAccount: it.RequireAccount, ViaPodGate: it.ViaPodGate}
 		if it.AccountID != nil {
 			r.AccountID = *it.AccountID
 		}

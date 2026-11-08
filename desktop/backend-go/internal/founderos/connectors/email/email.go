@@ -105,9 +105,12 @@ type Reply struct {
 	// RequireAccount refuses a send without a known AccountID: client pod
 	// mail must never fall back to the owner's first inbox.
 	RequireAccount bool
-	To             string
-	Subject        string
-	Text           string
+	// ViaPodGate is set only by the outbox pod gate. A pod mailbox
+	// ("pod:<slug>") refuses every send without it.
+	ViaPodGate bool
+	To         string
+	Subject    string
+	Text       string
 	// RecipientApproved is the mail guard's per-call MAIL_ALLOW_EXTERNAL: set
 	// only when a person approved this exact message and recipient (the
 	// /os/outbox approve), never as a default.
@@ -525,6 +528,9 @@ func setDeadline(ctx context.Context, conn net.Conn) {
 // send named none). Nothing is dialled.
 var ErrUnknownAccount = errors.New("unknown sending account")
 
+// ErrPodGateOnly: a client pod mailbox was named outside the pod send gate.
+var ErrPodGateOnly = errors.New("a client pod mailbox sends only through its pod's outbox")
+
 // SendReply sends a plain-text reply from the originating inbox. The mail
 // guard (an earlier incident) is checked first and refuses unapproved recipients; then the
 // send runs only through guard.Outbound("email.send"), so with FOUNDEROS_WRITES
@@ -538,6 +544,9 @@ func (c *Connector) SendReply(ctx context.Context, r Reply) error {
 	var cfg InboxConfig
 	found := false
 	if strings.HasPrefix(r.AccountID, PodAccountPrefix) {
+		if !r.ViaPodGate {
+			return ErrPodGateOnly
+		}
 		cfg, found = c.PodInbox(r.AccountID)
 	} else {
 		inboxes := c.Inboxes()

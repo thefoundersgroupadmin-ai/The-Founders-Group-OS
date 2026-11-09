@@ -675,6 +675,27 @@ func registerPods(s *gin.RouterGroup, d *Deps) {
 		}
 		c.JSON(http.StatusOK, gin.H{"weeks": out, "baseline": base, "thisWeek": now})
 	})
+	// Hand-off bundle (owner only): everything the client owns, as one zip.
+	s.GET("/pods/:slug/handoff-bundle", func(c *gin.Context) {
+		st, p, ok := pod(c)
+		if !ok {
+			return
+		}
+		if who, _ := personOf(c); !who.Owner {
+			c.JSON(http.StatusForbidden, gin.H{"error": "only the TFG owner exports a client's hand-off bundle"})
+			return
+		}
+		raw, err := st.Bundle(c.Request.Context(), p.Slug)
+		if err != nil {
+			podError(c, err)
+			return
+		}
+		_ = st.Log(c.Request.Context(), p.ID, "handoff_bundle", "Hand-off bundle exported", "")
+		name := strings.TrimPrefix(p.Slug, "client-") + "-ai-sdr-handoff-" + time.Now().Format("2006-01-02") + ".zip"
+		c.Header("Cache-Control", "no-store")
+		c.Header("Content-Disposition", `attachment; filename="`+name+`"`)
+		c.Data(http.StatusOK, "application/zip", raw)
+	})
 	registerPodCRM(s, d, pod, reply)
 	s.GET("/pods/:slug/activity", func(c *gin.Context) {
 		st, p, ok := pod(c)

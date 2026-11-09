@@ -30,14 +30,18 @@ describe('client pods view', () => {
 	it('the setup checklist follows the pod, its mailbox, documents and agent', () => {
 		const empty = setupChecklist(pod(), { configured: false }, {}, null);
 		expect(empty.every((i) => !i.done)).toBe(true);
-		expect(empty.map((i) => i.key)).toEqual(['mailbox', 'icp', 'voice', 'product', 'targets', 'agent', 'dryrun', 'live']);
+		expect(empty.filter((i) => !i.optional).map((i) => i.key)).toEqual(['mailbox', 'icp', 'voice', 'product', 'targets', 'agent', 'dryrun', 'live']);
+		expect(empty.filter((i) => i.optional).map((i) => i.key)).toEqual(['portal', 'handoff', 'calendar', 'crm', 'form', 'recorder', 'baseline']);
 		const ready = setupChecklist(
 			pod({ status: 'live', senderEmail: 'sam@bv.example', wentLiveAt: '2026-11-09T10:00:00Z' }),
 			{ configured: true },
 			{ icp: { approved: true }, voice: { approved: true }, product: { approved: false }, targets: { approved: true } },
 			{ agentId: 'a1' }
 		);
-		expect(ready.filter((i) => !i.done).map((i) => i.key)).toEqual(['product']);
+		expect(ready.filter((i) => !i.done && !i.optional).map((i) => i.key)).toEqual(['product']);
+		const full = setupChecklist(pod({ portalClientId: 'c1', handoffEmail: 'rep@bv.example', inboundLinkSet: true }), { configured: true }, {}, null,
+			{ calendar: true, recorder: true, crm: true, baseline: true });
+		expect(full.filter((i) => i.optional && !i.done)).toEqual([]);
 		expect(ready.find((i) => i.key === 'product')?.detail).toMatch(/approval/i);
 	});
 
@@ -80,10 +84,15 @@ describe('meetings and results (M6)', () => {
 		expect(meetingStage(m({ outcome: 'no_show' }), after).label).toBe('No-show');
 		expect(meetingStage(m({ status: 'cancelled' }), after).label).toBe('Cancelled');
 	});
-	it('sums the last four weeks against the baseline', () => {
-		const w = (booked: number, reached: number, replies: number) => ({ week: '', review: '', metrics: { meetingsBooked: booked, prospectsReached: reached, replies } as WeekMetrics });
-		const body: WeeklyBody = { weeks: [w(2, 50, 5), w(1, 50, 0), w(1, 0, 0), w(0, 0, 0), w(9, 9, 9)], baseline: { meetingsPerMonth: 3, replyRatePct: 1.5, note: '', setAt: 'x' }, thisWeek: {} as WeekMetrics };
-		expect(resultsSummary(body)).toEqual({ meetings: 4, meetingsBefore: 3, replyRate: 5, replyRateBefore: 1.5 });
-		expect(resultsSummary({ ...body, baseline: { meetingsPerMonth: 0, replyRatePct: 0, note: '' } }).meetingsBefore).toBeNull();
+	it('sums the four calendar weeks before this one against the baseline', () => {
+		const w = (week: string, booked: number, rate: number, cohort: number) => ({ week, review: '', metrics: { meetingsBooked: booked, replyRatePct: rate, cohortSize: cohort } as WeekMetrics });
+		const now = new Date('2026-11-25T12:00:00Z'); // Wednesday; this week starts 23 Nov
+		const body: WeeklyBody = {
+			weeks: [w('2026-11-23', 7, 9, 9), w('2026-11-16', 2, 5, 40), w('2026-11-09', 1, 4, 30), w('2026-10-26', 1, 0, 0), w('2026-10-19', 9, 9, 9)],
+			baseline: { meetingsPerMonth: 3, replyRatePct: 1.5, note: '', setAt: 'x' }, thisWeek: {} as WeekMetrics
+		};
+		expect(resultsSummary(body, now)).toEqual({ meetings: 4, meetingsBefore: 3, replyRate: 5, replyRateBefore: 1.5, weeksCovered: 3 });
+		expect(resultsSummary({ ...body, baseline: { meetingsPerMonth: 0, replyRatePct: 0, note: '' } }, now).meetingsBefore).toBeNull();
+		expect(resultsSummary({ ...body, weeks: [w('2026-08-03', 5, 5, 5)] }, now)).toMatchObject({ meetings: 0, replyRate: null, weeksCovered: 0 });
 	});
 });

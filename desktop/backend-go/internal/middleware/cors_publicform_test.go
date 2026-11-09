@@ -38,4 +38,13 @@ func TestClientWebsiteFormsPassCORSOnlyOnTheirOwnPath(t *testing.T) {
 	if w := do("POST", "/api/founderos/pages/pods"); w.Code != http.StatusForbidden {
 		t.Fatalf("foreign origin reached a normal route: %d", w.Code)
 	}
+	// Only the exact token route and POST/OPTIONS are public (Codex M6 review).
+	r.POST("/api/founderos/inbound/:token/admin", func(c *gin.Context) { c.String(200, "nested") })
+	r.GET("/api/founderos/inbound/:token", func(c *gin.Context) { c.String(200, "get") })
+	if w := do("POST", "/api/founderos/inbound/tok/admin"); w.Code != http.StatusForbidden {
+		t.Fatalf("nested path was public: %d", w.Code)
+	}
+	if w := do("GET", "/api/founderos/inbound/tok"); w.Code != http.StatusForbidden {
+		t.Fatalf("GET was public: %d", w.Code)
+	}
 }

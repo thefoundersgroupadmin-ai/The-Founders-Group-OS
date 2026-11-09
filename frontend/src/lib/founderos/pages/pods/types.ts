@@ -40,7 +40,7 @@ export type PodMeeting = {
 	status: 'booked' | 'cancelled'; outcome: '' | 'held' | 'no_show'; hasTranscript: boolean; coaching: string; coachingSent: boolean;
 };
 export type WeekMetrics = {
-	week: string; dryRun: boolean; prospectsReached: number; emailsSent: number; simulated: number; replies: number; replyRatePct: number;
+	week: string; dryRun: boolean; prospectsReached: number; emailsSent: number; simulated: number; replies: number; cohortSize: number; cohortReplied: number; replyRatePct: number;
 	enquiries: number; aiReplies: number; handoffs: number; meetingsBooked: number; meetingsHeld: number; noShows: number; optOuts: number;
 };
 export type Baseline = { meetingsPerMonth: number; replyRatePct: number; note: string; setAt?: string };

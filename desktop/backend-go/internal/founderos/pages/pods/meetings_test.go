@@ -59,14 +59,27 @@ func TestBookedMeetingsAreRecordedOnceAndGetACallBrief(t *testing.T) {
 	if _, err := s.Pool.Exec(ctx, `UPDATE founderos_pod_meetings SET brief = 'Priya runs ops at Brightvale...' WHERE booking_uid = 'b-1'`); err != nil {
 		t.Fatal(err)
 	}
-	ready, err := s.BriefsToSend(ctx)
+	// A paused pod emails nothing; the brief waits (Codex M6 review #8).
+	if _, err := s.SetStatus(ctx, p.Slug, StatusDryRun, ""); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.SetStatus(ctx, p.Slug, StatusPaused, "holiday"); err != nil {
+		t.Fatal(err)
+	}
+	if held, _ := s.ClaimBriefs(ctx); len(held) != 0 {
+		t.Fatal("paused pod emailed a brief")
+	}
+	if _, err := s.SetStatus(ctx, p.Slug, StatusDryRun, ""); err != nil {
+		t.Fatal(err)
+	}
+	ready, err := s.ClaimBriefs(ctx)
 	if err != nil || len(ready) != 1 || ready[0].Client != "Brightvale" {
 		t.Fatalf("ready briefs %+v %v", ready, err)
 	}
-	if err := s.MarkBriefSent(ctx, ready[0].ID, ""); err != nil {
+	if err := s.BriefDelivered(ctx, ready[0], ""); err != nil {
 		t.Fatal(err)
 	}
-	if again, _ := s.BriefsToSend(ctx); len(again) != 0 {
+	if again, _ := s.ClaimBriefs(ctx); len(again) != 0 {
 		t.Fatal("brief sent twice")
 	}
 }

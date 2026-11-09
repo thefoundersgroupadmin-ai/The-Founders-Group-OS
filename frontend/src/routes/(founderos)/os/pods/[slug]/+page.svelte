@@ -5,7 +5,7 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
 	import { page } from '$app/state';
-	import { founderosFetch } from '$lib/founderos/api';
+	import { founderosFetch, founderosUrl } from '$lib/founderos/api';
 	import { Badge, PageHeader, Pressable, Rise, Slab } from '$lib/founderos/kit';
 	import { APPROVAL_BADGE, DOC_LABELS, STATUS_BADGE, actionsFor, meetingStage, parseDomains, resultsSummary, setupChecklist, waitingReason } from '$lib/founderos/pages/pods/pods';
 	import type { Activity, AgentBinding, ClientApproval, Mailbox, Pod, PodDoc, PodMeeting, WeeklyBody } from '$lib/founderos/pages/pods/types';
@@ -168,7 +168,8 @@
 					pod,
 					{ configured: !!mailbox?.configured },
 					Object.fromEntries(Object.entries(docs).map(([k, d]) => [k, d && d.body ? { approved: !!d.approvedAt } : undefined])),
-					agent
+					agent,
+					{ calendar: calendarConnected, recorder: recorderConnected, crm: !!crm?.connected, baseline: !!weekly?.baseline?.setAt }
 				)
 			: []
 	);
@@ -209,10 +210,10 @@
 			</Slab>
 
 			<Slab>
-				<p class="bn-dim mb-2 font-mono text-[10px] uppercase tracking-[0.15em]">Setup</p>
+				<p class="bn-dim mb-2 font-mono text-[10px] uppercase tracking-[0.15em]">Onboarding · {checklist.filter((i) => i.done).length}/{checklist.length} done · * needed to go live</p>
 				{#each checklist as item (item.key)}
 					<div class="flex items-center justify-between gap-2 py-1">
-						<span class="text-[12px]">{item.done ? '✓' : '○'} {item.label}</span>
+						<span class="text-[12px]">{item.done ? '✓' : '○'} {item.label}{item.optional ? '' : ' *'}</span>
 						<span class="bn-dim font-mono text-[11px]">{item.detail}</span>
 					</div>
 				{/each}
@@ -385,8 +386,8 @@
 				{#if weekly}
 					{@const r = resultsSummary(weekly)}
 					<div class="mb-3 grid grid-cols-2 gap-3 md:grid-cols-4">
-						<div><p class="bn-dim font-mono text-[10px] uppercase">Meetings, last 4 weeks</p><p class="text-[18px]">{r.meetings}</p><p class="bn-dim text-[11px]">{r.meetingsBefore === null ? 'No baseline yet' : `Before: ${r.meetingsBefore} a month`}</p></div>
-						<div><p class="bn-dim font-mono text-[10px] uppercase">Reply rate</p><p class="text-[18px]">{r.replyRate === null ? '–' : `${r.replyRate}%`}</p><p class="bn-dim text-[11px]">{r.replyRateBefore === null ? '' : `Before: ${r.replyRateBefore}%`}</p></div>
+						<div><p class="bn-dim font-mono text-[10px] uppercase">Meetings, last 4 weeks{r.weeksCovered < 4 ? ` (${r.weeksCovered} recorded)` : ''}</p><p class="text-[18px]">{r.meetings}</p><p class="bn-dim text-[11px]">{r.meetingsBefore === null ? 'No baseline yet' : `Before: ${r.meetingsBefore} a month`}</p></div>
+						<div><p class="bn-dim font-mono text-[10px] uppercase">Reply rate (4-week cohort)</p><p class="text-[18px]">{r.replyRate === null ? '–' : `${r.replyRate}%`}</p><p class="bn-dim text-[11px]">{r.replyRateBefore === null ? '' : `Before: ${r.replyRateBefore}%`}</p></div>
 						<div><p class="bn-dim font-mono text-[10px] uppercase">This week so far</p><p class="text-[18px]">{weekly.thisWeek.prospectsReached} reached</p><p class="bn-dim text-[11px]">{weekly.thisWeek.replies} replies · {weekly.thisWeek.meetingsBooked} booked</p></div>
 						<div><p class="bn-dim font-mono text-[10px] uppercase">Hand-offs this week</p><p class="text-[18px]">{weekly.thisWeek.handoffs}</p><p class="bn-dim text-[11px]">{weekly.thisWeek.optOuts} opt-outs</p></div>
 					</div>
@@ -402,12 +403,18 @@
 				{/if}
 				{#each weekly?.weeks ?? [] as w (w.week)}
 					<details class="mt-2 border-b py-1" style="border-color: var(--bn-hairline)">
-						<summary class="cursor-pointer text-[12px]">Week of {w.week}{w.metrics.dryRun ? ' (test run)' : ''} · reached {w.metrics.prospectsReached} · replies {w.metrics.replies} ({w.metrics.replyRatePct}%) · booked {w.metrics.meetingsBooked} · held {w.metrics.meetingsHeld}</summary>
+						<summary class="cursor-pointer text-[12px]">Week of {w.week}{w.metrics.dryRun ? ' (test run)' : ''} · reached {w.metrics.prospectsReached} · replies {w.metrics.replies} · reply rate {w.metrics.replyRatePct}% of {w.metrics.cohortSize ?? 0} · booked {w.metrics.meetingsBooked} · held {w.metrics.meetingsHeld}</summary>
 						<p class="mt-1 whitespace-pre-wrap text-[12px]">{w.review || 'Review on its way from the AI SDR.'}</p>
 					</details>
 				{:else}
 					<p class="bn-dim mt-2 font-mono text-[12px]">The first weekly review arrives the Monday after the pod starts running.</p>
 				{/each}
+			</Slab>
+
+			<Slab>
+				<p class="bn-dim mb-2 font-mono text-[10px] uppercase tracking-[0.15em]">Hand-off</p>
+				<p class="mb-2 text-[12px]">Everything the client owns, in one zip: their documents, the AI SDR's instructions, every email sent, the pipeline, opt-outs, meetings with briefs and coaching, weekly results and reviews, settings and a guide to running it themselves. No keys or passwords.</p>
+				<a class="pc-input inline-block rounded-[6px] px-3 py-1.5 text-[12px]" href={founderosUrl(`${base}/handoff-bundle`)} download>Download hand-off bundle</a>
 			</Slab>
 
 			<Slab>

@@ -144,16 +144,23 @@ class PodRoutingTest(unittest.TestCase):
         self.assertIn("workspace_id = 'w-bv'", q)
 
     def test_coaching_and_review_documents_fill_their_rows_until_sent(self):
-        q = sync.coaching_query("issue-8", " Ask about budget earlier ")
+        q = sync.coaching_query("issue-8", " Ask about budget earlier ", "w-bv")
+        self.assertIn("workspace_id = 'w-bv'", q)
         self.assertIn("coaching_issue_id = 'issue-8'", q)
         self.assertIn("coaching_sent_at IS NULL", q)
         self.assertIn("'Ask about budget earlier'", q)
-        q = sync.review_query("issue-9", "Good week")
+        q = sync.review_query("issue-9", "Good week", "w-bv")
+        self.assertIn("workspace_id = 'w-bv'", q)
         self.assertIn("review_issue_id = 'issue-9'", q)
         self.assertIn("review_sent_at IS NULL", q)
 
+    def test_report_tasks_hand_over_only_their_own_document(self):
+        docs = [{"key": "coaching", "body": "notes"}, {"key": "outbox", "body": "[]"}, {"key": "handoff", "body": "x"}]
+        self.assertEqual([d["key"] for d in sync.report_docs("coaching", docs)], ["coaching"])
+        self.assertEqual(sync.report_docs("review", docs), [])
+
     def test_a_brief_document_fills_its_meeting(self):
-        q = sync.brief_query("issue-7", "Priya runs operations at Brightvale.")
+        q = sync.brief_query("issue-7", "Priya runs operations at Brightvale.", "w-bv")
         self.assertIn("UPDATE founderos_pod_meetings SET brief =", q)
         self.assertIn("brief_issue_id = 'issue-7'", q)
         self.assertIn("brief_sent_at IS NULL", q)

@@ -48,15 +48,20 @@ export function actionsFor(p: Pick<Pod, 'status'>): StatusAction[] {
 	return MOVES[p.status];
 }
 
-export type ChecklistItem = { key: string; label: string; done: boolean; detail: string };
+export type ChecklistItem = { key: string; label: string; done: boolean; detail: string; optional?: boolean };
+
+/** Connections beyond the go-live minimum that a full onboarding sets up. */
+export type Onboarding = { calendar: boolean; recorder: boolean; crm: boolean; baseline: boolean };
 
 /** What stands between this pod and a live AI SDR, in order. */
 export function setupChecklist(
 	p: Pod,
 	mailbox: { configured: boolean },
 	docs: Record<string, { approved: boolean } | undefined>,
-	agent: { agentId: string } | null
+	agent: { agentId: string } | null,
+	extra: Onboarding = { calendar: false, recorder: false, crm: false, baseline: false }
 ): ChecklistItem[] {
+	const opt = (key: string, label: string, done: boolean, yes: string, no: string): ChecklistItem => ({ key, label, done, detail: done ? yes : no, optional: true });
 	const doc = (key: string): ChecklistItem => {
 		const d = docs[key];
 		return {
@@ -73,6 +78,13 @@ export function setupChecklist(
 		doc('product'),
 		doc('targets'),
 		{ key: 'agent', label: 'AI SDR on the task board', done: !!agent?.agentId, detail: agent?.agentId ? 'provisioned' : 'not provisioned' },
+		opt('portal', 'Client portal linked', !!p.portalClientId, 'approvals and results in their portal', 'not linked'),
+		opt('handoff', 'Hand-off email', !!p.handoffEmail, p.handoffEmail, 'no rep email for hand-offs and briefs'),
+		opt('calendar', 'Calendar', extra.calendar, 'bookings become meetings with briefs', 'not connected'),
+		opt('crm', 'CRM', extra.crm, 'everything logged in their CRM', 'not connected'),
+		opt('form', 'Website form', p.inboundLinkSet, 'enquiries reach the AI SDR', 'no form link yet'),
+		opt('recorder', 'Call recorder', extra.recorder, 'calls get coaching notes', 'not connected (transcripts can be pasted)'),
+		opt('baseline', 'Month-one baseline', extra.baseline, 'results measured against it', 'not recorded'),
 		{ key: 'dryrun', label: 'Test run', done: p.status !== 'setup', detail: p.status === 'setup' ? 'not started' : 'done or running' },
 		{ key: 'live', label: 'Live', done: !!p.wentLiveAt, detail: p.wentLiveAt ? `since ${p.wentLiveAt.slice(0, 10)}` : 'not yet' }
 	];
@@ -129,16 +141,23 @@ export function meetingStage(m: PodMeeting, now = new Date()): { tone: BadgeTone
 	return { tone: 'default', label: 'Brief pending' };
 }
 
-/** The last four recorded weeks against the client's baseline (per month ≈ 4 weeks). */
-export function resultsSummary(body: WeeklyBody): { meetings: number; meetingsBefore: number | null; replyRate: number | null; replyRateBefore: number | null } {
-	const last = body.weeks.slice(0, 4);
-	const sum = (k: keyof WeekMetrics) => last.reduce((a, w) => a + (Number(w.metrics[k]) || 0), 0);
-	const reached = sum('prospectsReached');
+/** The four calendar weeks before this one, against the client's baseline.
+ * Older rows never stand in for missing weeks (Codex M6 review #12); the reply
+ * rate is the latest week's (already a four-week cohort rate). */
+export function resultsSummary(
+	body: WeeklyBody,
+	now = new Date()
+): { meetings: number; meetingsBefore: number | null; replyRate: number | null; replyRateBefore: number | null; weeksCovered: number } {
+	const monday = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() - ((now.getUTCDay() + 6) % 7)));
+	const cutoff = new Date(monday.getTime() - 28 * 864e5).toISOString().slice(0, 10);
+	const last = body.weeks.filter((w) => w.week >= cutoff && w.week < monday.toISOString().slice(0, 10));
+	const latest = last[0]?.metrics;
 	const set = Boolean(body.baseline?.setAt);
 	return {
-		meetings: sum('meetingsBooked'),
+		meetings: last.reduce((a, w) => a + (Number(w.metrics.meetingsBooked) || 0), 0),
 		meetingsBefore: set ? body.baseline.meetingsPerMonth : null,
-		replyRate: reached ? Math.round((sum('replies') / reached) * 1000) / 10 : null,
-		replyRateBefore: set ? body.baseline.replyRatePct : null
+		replyRate: latest && latest.cohortSize > 0 ? latest.replyRatePct : null,
+		replyRateBefore: set ? body.baseline.replyRatePct : null,
+		weeksCovered: last.length
 	};
 }

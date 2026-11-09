@@ -1,6 +1,7 @@
 package middleware
 
 import (
+	"regexp"
 	"strings"
 
 	"github.com/gin-contrib/cors"
@@ -75,7 +76,7 @@ func CORSMiddleware(cfg *config.Config) gin.HandlerFunc {
 
 	strict := cors.New(corsConfig)
 	return func(c *gin.Context) {
-		if isPublicFormPath(c.Request.URL.Path) {
+		if isPublicFormPath(c.Request.URL.Path) && (c.Request.Method == "POST" || c.Request.Method == "OPTIONS") {
 			publicFormCORS(c)
 			return
 		}
@@ -88,8 +89,11 @@ func CORSMiddleware(cfg *config.Config) gin.HandlerFunc {
 // website may post there: the token in the path is the credential, and no
 // cookies are honoured, so the origin allow-list does not apply.
 func isPublicFormPath(path string) bool {
-	return strings.HasPrefix(path, "/api/founderos/inbound/") || strings.HasPrefix(path, "/api/v1/founderos/inbound/")
+	return publicFormRe.MatchString(path)
 }
+
+// publicFormRe is exactly the form route: one token segment, nothing nested.
+var publicFormRe = regexp.MustCompile(`^/api/(v1/)?founderos/inbound/[A-Za-z0-9_-]+/?$`)
 
 // publicFormCORS allows any origin without credentials and answers preflights.
 func publicFormCORS(c *gin.Context) {

@@ -144,13 +144,6 @@ func startPodLoops(d *Deps) {
 					cancel()
 				}
 				if n%20 == 0 {
-					ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
-					if k, err := st.TaskWeeklyReviews(ctx, podTasksFor(d), time.Now()); k > 0 || err != nil {
-						slog.Info("client pods: weekly reviews requested", "tasked", k, "err", err)
-					}
-					cancel()
-				}
-				if n%20 == 0 {
 					ctx, cancel := context.WithTimeout(context.Background(), 4*time.Minute)
 					if k, err := syncPodCRMs(ctx, d, st); k > 0 || err != nil {
 						slog.Info("client pods: CRM sync", "written", k, "err", err)
@@ -168,6 +161,14 @@ func startPodLoops(d *Deps) {
 						slog.Info("client pods: call recordings matched", "new", k, "err", err)
 					}
 					cancel()
+					// After calendars and recordings, so the week's late data is in (Codex M6 #5).
+					if n%20 == 0 {
+						ctx, cancel = context.WithTimeout(context.Background(), 2*time.Minute)
+						if k, err := st.TaskWeeklyReviews(ctx, podTasksFor(d), time.Now()); k > 0 || err != nil {
+							slog.Info("client pods: weekly reviews requested", "tasked", k, "err", err)
+						}
+						cancel()
+					}
 				}
 			}
 		}()
@@ -205,7 +206,7 @@ func notifyHandoffs(ctx context.Context, d *Deps, st *pods.Store) (int, error) {
 // sendBriefs emails each finished call brief to the client's rep from TFG's
 // own inbox (a notice to the client) and logs it for the portal.
 func sendBriefs(ctx context.Context, d *Deps, st *pods.Store) (int, error) {
-	list, err := st.BriefsToSend(ctx)
+	list, err := st.ClaimBriefs(ctx)
 	if err != nil {
 		return 0, err
 	}
@@ -213,7 +214,7 @@ func sendBriefs(ctx context.Context, d *Deps, st *pods.Store) (int, error) {
 	var errs []error
 	for _, b := range list {
 		if b.To == "" {
-			_ = st.MarkBriefSent(ctx, b.ID, "no rep email set")
+			_ = st.BriefDelivered(ctx, b, "no rep email set")
 			continue
 		}
 		when := ""
@@ -225,9 +226,10 @@ func sendBriefs(ctx context.Context, d *Deps, st *pods.Store) (int, error) {
 				"\n\nAlso in your portal: https://thefoundersgroup.net/portal\n\nThe Founders Group", RecipientApproved: true})
 		if err != nil {
 			errs = append(errs, err)
+			_ = st.BriefDelivered(ctx, b, err.Error())
 			continue
 		}
-		_ = st.MarkBriefSent(ctx, b.ID, "")
+		_ = st.BriefDelivered(ctx, b, "")
 		sent++
 	}
 	return sent, errors.Join(errs...)
@@ -284,7 +286,7 @@ func readPodCalendars(ctx context.Context, d *Deps, st *pods.Store) (int, error)
 
 // sendCoaching emails each finished set of coaching notes to the client's rep.
 func sendCoaching(ctx context.Context, d *Deps, st *pods.Store) (int, error) {
-	list, err := st.CoachingToSend(ctx)
+	list, err := st.ClaimCoaching(ctx)
 	if err != nil {
 		return 0, err
 	}
@@ -292,7 +294,7 @@ func sendCoaching(ctx context.Context, d *Deps, st *pods.Store) (int, error) {
 	var errs []error
 	for _, b := range list {
 		if b.To == "" {
-			_ = st.MarkCoachingSent(ctx, b.ID, "no rep email set")
+			_ = st.CoachingDelivered(ctx, b, "no rep email set")
 			continue
 		}
 		err := commsSourcesFor(d).SendEmail(ctx, email.Reply{To: b.To, Subject: "Call coaching: " + b.Name,
@@ -300,9 +302,10 @@ func sendCoaching(ctx context.Context, d *Deps, st *pods.Store) (int, error) {
 				"\n\nAlso in your portal: https://thefoundersgroup.net/portal\n\nThe Founders Group", RecipientApproved: true})
 		if err != nil {
 			errs = append(errs, err)
+			_ = st.CoachingDelivered(ctx, b, err.Error())
 			continue
 		}
-		_ = st.MarkCoachingSent(ctx, b.ID, "")
+		_ = st.CoachingDelivered(ctx, b, "")
 		sent++
 	}
 	return sent, errors.Join(errs...)
@@ -310,7 +313,7 @@ func sendCoaching(ctx context.Context, d *Deps, st *pods.Store) (int, error) {
 
 // sendReviews emails each finished weekly review to the client's team.
 func sendReviews(ctx context.Context, d *Deps, st *pods.Store) (int, error) {
-	list, err := st.ReviewsToSend(ctx)
+	list, err := st.ClaimReviews(ctx)
 	if err != nil {
 		return 0, err
 	}
@@ -318,21 +321,23 @@ func sendReviews(ctx context.Context, d *Deps, st *pods.Store) (int, error) {
 	var errs []error
 	for _, r := range list {
 		if r.To == "" {
-			_ = st.MarkReviewSent(ctx, r.ID, "no rep email set")
+			_ = st.ReviewDelivered(ctx, r, "no rep email set")
 			continue
 		}
 		m, err := st.WeekMetrics(ctx, r.ID)
 		if err != nil {
 			errs = append(errs, err)
+			_ = st.ReviewDelivered(ctx, r, "could not read the week's numbers")
 			continue
 		}
 		err = commsSourcesFor(d).SendEmail(ctx, email.Reply{To: r.To, Subject: "Weekly AI SDR review: week of " + r.Week + " (" + r.Client + ")",
 			Text: pods.WeeklyText(r, m), RecipientApproved: true})
 		if err != nil {
 			errs = append(errs, err)
+			_ = st.ReviewDelivered(ctx, r, err.Error())
 			continue
 		}
-		_ = st.MarkReviewSent(ctx, r.ID, "")
+		_ = st.ReviewDelivered(ctx, r, "")
 		sent++
 	}
 	return sent, errors.Join(errs...)
@@ -360,7 +365,7 @@ func readPodRecordings(ctx context.Context, d *Deps, st *pods.Store) (int, error
 		if key == "" {
 			continue
 		}
-		ms, err := fc.RecentWithKey(ctx, key, time.Now().Add(-7*24*time.Hour))
+		ms, err := fc.RecentWithKey(ctx, key, time.Now().Add(-14*24*time.Hour))
 		if err != nil {
 			errs = append(errs, fmt.Errorf("%s: %w", p.Slug, err))
 			continue

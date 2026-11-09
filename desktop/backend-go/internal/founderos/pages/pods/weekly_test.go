@@ -2,6 +2,7 @@ package pods
 
 import (
 	"context"
+	"errors"
 	"strings"
 	"testing"
 	"time"
@@ -37,7 +38,7 @@ func TestLastWeeksResultsAreCountedAndReviewedOncePerWeek(t *testing.T) {
 		t.Fatal(err)
 	}
 	now := time.Now()
-	to := WeekOf(now, p.Timezone)
+	to := WeekOf(now.Add(-reviewGrace), p.Timezone)
 	mid := to.AddDate(0, 0, -4)
 	before := to.AddDate(0, 0, -10)
 	other := readyPod(t, s, "Kestrel")
@@ -57,6 +58,8 @@ func TestLastWeeksResultsAreCountedAndReviewedOncePerWeek(t *testing.T) {
 	}
 	exec(`INSERT INTO founderos_outbox (id, workspace_id, source, to_address, subject, body, status, sent_at)
 		VALUES ('other', $1, 'test', 'z@x.example', 's', 'b', 'sent', $2)`, other.WorkspaceID, mid)
+	exec(`INSERT INTO founderos_funnel_contacts (id, workspace_id, name, status, venture, created_at, email)
+		VALUES ('c1', $1, 'Ana', 'engaged', 'client', now(), 'A@x.example')`, p.WorkspaceID)
 	exec(`INSERT INTO founderos_pod_conversations (issue_id, workspace_id, contact_id, created_at) VALUES ('i1', $1, 'c1', $2)`, p.WorkspaceID, mid)
 	exec(`INSERT INTO founderos_pod_meetings (pod_id, booking_uid, attendee_email, starts_at, created_at, outcome)
 		VALUES ($1, 'm1', 'a@x.example', $2, $2, 'held')`, p.ID, mid)
@@ -73,7 +76,8 @@ func TestLastWeeksResultsAreCountedAndReviewedOncePerWeek(t *testing.T) {
 		t.Fatalf("weeks: %+v", weeks)
 	}
 	m := weeks[0].M
-	if m.ProspectsReached != 2 || m.EmailsSent != 4 || m.AIReplies != 1 || m.Replies != 1 || m.ReplyRatePct != 50 ||
+	if m.ProspectsReached != 2 || m.EmailsSent != 4 || m.AIReplies != 1 || m.Replies != 1 ||
+		m.CohortSize != 3 || m.CohortReplied != 1 || m.ReplyRatePct != 33.3 ||
 		m.MeetingsBooked != 1 || m.MeetingsHeld != 1 || !m.DryRun {
 		t.Fatalf("metrics: %+v", m)
 	}
@@ -90,7 +94,7 @@ func TestLastWeeksResultsAreCountedAndReviewedOncePerWeek(t *testing.T) {
 	}
 	// The review arrives and is sent once.
 	exec(`UPDATE founderos_pod_weekly SET review = 'Good week: two meetings' WHERE pod_id = $1`, p.ID)
-	list, err := s.ReviewsToSend(ctx)
+	list, err := s.ClaimReviews(ctx)
 	if err != nil || len(list) != 1 {
 		t.Fatalf("reviews to send: %+v %v", list, err)
 	}
@@ -98,10 +102,10 @@ func TestLastWeeksResultsAreCountedAndReviewedOncePerWeek(t *testing.T) {
 	if !strings.Contains(body, "Good week") || !strings.Contains(body, "meetings booked: 1") {
 		t.Fatalf("email body: %s", body)
 	}
-	if err := s.MarkReviewSent(ctx, list[0].ID, ""); err != nil {
+	if err := s.ReviewDelivered(ctx, list[0], ""); err != nil {
 		t.Fatal(err)
 	}
-	if again, _ := s.ReviewsToSend(ctx); len(again) != 0 {
+	if again, _ := s.ClaimReviews(ctx); len(again) != 0 {
 		t.Fatal("review sent twice")
 	}
 }
@@ -121,4 +125,46 @@ func TestANewPodGetsNoReviewForAWeekBeforeItExisted(t *testing.T) {
 	if n, err := s.TaskWeeklyReviews(ctx, f, time.Now()); err != nil || n != 0 {
 		t.Fatalf("reviewed a week before the pod existed: %d %v", n, err)
 	}
+}
+
+// Codex M6 review #5, #6: late data lands in its week, and a week whose review
+// task failed is retried.
+func TestLateDataIsRecountedAndAFailedReviewTaskIsRetried(t *testing.T) {
+	s := &Store{Pool: catalogdb.TestDB(t)}
+	ctx := context.Background()
+	p := readyPod(t, s, "Brightvale")
+	if _, err := s.Provision(ctx, newFakeBoard(), p.Slug); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.SetStatus(ctx, p.Slug, StatusDryRun, ""); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.Pool.Exec(ctx, `UPDATE founderos_client_pods SET created_at = now() - interval '30 days' WHERE id = $1`, p.ID); err != nil {
+		t.Fatal(err)
+	}
+	now := time.Now()
+	to := WeekOf(now.Add(-reviewGrace), p.Timezone)
+	fail := &failingTasks{}
+	if _, err := s.TaskWeeklyReviews(ctx, fail, now); err == nil {
+		t.Fatal("a failed review task was not reported")
+	}
+	// A Sunday call is marked held after the week was first counted.
+	if _, err := s.Pool.Exec(ctx, `INSERT INTO founderos_pod_meetings (pod_id, booking_uid, attendee_email, starts_at, created_at, outcome)
+		VALUES ($1, 'late', 'a@x.example', $2, $2, 'held')`, p.ID, to.Add(-2*time.Hour)); err != nil {
+		t.Fatal(err)
+	}
+	f := &fakeTasks{}
+	if n, err := s.TaskWeeklyReviews(ctx, f, now); err != nil || n != 1 {
+		t.Fatalf("retry tasked %d %v", n, err)
+	}
+	weeks, _ := s.Weeks(ctx, p.ID, 1)
+	if weeks[0].M.MeetingsHeld != 1 || !strings.Contains(f.bodies[0], "held: 1") {
+		t.Fatalf("late call not counted: %+v", weeks[0].M)
+	}
+}
+
+type failingTasks struct{}
+
+func (failingTasks) CreateTask(context.Context, string, string, string, string) (string, error) {
+	return "", errors.New("board down")
 }

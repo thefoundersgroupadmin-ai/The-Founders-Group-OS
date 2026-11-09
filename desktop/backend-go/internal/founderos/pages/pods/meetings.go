@@ -178,12 +178,18 @@ type Brief struct {
 	At                                   *time.Time
 }
 
-// BriefsToSend lists briefs written but not yet sent.
-func (s *Store) BriefsToSend(ctx context.Context) ([]Brief, error) {
-	rows, err := s.Pool.Query(ctx, `SELECT m.id, p.id::text, p.client_name, p.handoff_email, m.title,
-		coalesce(nullif(m.attendee_name, ''), m.attendee_email), m.brief, m.starts_at
-		FROM founderos_pod_meetings m JOIN founderos_client_pods p ON p.id = m.pod_id
-		WHERE m.brief <> '' AND m.brief_sent_at IS NULL AND m.status = 'booked' ORDER BY m.starts_at LIMIT 20`)
+// ClaimBriefs takes briefs ready to email to the rep and marks them sent
+// first, so a crash or timeout can never email one twice (Codex M6 review #2).
+// Paused and handed-over pods email nothing; briefs stay in the portal.
+func (s *Store) ClaimBriefs(ctx context.Context) ([]Brief, error) {
+	rows, err := s.Pool.Query(ctx, `UPDATE founderos_pod_meetings m SET brief_sent_at = now()
+		FROM founderos_client_pods p
+		WHERE p.id = m.pod_id AND m.id IN (
+			SELECT m2.id FROM founderos_pod_meetings m2 JOIN founderos_client_pods p2 ON p2.id = m2.pod_id
+			WHERE m2.brief <> '' AND m2.brief_sent_at IS NULL AND m2.status = 'booked' AND p2.status IN ('live', 'dry_run')
+			ORDER BY m2.starts_at LIMIT 20 FOR UPDATE OF m2 SKIP LOCKED)
+		RETURNING m.id, p.id::text, p.client_name, p.handoff_email, m.title,
+		coalesce(nullif(m.attendee_name, ''), m.attendee_email), m.brief, m.starts_at`)
 	if err != nil {
 		return nil, err
 	}
@@ -199,18 +205,12 @@ func (s *Store) BriefsToSend(ctx context.Context) ([]Brief, error) {
 	return out, rows.Err()
 }
 
-// MarkBriefSent records that a brief went to the rep (why == "") or why not.
-func (s *Store) MarkBriefSent(ctx context.Context, id int64, why string) error {
-	var podID, name string
-	err := s.Pool.QueryRow(ctx, `UPDATE founderos_pod_meetings SET brief_sent_at = now()
-		WHERE id = $1 RETURNING pod_id::text, coalesce(nullif(attendee_name, ''), attendee_email)`, id).Scan(&podID, &name)
-	if err != nil {
-		return err
-	}
+// BriefDelivered logs how a claimed brief went: emailed (why == "") or not.
+func (s *Store) BriefDelivered(ctx context.Context, b Brief, why string) error {
 	if why != "" {
-		return s.Log(ctx, podID, "brief", "Call brief for "+name+" is in your portal ("+clip(why, 120)+")", "")
+		return s.Log(ctx, b.PodID, "brief", "Call brief for "+b.Name+" is in your portal (not emailed: "+clip(why, 120)+")", "")
 	}
-	return s.Log(ctx, podID, "brief", "Call brief for "+name+" sent to your team", "")
+	return s.Log(ctx, b.PodID, "brief", "Call brief for "+b.Name+" sent to your team", "")
 }
 
 // MeetingRow is a meeting as the portal shows it.

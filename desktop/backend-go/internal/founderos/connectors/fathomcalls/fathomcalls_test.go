@@ -344,11 +344,14 @@ func TestRecentWithKeyUsesThePodsOwnKey(t *testing.T) {
 		if r.URL.Query().Get("include_transcript") != "true" || r.URL.Query().Get("created_after") == "" {
 			return 400, `{}`
 		}
-		return 200, `{"items": [` + fullItem(7, "Discovery", "2026-11-05T15:00:00Z") + `]}`
+		if r.URL.Query().Get("cursor") == "" {
+			return 200, `{"items": [` + fullItem(7, "Discovery", "2026-11-05T15:00:00Z") + `], "next_cursor": "p2"}`
+		}
+		return 200, `{"items": [` + fullItem(8, "Demo", "2026-11-06T15:00:00Z") + `], "next_cursor": null}`
 	})
 	c := keyed(t, "tfg-own-key", f.srv.URL)
 	got, err := c.RecentWithKey(context.Background(), "pod-key", time.Now().Add(-72*time.Hour))
-	if err != nil || len(got) != 1 || got[0].ID() != "7" || len(TranscriptLines(got[0])) == 0 {
+	if err != nil || len(got) != 2 || got[0].ID() != "7" || got[1].ID() != "8" || len(TranscriptLines(got[0])) == 0 {
 		t.Fatalf("got %+v %v", got, err)
 	}
 	if sawKey != "pod-key" {

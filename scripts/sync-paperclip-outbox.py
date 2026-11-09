@@ -188,22 +188,39 @@ def takeover_query(workspace_id, issue_id):
             f"(SELECT contact_id FROM founderos_pod_conversations WHERE issue_id = {sql(issue_id)})")
 
 
-def brief_query(issue_id, body):
+def pod_scope(workspace_id):
+    """Only rows of the pod the task belongs to now: a task moved to another
+    client's project never writes into the first client's records (Codex M6 #1)."""
+    return f"pod_id = (SELECT id FROM founderos_client_pods WHERE workspace_id = {sql(workspace_id)})"
+
+
+def brief_query(issue_id, body, workspace_id):
     """A call brief for the meeting this task was opened for (until it has been sent)."""
     return (f"UPDATE founderos_pod_meetings SET brief = {sql(body.strip()[:8000])} "
-            f"WHERE brief_issue_id = {sql(issue_id)} AND brief_sent_at IS NULL")
+            f"WHERE brief_issue_id = {sql(issue_id)} AND brief_sent_at IS NULL AND {pod_scope(workspace_id)}")
 
 
-def coaching_query(issue_id, body):
+def coaching_query(issue_id, body, workspace_id):
     """Coaching notes for the recorded call this task was opened for (until sent)."""
     return (f"UPDATE founderos_pod_meetings SET coaching = {sql(body.strip()[:12000])} "
-            f"WHERE coaching_issue_id = {sql(issue_id)} AND coaching_sent_at IS NULL")
+            f"WHERE coaching_issue_id = {sql(issue_id)} AND coaching_sent_at IS NULL AND {pod_scope(workspace_id)}")
 
 
-def review_query(issue_id, body):
+def review_query(issue_id, body, workspace_id):
     """The weekly pipeline review for the week this task was opened for (until sent)."""
     return (f"UPDATE founderos_pod_weekly SET review = {sql(body.strip()[:16000])} "
-            f"WHERE review_issue_id = {sql(issue_id)} AND review_sent_at IS NULL")
+            f"WHERE review_issue_id = {sql(issue_id)} AND review_sent_at IS NULL AND {pod_scope(workspace_id)}")
+
+
+REPORT_TASKS_QUERY = ("SELECT brief_issue_id AS issue_id, 'brief' AS kind FROM founderos_pod_meetings WHERE brief_issue_id IS NOT NULL "
+                      "UNION ALL SELECT coaching_issue_id, 'coaching' FROM founderos_pod_meetings WHERE coaching_issue_id IS NOT NULL "
+                      "UNION ALL SELECT review_issue_id, 'review' FROM founderos_pod_weekly WHERE review_issue_id IS NOT NULL")
+
+
+def report_docs(kind, docs):
+    """A brief, coaching or review task hands over only its own document: never
+    outreach, prospects, a hand-off or qualification (Codex M6 #3)."""
+    return [d for d in docs if d.get("key") == kind]
 
 
 def recipient_matches_query(addr):
@@ -291,6 +308,7 @@ def main():
     imported = 0
     pods = {p["project_id"]: p for p in psql_rows(db, POD_ROUTES_QUERY)}
     conversations = {r["issue_id"] for r in psql_rows(db, CONVERSATIONS_QUERY)}
+    report_tasks = {r["issue_id"]: r["kind"] for r in psql_rows(db, REPORT_TASKS_QUERY)}
     pod_senders = {p["workspace_id"]: p["sender_name"] for p in pods.values()}
     project_names = project_names_of(paperclip(pc, "GET", f"/api/companies/{company}/projects"))
     for issue in issues:
@@ -309,6 +327,9 @@ def main():
         outbox_ws = rt["outbox_ws"] or ws
         docs = paperclip(pc, "GET", f"/api/issues/{issue['id']}/documents")
         docs = docs.get("documents", docs) if isinstance(docs, dict) else docs
+        kind = report_tasks.get(issue["id"])
+        if kind:
+            docs = report_docs(kind, docs)
         if rt["pod"] and not dry:
             for d in docs:
                 text = d.get("body") or (d.get("latestRevision") or {}).get("body") or ""
@@ -317,11 +338,11 @@ def main():
                     # A person takes it from here: the AI stops replying in this conversation.
                     psql(db, takeover_query(rt["outbox_ws"], issue["id"]))
                 elif d.get("key") == "brief" and text.strip():
-                    psql(db, brief_query(issue["id"], text))
+                    psql(db, brief_query(issue["id"], text, rt["outbox_ws"]))
                 elif d.get("key") == "coaching" and text.strip():
-                    psql(db, coaching_query(issue["id"], text))
+                    psql(db, coaching_query(issue["id"], text, rt["outbox_ws"]))
                 elif d.get("key") == "review" and text.strip():
-                    psql(db, review_query(issue["id"], text))
+                    psql(db, review_query(issue["id"], text, rt["outbox_ws"]))
                 elif d.get("key") == "qualification":
                     upd = qualification_update(rt["outbox_ws"], issue["id"], text)
                     if upd:

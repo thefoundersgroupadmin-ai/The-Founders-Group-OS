@@ -18,7 +18,7 @@ describe('the operator theme selection', () => {
   // FounderOS v1 lib/theme.ts THEMES, in its order. Its 'dark' (Terminal) keeps
   // the bridge's id 'terminal'; every other id is production's.
   it("offers every production skin, in production's order, and ignores unknown stored values", () => {
-    expect(FOUNDEROS_THEMES).toEqual(['mono', 'mono-light', 'terminal', 'light', 'midnight', 'ember', 'glass', 'glass-light']);
+    expect(FOUNDEROS_THEMES).toEqual(['mono', 'mono-light', 'terminal', 'light', 'midnight', 'ember', 'glass', 'glass-light', 'portal']);
     localStorage.setItem(STORAGE_KEY, 'neon');
     expect(readStoredTheme()).toBe('mono');
     for (const t of FOUNDEROS_THEMES) {
@@ -43,7 +43,9 @@ describe('the operator theme selection', () => {
       'mono-light': { name: 'Daylight', blurb: 'brain blue on cool white', swatch: ['#f2f6f9', '#4db3de', '#16222c'] },
       // TFG's own skin (2026-11-07): frosted glass over navy, the website's gold
       glass: { name: 'Glass', blurb: 'frosted panels over dark greenery, TFG gold', swatch: ['#061a10', '#d9b36c', '#eef1fa'] },
-      'glass-light': { name: 'Glass Light', blurb: 'milky glass over sunlit leaves', swatch: ['#e8efe4', '#a0732a', '#10241a'] }
+      'glass-light': { name: 'Glass Light', blurb: 'milky glass over sunlit leaves', swatch: ['#e8efe4', '#a0732a', '#10241a'] },
+      // the client portal's canvas (owner, 9 Nov 2026)
+      portal: { name: 'Portal', blurb: "frosted glass over the client portal's fading colours", swatch: ['#efe7da', '#a8874f', '#1a1a1c'] }
     });
   });
 
@@ -57,7 +59,7 @@ describe('the operator theme selection', () => {
   // BusinessOS components under /os follow `.dark`; a light skin must drop it
   // or they paint dark panels on Daylight's white canvas.
   it('light skins (Daylight, Clay) leave the document light', () => {
-    expect(FOUNDEROS_THEMES.filter((t) => !isDarkTheme(t))).toEqual(['mono-light', 'light', 'glass-light']);
+    expect(FOUNDEROS_THEMES.filter((t) => !isDarkTheme(t))).toEqual(['mono-light', 'light', 'glass-light', 'portal']);
     document.documentElement.classList.add('dark');
     applyFounderosTheme('mono-light');
     expect(document.documentElement.getAttribute('data-founderos-theme')).toBe('mono-light');
@@ -386,6 +388,35 @@ describe('Glass Light skin', () => {
 
   it('keeps menus and dialogs near-opaque', () => {
     const o = block(":root[data-founderos-theme='glass-light'] /* overlays */");
+    for (const t of ['--popover', '--bos-v2-layer-background-modal']) {
+      const a = Number(/rgba\([^)]*,\s*([0-9.]+)\)/.exec(o[t] ?? '')?.[1]);
+      expect(a, t).toBeGreaterThanOrEqual(0.9);
+    }
+  });
+});
+
+// Portal (owner, 9 Nov 2026): the client portal's fading colours behind TFG OS.
+describe('Portal skin', () => {
+  it('is a light skin with see-through white surfaces and charcoal text', () => {
+    expect(isDarkTheme('portal')).toBe(false);
+    const g = block(":root[data-founderos-theme='portal']");
+    for (const t of ['--bn-bg-2', '--bn-surface', '--bn-surface-2']) {
+      expect(g[t], t).toMatch(/^rgba\(255, 255, 255,/);
+    }
+    expect(g['--bn-text']).toBe('#1a1a1c');
+    expect(g['--bn-accent']).toBe('#a8874f');
+  });
+
+  it('paints the portal glows and frosts the chrome', () => {
+    expect(css).toMatch(/:root\[data-founderos-theme='portal'\] body \{[^}]*radial-gradient\(900px 700px at 8% 4%, rgba\(232, 196, 132/);
+    for (const sel of ['.bn-sidebar', '.bn-topbar', '.bn-slab', '.bn-card']) {
+      const re = new RegExp(`:root\\[data-founderos-theme='portal'\\][^{]*\\${sel}[^{]*\\{[^}]*backdrop-filter:\\s*blur`);
+      expect(css, sel).toMatch(re);
+    }
+  });
+
+  it('keeps menus and dialogs near-opaque', () => {
+    const o = block(":root[data-founderos-theme='portal'] /* overlays */");
     for (const t of ['--popover', '--bos-v2-layer-background-modal']) {
       const a = Number(/rgba\([^)]*,\s*([0-9.]+)\)/.exec(o[t] ?? '')?.[1]);
       expect(a, t).toBeGreaterThanOrEqual(0.9);

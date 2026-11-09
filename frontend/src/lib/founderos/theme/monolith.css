@@ -246,6 +246,35 @@
   --bn-insight-ink: #10241a;
 }
 
+:root[data-founderos-theme='portal'] {
+  color-scheme: light;
+  --bn-bg: rgba(255, 255, 255, 0.42);
+  --bn-bg-2: rgba(255, 255, 255, 0.38);
+  --bn-surface: rgba(255, 255, 255, 0.52);
+  --bn-surface-2: rgba(255, 255, 255, 0.7);
+  --bn-surface-3: rgba(255, 255, 255, 0.85);
+  --bn-border: rgba(26, 26, 28, 0.11);
+  --bn-border-strong: rgba(26, 26, 28, 0.22);
+  --bn-text: #1a1a1c;
+  --bn-text-2: #4a4740;
+  --bn-text-3: #6f6a60;
+  --bn-accent: #a8874f;
+  --bn-accent-2: #8e7244;
+  --bn-accent-ink: #fffaf0;
+  --bn-accent-soft: rgba(168, 135, 79, 0.13);
+  --bn-accent-line: rgba(168, 135, 79, 0.36);
+  --bn-ok: #2f7a47;
+  --bn-warn: #a8670f;
+  --bn-err: #c4372b;
+  --bn-grid: transparent;
+  --bn-hairline: rgba(26, 26, 28, 0.07);
+  --bn-brain-1: #6d5cf0;
+  --bn-brain-2: #2b8fd8;
+  --bn-brain-3: #a8874f;
+  --bn-glass-edge: inset 0 1px 0 rgba(255, 255, 255, 0.8);
+  --bn-insight-ink: #1a1a1c;
+}
+
 :root[data-founderos-theme] {
   /* FounderOS v1 radius scale (tailwind.config.ts borderRadius + .os-slab):
      chips 5, controls 6, cards 8, panels 10, tiles/slab cards 12, slab 28. */
@@ -384,6 +413,7 @@
 :root[data-founderos-theme='midnight'] .bn-kg,
 :root[data-founderos-theme='glass'] .bn-kg,
 :root[data-founderos-theme='glass-light'] .bn-kg,
+:root[data-founderos-theme='portal'] .bn-kg,
 :root[data-founderos-theme='ember'] .bn-kg {
   --bn-kg-tool: var(--bn-brain-2);
 }
@@ -409,7 +439,8 @@
   --fn-s0: #1d8fd6; --fn-s1: #7a5cf0; --fn-s2: #a98f1c; --fn-s3: #0f9c8a; --fn-s4: #0b8a52; --fn-s5: #c04a8a; --fn-s6: #b5651d;
 }
 :root[data-founderos-theme='mono-light'] .bn-fn,
-:root[data-founderos-theme='glass-light'] .bn-fn {
+:root[data-founderos-theme='glass-light'] .bn-fn,
+:root[data-founderos-theme='portal'] .bn-fn {
   --fn-hot: #d92d20; --fn-warm: #b7791f; --fn-cold: #6b83a3;
   --fn-s0: #4db3de; --fn-s1: #6d5cf0; --fn-s2: #b7791f; --fn-s3: #0f9c8a; --fn-s4: #17924e; --fn-s5: #c04a8a; --fn-s6: #7a828c;
 }
@@ -508,4 +539,96 @@
 }
 :root[data-founderos-theme='glass-light'] .bn-mark-adaptive {
   filter: brightness(0);
+}
+
+/* ── Portal skin (owner, 9 Nov 2026): the client portal's canvas, a warm cream
+   gradient under soft gold, rose, sage and lilac glows that drift slowly, with
+   milky frosted glass over it. */
+:root[data-founderos-theme='portal'] {
+  background-color: #efe7da;
+}
+:root[data-founderos-theme='portal'] body {
+  background:
+    radial-gradient(900px 700px at 8% 4%, rgba(232, 196, 132, 0.78), transparent 60%),
+    radial-gradient(800px 640px at 96% 18%, rgba(222, 168, 186, 0.62), transparent 62%),
+    radial-gradient(900px 760px at 70% 98%, rgba(156, 190, 172, 0.58), transparent 60%),
+    radial-gradient(700px 600px at 18% 86%, rgba(190, 172, 224, 0.5), transparent 62%),
+    linear-gradient(160deg, #f6f0e6 0%, #eee4d4 55%, #e9e0d6 100%) fixed;
+  background-attachment: fixed;
+}
+:root[data-founderos-theme='portal'] body::before {
+  content: '';
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  z-index: 0;
+  background:
+    radial-gradient(420px 420px at 30% 30%, rgba(255, 236, 196, 0.55), transparent 70%),
+    radial-gradient(380px 380px at 75% 60%, rgba(255, 214, 222, 0.4), transparent 70%);
+  filter: blur(10px);
+  animation: bn-portal-glow 26s ease-in-out infinite alternate;
+}
+@keyframes bn-portal-glow {
+  to {
+    transform: translate3d(-4%, 3%, 0) scale(1.08);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  :root[data-founderos-theme='portal'] body::before {
+    animation: none;
+  }
+}
+:root[data-founderos-theme='portal'] .bn-os {
+  background: transparent;
+  position: relative;
+  z-index: 1;
+}
+:root[data-founderos-theme='portal'] .bn-sidebar,
+:root[data-founderos-theme='portal'] .bn-topbar,
+:root[data-founderos-theme='portal'] .bn-slab,
+:root[data-founderos-theme='portal'] .bn-card {
+  -webkit-backdrop-filter: blur(22px) saturate(170%);
+  backdrop-filter: blur(22px) saturate(170%);
+}
+:root[data-founderos-theme='portal'] .bn-sidebar {
+  background: rgba(255, 255, 255, 0.46);
+  border-color: rgba(255, 255, 255, 0.7);
+}
+:root[data-founderos-theme='portal'] .bn-topbar {
+  background: rgba(255, 255, 255, 0.4);
+  border-color: rgba(255, 255, 255, 0.7);
+}
+:root[data-founderos-theme='portal'] .bn-slab {
+  background: rgba(255, 255, 255, 0.42);
+  border-color: rgba(255, 255, 255, 0.75);
+  box-shadow: var(--bn-glass-edge), 0 10px 40px -12px rgba(74, 56, 24, 0.22);
+}
+:root[data-founderos-theme='portal'] .bn-card,
+:root[data-founderos-theme='portal'] .bn-slab [data-part='card'] {
+  box-shadow: var(--bn-glass-edge);
+}
+:root[data-founderos-theme='portal'] .bn-slab .bn-card {
+  -webkit-backdrop-filter: none;
+  backdrop-filter: none;
+}
+:root[data-founderos-theme='portal'] /* overlays */ {
+  --popover: rgba(251, 248, 243, 0.95);
+  --bos-v2-layer-background-modal: rgba(251, 248, 243, 0.95);
+}
+:root[data-founderos-theme='portal'] ::-webkit-scrollbar-thumb {
+  border-color: transparent;
+  background-clip: padding-box;
+}
+:root[data-founderos-theme='portal'] .bn-mark-adaptive {
+  filter: brightness(0);
+}
+@media (prefers-reduced-transparency: reduce) {
+  :root[data-founderos-theme='portal'] body::before {
+    display: none;
+  }
+  :root[data-founderos-theme='portal'] .bn-sidebar,
+  :root[data-founderos-theme='portal'] .bn-topbar,
+  :root[data-founderos-theme='portal'] .bn-slab {
+    background: #fbf8f3;
+  }
 }

@@ -3,14 +3,14 @@
 // from the Topbar's theme menu. Production calls Terminal 'dark'; the bridge
 // keeps its own id 'terminal' (pages key colours off it) and reads a stored
 // 'dark' as Terminal. The token blocks live in monolith.css.
-export const FOUNDEROS_THEMES = ['mono', 'mono-light', 'terminal', 'light', 'midnight', 'ember', 'glass', 'glass-light'] as const;
+export const FOUNDEROS_THEMES = ['mono', 'mono-light', 'terminal', 'light', 'midnight', 'ember', 'glass', 'glass-light', 'portal'] as const;
 export type FounderosTheme = (typeof FOUNDEROS_THEMES)[number];
 export const DEFAULT_FOUNDEROS_THEME: FounderosTheme = 'mono';
 export const STORAGE_KEY = 'founderos-theme';
 
 /** The skins painted on a light canvas. BusinessOS's own `.dark` styles must
  *  be off under them, or its components paint dark panels on a white page. */
-const LIGHT_THEMES: readonly FounderosTheme[] = ['mono-light', 'light', 'glass-light'];
+const LIGHT_THEMES: readonly FounderosTheme[] = ['mono-light', 'light', 'glass-light', 'portal'];
 
 /** Picker metadata (FounderOS v1 THEME_META): name, one-line feel, [bg, accent, text] swatch. */
 export const THEME_META: Record<FounderosTheme, { name: string; blurb: string; swatch: [string, string, string] }> = {
@@ -21,7 +21,8 @@ export const THEME_META: Record<FounderosTheme, { name: string; blurb: string; s
 	mono: { name: 'Monolith', blurb: 'white on black, color = status only', swatch: ['#0a0a0a', '#f2f2f2', '#2fd36f'] },
 	'mono-light': { name: 'Daylight', blurb: 'brain blue on cool white', swatch: ['#f2f6f9', '#4db3de', '#16222c'] },
 	glass: { name: 'Glass', blurb: 'frosted panels over dark greenery, TFG gold', swatch: ['#061a10', '#d9b36c', '#eef1fa'] },
-	'glass-light': { name: 'Glass Light', blurb: 'milky glass over sunlit leaves', swatch: ['#e8efe4', '#a0732a', '#10241a'] }
+	'glass-light': { name: 'Glass Light', blurb: 'milky glass over sunlit leaves', swatch: ['#e8efe4', '#a0732a', '#10241a'] },
+	portal: { name: 'Portal', blurb: "frosted glass over the client portal's fading colours", swatch: ['#efe7da', '#a8874f', '#1a1a1c'] }
 };
 
 /** Production's id for a skin the bridge names differently. */

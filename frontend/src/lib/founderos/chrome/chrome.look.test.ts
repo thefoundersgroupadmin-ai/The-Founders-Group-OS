@@ -72,20 +72,14 @@ describe('Sidebar look', () => {
 });
 
 describe('Topbar look', () => {
-	it('theme, search and Conductor are 30px icon buttons on the control lens, then the emblem', () => {
+	it('search and Conductor are 30px icon buttons on the control lens, then the emblem', () => {
 		const { container } = render(Topbar, { pathname: '/os' });
-		const theme = screen.getByRole('button', { name: 'Choose a theme' });
 		const search = screen.getByRole('button', { name: /command palette/i });
 		const agent = screen.getByRole('button', { name: /open the conductor/i });
-		// ThemeToggle.tsx is a plain pressable (no data-lens), the other two ride the control lens
-		for (const b of [search, agent]) expect(b.getAttribute('data-lens')).toBe('c');
-		for (const b of [theme, search, agent]) {
-			for (const c of ['bn-pressable', 'h-[30px]', 'w-[30px]', 'border']) expect(cls(b)).toContain(c);
+		for (const b of [search, agent]) {
+			expect(b.getAttribute('data-lens')).toBe('c');
+			for (const c of ['bn-pressable', 'h-[30px]', 'w-[30px]', 'border', 'rounded-[6px]']) expect(cls(b)).toContain(c);
 		}
-		expect(cls(theme)).toContain('rounded-[5px]');
-		expect(cls(search)).toContain('rounded-[6px]');
-		expect(cls(agent)).toContain('rounded-[6px]');
-		expect(theme.textContent!.trim()).toBe('');
 		const mark = container.querySelector('img[alt="Founder OS"]')!;
 		expect(mark.getAttribute('width')).toBe('26');
 		expect(agent.compareDocumentPosition(mark) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();

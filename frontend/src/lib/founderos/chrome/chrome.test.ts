@@ -13,7 +13,6 @@ import Sidebar from './Sidebar.svelte';
 import Topbar from './Topbar.svelte';
 import { breadcrumbFor, isOperatorView, PALETTE_EVENT, RAIL_KEY } from './chrome';
 import { CONDUCTOR_OPEN_EVENT } from './conductor';
-import { STORAGE_KEY as THEME_KEY } from '../theme/theme';
 
 beforeEach(() => localStorage.clear());
 
@@ -120,8 +119,8 @@ describe('Topbar', () => {
 	});
 });
 
-describe('Topbar: Conductor button and theme toggle (spec 6.20)', () => {
-	beforeEach(() => document.documentElement.setAttribute('data-founderos-theme', 'mono'));
+describe('Topbar: Conductor button (spec 6.20)', () => {
+	beforeEach(() => document.documentElement.setAttribute('data-founderos-theme', 'portal'));
 
 	it('the agent button opens the Conductor dock', async () => {
 		render(Topbar, { pathname: '/os' });
@@ -138,53 +137,11 @@ describe('Topbar: Conductor button and theme toggle (spec 6.20)', () => {
 		expect(labels.findIndex((l) => /conductor/i.test(l))).toBeGreaterThan(labels.findIndex((l) => /command palette/i.test(l)));
 	});
 
-	// FounderOS v1 components/ThemeToggle.tsx: a palette chip that opens the
-	// theme menu, every skin with its swatch trio, name and one-line feel.
-	it('the palette chip opens the theme menu listing every skin, the active one checked', async () => {
+	// One interface for everyone (owner, 9 Nov 2026): Portal is the only skin, so the
+	// top bar no longer offers a theme picker.
+	it('offers no theme picker', () => {
 		render(Topbar, { pathname: '/os' });
-		const chip = screen.getByRole('button', { name: 'Choose a theme' });
-		expect(chip.getAttribute('title')).toBe('Choose a theme');
-		expect(chip.getAttribute('aria-expanded')).toBe('false');
-		expect(screen.queryByRole('menu')).toBeNull();
-		await fireEvent.click(chip);
-		expect(chip.getAttribute('aria-expanded')).toBe('true');
-		const menu = screen.getByRole('menu');
-		expect(menu.querySelector('[data-part="menu-title"]')!.textContent).toBe('Theme');
-		const items = screen.getAllByRole('menuitemradio');
-		expect(items.map((i) => i.querySelector('[data-part="name"]')!.textContent)).toEqual(['Monolith', 'Daylight', 'Terminal', 'Clay', 'Midnight', 'Ember', 'Glass', 'Glass Light']);
-		expect(items[0].getAttribute('aria-checked')).toBe('true');
-		expect(items[0].querySelectorAll('[data-part="swatch"] > span')).toHaveLength(3);
-		expect(items[3].textContent).toContain('warm paper with clay orange');
-	});
-
-	it('picking a skin applies it, remembers it and closes the menu', async () => {
-		render(Topbar, { pathname: '/os' });
-		await fireEvent.click(screen.getByRole('button', { name: 'Choose a theme' }));
-		await fireEvent.click(screen.getByRole('menuitemradio', { name: /Midnight/ }));
-		expect(document.documentElement.getAttribute('data-founderos-theme')).toBe('midnight');
-		expect(localStorage.getItem(THEME_KEY)).toBe('midnight');
-		expect(screen.queryByRole('menu')).toBeNull();
-		await fireEvent.click(screen.getByRole('button', { name: 'Choose a theme' }));
-		expect(screen.getByRole('menuitemradio', { name: /Midnight/ }).getAttribute('aria-checked')).toBe('true');
-	});
-
-	it('Escape or a click outside closes the menu', async () => {
-		render(Topbar, { pathname: '/os' });
-		const chip = screen.getByRole('button', { name: 'Choose a theme' });
-		await fireEvent.click(chip);
-		await fireEvent.keyDown(window, { key: 'Escape' });
-		expect(screen.queryByRole('menu')).toBeNull();
-		await fireEvent.click(chip);
-		await fireEvent.pointerDown(document.body);
-		expect(screen.queryByRole('menu')).toBeNull();
-	});
-
-	it('starts from the theme already on the page', async () => {
-		document.documentElement.setAttribute('data-founderos-theme', 'terminal');
-		render(Topbar, { pathname: '/os' });
-		await tick();
-		await fireEvent.click(screen.getByRole('button', { name: 'Choose a theme' }));
-		expect(screen.getByRole('menuitemradio', { name: /Terminal/ }).getAttribute('aria-checked')).toBe('true');
+		expect(screen.queryByRole('button', { name: 'Choose a theme' })).toBeNull();
 	});
 });
 

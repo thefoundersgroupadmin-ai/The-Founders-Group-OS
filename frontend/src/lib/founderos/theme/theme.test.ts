@@ -10,62 +10,40 @@ describe('the operator theme selection', () => {
     document.documentElement.classList.remove('dark');
   });
 
-  it('defaults to Monolith Signal, like FounderOS v1', () => {
-    expect(DEFAULT_FOUNDEROS_THEME).toBe('mono');
-    expect(readStoredTheme()).toBe('mono');
+  // One interface for everyone (owner, 9 Nov 2026): Portal is the only skin.
+  it('Portal is the only skin, and the default', () => {
+    expect(FOUNDEROS_THEMES).toEqual(['portal']);
+    expect(DEFAULT_FOUNDEROS_THEME).toBe('portal');
+    expect(readStoredTheme()).toBe('portal');
   });
 
-  // FounderOS v1 lib/theme.ts THEMES, in its order. Its 'dark' (Terminal) keeps
-  // the bridge's id 'terminal'; every other id is production's.
-  it("offers every production skin, in production's order, and ignores unknown stored values", () => {
-    expect(FOUNDEROS_THEMES).toEqual(['mono', 'mono-light', 'terminal', 'light', 'midnight', 'ember', 'glass', 'glass-light', 'portal']);
-    localStorage.setItem(STORAGE_KEY, 'neon');
-    expect(readStoredTheme()).toBe('mono');
-    for (const t of FOUNDEROS_THEMES) {
-      localStorage.setItem(STORAGE_KEY, t);
-      expect(readStoredTheme()).toBe(t);
+  it('any earlier stored choice, or an unknown value, resolves to Portal', () => {
+    for (const old of ['mono', 'mono-light', 'terminal', 'dark', 'light', 'midnight', 'ember', 'glass', 'glass-light', 'neon']) {
+      localStorage.setItem(STORAGE_KEY, old);
+      expect(readStoredTheme()).toBe('portal');
     }
   });
 
-  it("reads production's id for Terminal ('dark') as terminal", () => {
-    localStorage.setItem(STORAGE_KEY, 'dark');
-    expect(readStoredTheme()).toBe('terminal');
-  });
-
-  it('picker metadata matches FounderOS v1 THEME_META: name, one-line feel, [bg, accent, text] swatch', () => {
+  it('picker metadata lists only Portal', () => {
     expect(THEME_META).toEqual({
-      terminal: { name: 'Terminal', blurb: 'phosphor green on near-black', swatch: ['#050807', '#3df08c', '#e4efe6'] },
-      light: { name: 'Clay', blurb: 'warm paper with clay orange', swatch: ['#ece3d2', '#c96442', '#2b2722'] },
-      midnight: { name: 'Midnight', blurb: 'deep navy, signal blue', swatch: ['#070d1f', '#5ec9f8', '#e8ecf9'] },
-      ember: { name: 'Ember', blurb: 'coal dark, vault orange', swatch: ['#0c0806', '#e35c35', '#f2e9e2'] },
-      mono: { name: 'Monolith', blurb: 'white on black, color = status only', swatch: ['#0a0a0a', '#f2f2f2', '#2fd36f'] },
-      // G-Brain is retired on the bridge; the blurb names the colour, not the product
-      'mono-light': { name: 'Daylight', blurb: 'brain blue on cool white', swatch: ['#f2f6f9', '#4db3de', '#16222c'] },
-      // TFG's own skin (2026-11-07): frosted glass over navy, the website's gold
-      glass: { name: 'Glass', blurb: 'frosted panels over dark greenery, TFG gold', swatch: ['#061a10', '#d9b36c', '#eef1fa'] },
-      'glass-light': { name: 'Glass Light', blurb: 'milky glass over sunlit leaves', swatch: ['#e8efe4', '#a0732a', '#10241a'] },
-      // the client portal's canvas (owner, 9 Nov 2026)
       portal: { name: 'Portal', blurb: "frosted glass over the client portal's fading colours", swatch: ['#efe7da', '#a8874f', '#1a1a1c'] }
     });
   });
 
-  it('applies a dark theme as a data attribute on a dark document and persists it', () => {
-    applyFounderosTheme('terminal');
-    expect(document.documentElement.getAttribute('data-founderos-theme')).toBe('terminal');
-    expect(document.documentElement.classList.contains('dark')).toBe(true);
-    expect(localStorage.getItem(STORAGE_KEY)).toBe('terminal');
+  it('applies Portal as a data attribute and persists it', () => {
+    applyFounderosTheme('portal');
+    expect(document.documentElement.getAttribute('data-founderos-theme')).toBe('portal');
+    expect(localStorage.getItem(STORAGE_KEY)).toBe('portal');
   });
 
   // BusinessOS components under /os follow `.dark`; a light skin must drop it
   // or they paint dark panels on Daylight's white canvas.
-  it('light skins (Daylight, Clay) leave the document light', () => {
-    expect(FOUNDEROS_THEMES.filter((t) => !isDarkTheme(t))).toEqual(['mono-light', 'light', 'glass-light', 'portal']);
+  it('Portal is a light skin and leaves the document light', () => {
+    expect(isDarkTheme('portal')).toBe(false);
     document.documentElement.classList.add('dark');
-    applyFounderosTheme('mono-light');
-    expect(document.documentElement.getAttribute('data-founderos-theme')).toBe('mono-light');
+    applyFounderosTheme('portal');
+    expect(document.documentElement.getAttribute('data-founderos-theme')).toBe('portal');
     expect(document.documentElement.classList.contains('dark')).toBe(false);
-    applyFounderosTheme('midnight');
-    expect(document.documentElement.classList.contains('dark')).toBe(true);
   });
 });
 
@@ -305,13 +283,13 @@ describe('first paint', () => {
       new Function(FOUNDEROS_THEME_INIT_SCRIPT)();
       return [root.getAttribute('data-founderos-theme'), root.classList.contains('dark')];
     };
-    expect(run('/os/comms')).toEqual(['mono', true]);
-    expect(run('/os')).toEqual(['mono', true]);
+    expect(run('/os/comms')).toEqual(['portal', false]);
+    expect(run('/os')).toEqual(['portal', false]);
     expect(run('/window')).toEqual([null, false]);
     localStorage.setItem(STORAGE_KEY, 'mono-light');
-    expect(run('/os/usage')).toEqual(['mono-light', false]);
+    expect(run('/os/usage')).toEqual(['portal', false]);
     localStorage.setItem(STORAGE_KEY, 'dark');
-    expect(run('/os/usage')).toEqual(['terminal', true]);
+    expect(run('/os/usage')).toEqual(['portal', false]);
     localStorage.removeItem(STORAGE_KEY);
     expect(run('/osa')).toEqual([null, false]);
   });
@@ -328,8 +306,9 @@ describe('first paint', () => {
 // with a gold and blue glow. Surfaces are see-through and the main chrome
 // blurs what is behind it; menus and dialogs stay near-opaque to read.
 describe('Glass skin', () => {
-  it('is a dark skin', () => {
-    expect(isDarkTheme('glass')).toBe(true);
+  it('is no longer selectable: a stored Glass opens as Portal', () => {
+    localStorage.setItem(STORAGE_KEY, 'glass');
+    expect(readStoredTheme()).toBe('portal');
   });
 
   it('has see-through surfaces and a gold accent', () => {
@@ -366,8 +345,9 @@ describe('Glass skin', () => {
 // Glass Light (owner, 7 Nov 2026): milky white glass over a sunlit version of
 // the same greenery, dark text, bronze-gold accent.
 describe('Glass Light skin', () => {
-  it('is a light skin', () => {
-    expect(isDarkTheme('glass-light')).toBe(false);
+  it('is no longer selectable: a stored Glass Light opens as Portal', () => {
+    localStorage.setItem(STORAGE_KEY, 'glass-light');
+    expect(readStoredTheme()).toBe('portal');
   });
 
   it('has see-through white surfaces and dark text', () => {

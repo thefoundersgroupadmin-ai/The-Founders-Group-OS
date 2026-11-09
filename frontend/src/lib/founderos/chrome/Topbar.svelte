@@ -8,7 +8,6 @@
 	import OsMark from '../kit/OsMark.svelte';
 	import { breadcrumbFor, openPalette } from './chrome';
 	import { openConductor } from './conductor';
-	import ThemeToggle from './ThemeToggle.svelte';
 
 	let { pathname }: { pathname: string } = $props();
 	const here = $derived(breadcrumbFor(pathname));
@@ -21,7 +20,6 @@
 		<span class="bn-text">{here}</span>
 	</div>
 	<div class="ml-auto flex items-center gap-2.5">
-		<ThemeToggle />
 		<button
 			type="button"
 			onclick={openPalette}

@@ -237,10 +237,25 @@ export async function signInWithEmail(
       body: JSON.stringify(bodyPayload),
     });
 
-    const data = await response.json();
+    // A request blocked before it reaches sign-in (CORS or CSRF) can come back with
+    // an empty body; say what happened instead of "Unexpected end of JSON input".
+    let parsed = true;
+    const data = await response.json().catch(() => { parsed = false; return {}; });
+
+    if (response.ok && !parsed) {
+      return { error: { message: "Sign in failed: the server sent an unreadable reply. Try again." } };
+    }
 
     if (!response.ok) {
-      return { error: { message: data.error || "Sign in failed" } };
+      const blocked = response.status === 403 && !data.error;
+      const message = typeof data.error === "string" ? data.error : data.error?.message;
+      return {
+        error: {
+          message: blocked
+            ? "Sign-in was blocked by this address's security settings. Use os.thefoundersgroup.net, or ask the admin to allow this address."
+            : message || `Sign in failed (${response.status})`,
+        },
+      };
     }
 
     clearLoggedOut();

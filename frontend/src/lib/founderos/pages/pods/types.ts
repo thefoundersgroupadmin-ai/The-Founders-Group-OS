@@ -44,4 +44,4 @@ export type WeekMetrics = {
 	enquiries: number; aiReplies: number; handoffs: number; meetingsBooked: number; meetingsHeld: number; noShows: number; optOuts: number;
 };
 export type Baseline = { meetingsPerMonth: number; replyRatePct: number; note: string; setAt?: string };
-export type WeeklyBody = { weeks: { week: string; metrics: WeekMetrics; review: string }[]; baseline: Baseline; thisWeek: WeekMetrics };
+export type WeeklyBody = { weeks: { week: string; metrics: WeekMetrics; review: string; corrected?: boolean }[]; baseline: Baseline; thisWeek: WeekMetrics };

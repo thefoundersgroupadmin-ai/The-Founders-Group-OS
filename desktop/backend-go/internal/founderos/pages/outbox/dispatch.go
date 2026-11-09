@@ -21,6 +21,14 @@ type DispatchResult struct {
 }
 
 func DispatchPods(ctx context.Context, pool *pgxpool.Pool, ownDomain string, send SendFunc) (DispatchResult, error) {
+	return DispatchPodsExcept(ctx, pool, ownDomain, send, nil)
+}
+
+// DispatchPodsExcept dispatches every running pod except those in hold (pods
+// whose own calendar could not be read this pass, so a fresh booking could be
+// missed). One pod's trouble never holds another, nor does TFG's own calendar
+// (Codex final review #5).
+func DispatchPodsExcept(ctx context.Context, pool *pgxpool.Pool, ownDomain string, send SendFunc, hold map[string]bool) (DispatchResult, error) {
 	var res DispatchResult
 	rows, err := pool.Query(ctx, `SELECT p.slug, p.sender_name, p.workspace_id::text FROM founderos_client_pods p
 		WHERE p.status IN ('live', 'dry_run') ORDER BY p.slug`)
@@ -43,6 +51,9 @@ func DispatchPods(ctx context.Context, pool *pgxpool.Pool, ownDomain string, sen
 	}
 	var errs []error
 	for _, p := range list {
+		if hold[p.slug] {
+			continue
+		}
 		if err := dispatchPod(ctx, pool, p.slug, p.ws, firstName(p.signer), ownDomain, send, &res); err != nil {
 			errs = append(errs, err)
 		}
@@ -62,8 +73,9 @@ func noteWaiting(ctx context.Context, pool *pgxpool.Pool, ws, id, why string) {
 }
 
 func dispatchPod(ctx context.Context, pool *pgxpool.Pool, slug, ws, signer, ownDomain string, send SendFunc, res *DispatchResult) error {
+	// Replies to people who wrote back go first and do not use up the pass's one outreach send.
 	rows, err := pool.Query(ctx, `SELECT `+cols+` FROM founderos_outbox WHERE workspace_id = $1 AND status = 'pending'
-		ORDER BY created_at, id`, ws)
+		ORDER BY (coalesce(sequence_key, '') = 'reply') DESC, created_at, id`, ws)
 	if err != nil {
 		return err
 	}
@@ -93,12 +105,15 @@ func dispatchPod(ctx context.Context, pool *pgxpool.Pool, slug, ws, signer, ownD
 		}
 		got, err := Approve(ctx, pool, slug, it.ID, Content{Subject: it.Subject, Body: it.Body}, send)
 		switch {
-		case err == nil && got != nil && got.Status == "sent":
-			res.Sent++
-			return nil
-		case err == nil && got != nil && got.Status == "simulated":
-			res.Simulated++
-			return nil
+		case err == nil && got != nil && (got.Status == "sent" || got.Status == "simulated"):
+			if got.Status == "sent" {
+				res.Sent++
+			} else {
+				res.Simulated++
+			}
+			if it.SequenceKey == nil || *it.SequenceKey != "reply" {
+				return nil
+			}
 		case errors.Is(err, ErrHeld), errors.Is(err, ErrAwaitingClient):
 			noteWaiting(ctx, pool, ws, it.ID, "waiting: "+err.Error())
 			res.Waiting++

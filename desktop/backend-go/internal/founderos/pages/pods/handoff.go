@@ -63,7 +63,7 @@ func (s *Store) BundleFiles(ctx context.Context, slug string) (map[string][]byte
 	}
 	if err := s.csvFile(ctx, files, "opt-outs.csv", []string{"address", "domain", "reason", "at"},
 		`SELECT coalesce(address, ''), coalesce(domain, ''), coalesce(reason, ''), to_char(created_at, 'YYYY-MM-DD')
-		 FROM founderos_email_suppression WHERE workspace_id = $1 ORDER BY created_at`, p.WorkspaceID); err != nil {
+		 FROM founderos_email_suppression WHERE workspace_id = $1 OR workspace_id IS NULL ORDER BY created_at`, p.WorkspaceID); err != nil {
 		return nil, err
 	}
 	if err := s.csvFile(ctx, files, "meetings.csv", []string{"starts_at", "title", "attendee", "email", "status", "outcome", "brief", "coaching"},
@@ -71,8 +71,9 @@ func (s *Store) BundleFiles(ctx context.Context, slug string) (map[string][]byte
 		 FROM founderos_pod_meetings WHERE pod_id = $1 ORDER BY starts_at`, p.ID); err != nil {
 		return nil, err
 	}
-	if err := s.csvFile(ctx, files, "approvals.csv", []string{"created_at", "kind", "title", "status"},
-		`SELECT to_char(created_at, 'YYYY-MM-DD'), kind, title, status FROM founderos_client_approvals WHERE pod_id = $1 ORDER BY created_at`, p.ID); err != nil {
+	if err := s.csvFile(ctx, files, "approvals.csv", []string{"created_at", "kind", "title", "status", "approved_wording"},
+		`SELECT to_char(created_at, 'YYYY-MM-DD'), kind, title, status, coalesce(payload::text, '')
+		 FROM founderos_client_approvals WHERE pod_id = $1 ORDER BY created_at`, p.ID); err != nil {
 		return nil, err
 	}
 	if err := s.csvFile(ctx, files, "activity.csv", []string{"at", "kind", "summary"},

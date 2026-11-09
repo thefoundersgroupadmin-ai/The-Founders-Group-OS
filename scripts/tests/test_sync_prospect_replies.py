@@ -69,5 +69,33 @@ class PodRepliesTest(unittest.TestCase):
         self.assertEqual((task["assigneeAgentId"], task["projectId"]), ("ag-bv", "proj-bv"))
 
 
+
+class FinalReviewRepliesTest(unittest.TestCase):
+    """Codex final review #2, #3."""
+
+    def test_seen_ids_are_per_mailbox_and_keep_old_entries(self):
+        seen = {"pod/client-a/<m1@x>", "pod/client-b/<m2@x>", "<legacy@x>"}
+        self.assertEqual(sync.seen_for(seen, "client-a"), {"<m1@x>", "<legacy@x>"})
+        self.assertNotIn("<m1@x>", sync.seen_for(seen, "client-b"))
+
+    def test_each_message_is_recorded_once_per_pod(self):
+        q = sync.message_claim_query("client-a", "<m1@x>", "ana@acme.example", "")
+        self.assertIn("on conflict (pod_id, message_id) do nothing", q)
+        self.assertIn("slug='client-a'", q)
+
+    def test_a_colleague_gets_their_own_contact(self):
+        cid, name, company = sync.sender_contact("c-ana", "Ben@Acme.example", "Acme")
+        self.assertTrue(cid.startswith("c-ana-") and cid != "c-ana")
+        self.assertEqual((name, company), ("Ben", "Acme"))
+        self.assertEqual(cid, sync.sender_contact("c-ana", "ben@acme.example", "Acme")[0])
+        self.assertIn("'ben@acme.example'", sync.sender_contact_query("w", cid, name, "Ben@Acme.example", company))
+
+    def test_after_a_takeover_new_messages_go_to_the_person(self):
+        q = sync.taken_over_query("w-a", ["c1", "c2"])
+        self.assertIn("taken_over_at is not null", q)
+        h = sync.person_handoff_query("client-a", "<m9@x>", "c1", "ana@acme.example", "Re: pricing", "Can we talk?")
+        self.assertIn("'msg:client-a:<m9@x>'", h)
+        self.assertIn("on conflict (issue_id) do nothing", h)
+
 if __name__ == "__main__":
     unittest.main()

@@ -632,9 +632,9 @@ func (c *Connector) RecentWithKey(ctx context.Context, key string, after time.Ti
 		}
 		out = append(out, pg.Items...)
 		if pg.NextCursor == nil || *pg.NextCursor == "" {
-			break
+			return out, nil
 		}
 		cursor = *pg.NextCursor
 	}
-	return out, nil
+	return out, fmt.Errorf("more than %d recordings since %s; only the newest were read", len(out), after.Format("2 Jan"))
 }

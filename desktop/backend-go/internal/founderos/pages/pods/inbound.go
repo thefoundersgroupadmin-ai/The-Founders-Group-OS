@@ -211,6 +211,8 @@ func (s *Store) TaskInbound(ctx context.Context, b TaskBoard) (int, error) {
 			errs = append(errs, err)
 			continue
 		}
+		_ = s.ownTask(ctx, issue, p.ID, "enquiry")
+
 		if _, err := s.Pool.Exec(ctx, `INSERT INTO founderos_pod_conversations (issue_id, workspace_id, contact_id, source)
 			VALUES ($1, $2, $3, 'form') ON CONFLICT DO NOTHING`, issue, p.WorkspaceID, j.contact); err != nil {
 			errs = append(errs, err)
@@ -235,7 +237,8 @@ type Handoff struct {
 // PendingHandoffs lists hand-offs not yet emailed.
 func (s *Store) PendingHandoffs(ctx context.Context) ([]Handoff, error) {
 	rows, err := s.Pool.Query(ctx, `SELECT h.id, p.id::text, p.client_name, p.handoff_email, h.summary FROM founderos_pod_handoffs h
-		JOIN founderos_client_pods p ON p.id = h.pod_id WHERE h.notified_at IS NULL AND h.attempts < 5 ORDER BY h.created_at LIMIT 20`)
+		JOIN founderos_client_pods p ON p.id = h.pod_id WHERE h.notified_at IS NULL AND h.attempts < 5
+		AND p.status <> 'handed_over' ORDER BY h.created_at LIMIT 20`)
 	if err != nil {
 		return nil, err
 	}

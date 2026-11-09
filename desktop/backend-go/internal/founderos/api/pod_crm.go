@@ -45,7 +45,9 @@ func syncPodCRMs(ctx context.Context, d *Deps, st *pods.Store) (int, error) {
 	total := 0
 	var errs []error
 	for _, p := range list {
-		if p.Status == pods.StatusSetup {
+		// Only real work reaches the client's CRM: never a test run's contacts or
+		// simulated emails, and nothing after hand-over (Codex final review #7).
+		if p.Status != pods.StatusLive && p.Status != pods.StatusPaused {
 			continue
 		}
 		crm := podCRM(d, p)
@@ -123,7 +125,13 @@ func registerPodCRM(s *gin.RouterGroup, d *Deps, pod func(*gin.Context) (*pods.S
 			podError(c, err)
 			return
 		}
-		_ = st.Log(c.Request.Context(), p.ID, "settings", "CRM connected ("+in.Provider+")", "")
+		// A new connection may be another account: record ids from the old one
+		// must never be written to (Codex final review #4). Start the mapping afresh.
+		if _, err := d.Pool.Exec(c.Request.Context(), `DELETE FROM founderos_pod_crm_ids WHERE pod_id = $1`, p.ID); err != nil {
+			podError(c, err)
+			return
+		}
+		_ = st.Log(c.Request.Context(), p.ID, "settings", "CRM connected ("+in.Provider+"); records will be written to this account from scratch", "")
 		c.Header("Cache-Control", "no-store")
 		reply(c, st, p.Slug)
 	})

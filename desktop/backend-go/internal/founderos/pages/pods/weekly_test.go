@@ -102,7 +102,7 @@ func TestLastWeeksResultsAreCountedAndReviewedOncePerWeek(t *testing.T) {
 	if !strings.Contains(body, "Good week") || !strings.Contains(body, "meetings booked: 1") {
 		t.Fatalf("email body: %s", body)
 	}
-	if err := s.ReviewDelivered(ctx, list[0], ""); err != nil {
+	if err := s.ReviewDelivered(ctx, list[0], "", false); err != nil {
 		t.Fatal(err)
 	}
 	if again, _ := s.ClaimReviews(ctx); len(again) != 0 {
@@ -167,4 +167,20 @@ type failingTasks struct{}
 
 func (failingTasks) CreateTask(context.Context, string, string, string, string) (string, error) {
 	return "", errors.New("board down")
+}
+
+// Codex final review #9: a review whose numbers changed after it was written is flagged.
+func TestAReviewIsFlaggedWhenItsNumbersChangeLater(t *testing.T) {
+	s := &Store{Pool: catalogdb.TestDB(t)}
+	ctx := context.Background()
+	p := readyPod(t, s, "Brightvale")
+	if _, err := s.Pool.Exec(ctx, `INSERT INTO founderos_pod_weekly (pod_id, week_start, metrics, review, review_metrics)
+		VALUES ($1, '2026-11-02', '{"meetingsHeld":1}', 'One call held', '{"meetingsHeld":1}'),
+		       ($1, '2026-10-26', '{"meetingsHeld":2}', 'One call held', '{"meetingsHeld":1}')`, p.ID); err != nil {
+		t.Fatal(err)
+	}
+	weeks, err := s.Weeks(ctx, p.ID, 5)
+	if err != nil || len(weeks) != 2 || weeks[0].Corrected || !weeks[1].Corrected {
+		t.Fatalf("corrected flags: %+v %v", weeks, err)
+	}
 }

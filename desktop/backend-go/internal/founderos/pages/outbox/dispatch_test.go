@@ -50,3 +50,24 @@ func TestDispatchSendsOneScreenedEmailPerPodPerPassAndSkipsPodsNotRunning(t *tes
 		t.Fatal("a screened-out email does not say why it is waiting")
 	}
 }
+
+// Codex final review #5: a pod whose calendar could not be read is held; the others still send.
+func TestAPodWithAnUnreadableCalendarIsHeldAlone(t *testing.T) {
+	pool := catalogdb.TestDB(t)
+	ctx := context.Background()
+	a := podFixture(t, pool, "client-alpha", "live")
+	b := podFixture(t, pool, "client-bravo", "live")
+	if _, err := pool.Exec(ctx, `UPDATE founderos_client_pods SET sender_name = 'Sam'`); err != nil {
+		t.Fatal(err)
+	}
+	a("a-1", "priya@brightvale.example")
+	b("b-1", "jo@oakfield.example")
+	if _, err := pool.Exec(ctx, `UPDATE founderos_outbox SET body = $1`, signedBody); err != nil {
+		t.Fatal(err)
+	}
+	got, send := recorder()
+	res, err := DispatchPodsExcept(ctx, pool, "thefoundersgroup.net", send, map[string]bool{"client-alpha": true})
+	if err != nil || res.Sent != 1 || len(*got) != 1 || (*got)[0].To != "jo@oakfield.example" {
+		t.Fatalf("held dispatch: %+v %+v %v", *got, res, err)
+	}
+}

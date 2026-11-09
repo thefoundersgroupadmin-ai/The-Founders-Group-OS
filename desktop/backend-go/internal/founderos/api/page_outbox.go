@@ -19,6 +19,7 @@ import (
 	"github.com/rhl/businessos-backend/internal/founderos/guard"
 	"github.com/rhl/businessos-backend/internal/founderos/pages/bookings"
 	"github.com/rhl/businessos-backend/internal/founderos/pages/outbox"
+	"github.com/rhl/businessos-backend/internal/founderos/pages/pods"
 )
 
 // /os/outbox: agent-drafted email waiting for the operator (migration 166).
@@ -104,6 +105,19 @@ func startAutoFollowUps(d *Deps) {
 			defer t.Stop()
 			for range t.C {
 				ctx, cancel := context.WithTimeout(context.Background(), 4*time.Minute)
+				// Client pods first, independent of TFG's own calendar: each pod's
+				// bookings are read just before its dispatch; a pod whose calendar is
+				// unreadable is held, never the others (Codex final review #5).
+				{
+					st := &pods.Store{Pool: d.Pool}
+					_, hold, cerr := readPodCalendarsHold(ctx, d, st)
+					if cerr != nil {
+						slog.Warn("founderos pods: some client calendars unreadable; those pods held", "held", len(hold), "err", cerr)
+					}
+					if res, err := outbox.DispatchPodsExcept(ctx, d.Pool, ownDomain, outboxSender(d), hold); res.Sent+res.Simulated > 0 || err != nil {
+						slog.Info("founderos pods: dispatch pass", "sent", res.Sent, "simulated", res.Simulated, "waiting", res.Waiting, "err", err)
+					}
+				}
 				// Mail to the owner's own inbox is not outreach: no booking check needed.
 				if n, err := outbox.AutoSendToOwner(ctx, d.Pool, outboxWorkspace, ownerAddresses(d), ownerMailDailyCap, outboxSender(d)); n > 0 || err != nil {
 					slog.Info("founderos outbox: owner-addressed mail sent without a click", "sent", n, "err", err)
@@ -120,10 +134,6 @@ func startAutoFollowUps(d *Deps) {
 					continue
 				}
 				sendCampaign(ctx, d, time.Now())
-				// Client pods: each walks its waiting emails through the pod gate.
-				if res, err := outbox.DispatchPods(ctx, d.Pool, ownDomain, outboxSender(d)); res.Sent+res.Simulated > 0 || err != nil {
-					slog.Info("founderos pods: dispatch pass", "sent", res.Sent, "simulated", res.Simulated, "waiting", res.Waiting, "err", err)
-				}
 				limit := autoFollowUpCap()
 				if limit == 0 {
 					cancel()

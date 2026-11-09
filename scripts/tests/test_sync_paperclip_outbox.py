@@ -172,5 +172,16 @@ class PodRoutingTest(unittest.TestCase):
             sync.entries('[{"to": "a@b.co", "subject": "s", "body": "b", "sequenceKey": "' + "x" * 101 + '"}]')
 
 
+
+class OutboxOwnershipTest(unittest.TestCase):
+    """Codex final review #1."""
+
+    def test_a_task_keeps_its_first_owner(self):
+        self.assertTrue(sync.moved("i1", "hq", {"i1": "client-a"}))
+        self.assertFalse(sync.moved("i1", "client-a", {"i1": "client-a"}))
+        q = sync.own_query("i1", "client-a")
+        self.assertIn("ON CONFLICT (issue_id) DO NOTHING", q)
+        self.assertIn("slug = 'client-a'", q)
+
 if __name__ == "__main__":
     unittest.main()

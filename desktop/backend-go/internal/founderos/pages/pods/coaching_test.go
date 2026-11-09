@@ -68,7 +68,7 @@ func TestARecordedCallGetsCoachingNotesOnce(t *testing.T) {
 	if err != nil || len(list) != 1 || list[0].Text != "Ask about budget earlier" {
 		t.Fatalf("coaching to send: %+v %v", list, err)
 	}
-	if err := s.CoachingDelivered(ctx, list[0], ""); err != nil {
+	if err := s.CoachingDelivered(ctx, list[0], "", false); err != nil {
 		t.Fatal(err)
 	}
 	if again, _ := s.ClaimCoaching(ctx); len(again) != 0 {

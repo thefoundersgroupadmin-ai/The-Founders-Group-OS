@@ -130,12 +130,16 @@ type Week struct {
 	Start  string
 	M      Metrics
 	Review string
+	// Corrected: late or corrected records changed the numbers after the
+	// review was written (Codex final review #9).
+	Corrected bool
 }
 
 // Weeks lists the pod's stored weeks, newest first.
 func (s *Store) Weeks(ctx context.Context, podID string, limit int) ([]Week, error) {
-	rows, err := s.Pool.Query(ctx, `SELECT week_start::text, metrics, review FROM founderos_pod_weekly
-		WHERE pod_id = $1 ORDER BY week_start DESC LIMIT $2`, podID, limit)
+	rows, err := s.Pool.Query(ctx, `SELECT week_start::text, metrics, review,
+		review <> '' AND review_metrics IS NOT NULL AND review_metrics <> metrics
+		FROM founderos_pod_weekly WHERE pod_id = $1 ORDER BY week_start DESC LIMIT $2`, podID, limit)
 	if err != nil {
 		return nil, err
 	}
@@ -144,7 +148,7 @@ func (s *Store) Weeks(ctx context.Context, podID string, limit int) ([]Week, err
 	for rows.Next() {
 		var w Week
 		var raw []byte
-		if err := rows.Scan(&w.Start, &raw, &w.Review); err != nil {
+		if err := rows.Scan(&w.Start, &raw, &w.Review, &w.Corrected); err != nil {
 			return nil, err
 		}
 		_ = json.Unmarshal(raw, &w.M)
@@ -286,6 +290,8 @@ func (s *Store) TaskWeeklyReviews(ctx context.Context, b TaskBoard, now time.Tim
 				errs = append(errs, err)
 				continue
 			}
+			_ = s.ownTask(ctx, issue, p.ID, "review")
+
 			if _, err := s.Pool.Exec(ctx, `UPDATE founderos_pod_weekly SET review_issue_id = $2 WHERE id = $1 AND review_issue_id IS NULL`, w.id, issue); err != nil {
 				errs = append(errs, err)
 				continue
@@ -400,7 +406,9 @@ type Review struct {
 // so nothing is emailed twice (Codex M6 review #2). Paused and handed-over
 // pods email nothing (#8); the review still shows in the portal.
 func (s *Store) ClaimReviews(ctx context.Context) ([]Review, error) {
-	rows, err := s.Pool.Query(ctx, `UPDATE founderos_pod_weekly w SET review_sent_at = now()
+	s.sweep(ctx, reviewNotice)
+	rows, err := s.Pool.Query(ctx, `UPDATE founderos_pod_weekly w SET review_sent_at = now(), review_delivery = 'sending',
+		review_attempts = w.review_attempts + 1
 		FROM founderos_client_pods p
 		WHERE p.id = w.pod_id AND w.id IN (
 			SELECT w2.id FROM founderos_pod_weekly w2 JOIN founderos_client_pods p2 ON p2.id = w2.pod_id
@@ -422,13 +430,19 @@ func (s *Store) ClaimReviews(ctx context.Context) ([]Review, error) {
 	return out, rows.Err()
 }
 
-// ReviewDelivered logs how a claimed review went: emailed (why == "") or not.
-func (s *Store) ReviewDelivered(ctx context.Context, r Review, why string) error {
+// ReviewDelivered records how a claimed review went (see delivery.go).
+func (s *Store) ReviewDelivered(ctx context.Context, r Review, why string, retry bool) error {
+	if err := s.finish(ctx, reviewNotice, r.ID, why, retry); err != nil {
+		return err
+	}
 	if why != "" {
 		return s.Log(ctx, r.PodID, "weekly", "Weekly review for the week of "+r.Week+" is in your portal (not emailed: "+clip(why, 120)+")", "")
 	}
 	return s.Log(ctx, r.PodID, "weekly", "Weekly review for the week of "+r.Week+" sent to your team", "")
 }
+
+// CorrectedNote is shown under a review whose numbers changed after it was written.
+const CorrectedNote = "\n\n(The numbers for this week were updated after this review was written: a late booking, recording or reply arrived.)"
 
 // WeeklyText renders a review email body.
 func WeeklyText(r Review, m Metrics) string {

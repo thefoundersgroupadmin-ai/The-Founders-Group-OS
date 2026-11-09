@@ -671,7 +671,7 @@ func registerPods(s *gin.RouterGroup, d *Deps) {
 		}
 		out := make([]gin.H, 0, len(weeks))
 		for _, w := range weeks {
-			out = append(out, gin.H{"week": w.Start, "metrics": w.M, "review": w.Review})
+			out = append(out, gin.H{"week": w.Start, "metrics": w.M, "review": w.Review, "corrected": w.Corrected})
 		}
 		c.JSON(http.StatusOK, gin.H{"weeks": out, "baseline": base, "thisWeek": now})
 	})

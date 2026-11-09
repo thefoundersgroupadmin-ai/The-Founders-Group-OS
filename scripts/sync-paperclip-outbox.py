@@ -101,6 +101,24 @@ def route(issue, pods, task_workspaces, default_pipeline_ws):
             "sender": None, "binding": bool(binding)}
 
 
+# Task ownership (Codex final review #1, #11). A board task belongs to the pod
+# (or "hq") it was first seen in. A task that later moves is quarantined, never
+# imported into its new owner; report tasks (briefs, coaching, weekly reviews)
+# never hand over prospects or outreach.
+
+
+def moved(issue_id, owner, owners):
+    """True when the task was first seen under another owner."""
+    first = owners.get(issue_id)
+    return first is not None and first != owner
+
+
+def own_query(issue_id, owner):
+    """Record the task's first owner (pod slug or "hq"); later moves never change it."""
+    return ("INSERT INTO founderos_pod_task_owner (issue_id, pod_id) VALUES "
+            f"({sql(issue_id)}, (SELECT id FROM founderos_client_pods WHERE slug = {sql(owner)})) ON CONFLICT (issue_id) DO NOTHING")
+
+
 def outbox_id(ident, it, pod_slug):
     """A draft's stable id. Pod drafts carry the pod's slug (Codex M1 review #7), so a
     task moved to another pod never rewrites the first pod's draft; HQ ids are unchanged."""
@@ -208,7 +226,7 @@ def coaching_query(issue_id, body, workspace_id):
 
 def review_query(issue_id, body, workspace_id):
     """The weekly pipeline review for the week this task was opened for (until sent)."""
-    return (f"UPDATE founderos_pod_weekly SET review = {sql(body.strip()[:16000])} "
+    return (f"UPDATE founderos_pod_weekly SET review = {sql(body.strip()[:16000])}, review_metrics = metrics "
             f"WHERE review_issue_id = {sql(issue_id)} AND review_sent_at IS NULL AND {pod_scope(workspace_id)}")
 
 
@@ -221,6 +239,12 @@ def report_docs(kind, docs):
     """A brief, coaching or review task hands over only its own document: never
     outreach, prospects, a hand-off or qualification (Codex M6 #3)."""
     return [d for d in docs if d.get("key") == kind]
+
+
+def owners_map(db):
+    rows = psql_rows(db, "SELECT o.issue_id, coalesce(p.slug, 'hq') AS owner FROM founderos_pod_task_owner o "
+                         "LEFT JOIN founderos_client_pods p ON p.id = o.pod_id")
+    return {r["issue_id"]: r["owner"] for r in rows}
 
 
 def recipient_matches_query(addr):
@@ -309,6 +333,7 @@ def main():
     pods = {p["project_id"]: p for p in psql_rows(db, POD_ROUTES_QUERY)}
     conversations = {r["issue_id"] for r in psql_rows(db, CONVERSATIONS_QUERY)}
     report_tasks = {r["issue_id"]: r["kind"] for r in psql_rows(db, REPORT_TASKS_QUERY)}
+    owners = owners_map(db)
     pod_senders = {p["workspace_id"]: p["sender_name"] for p in pods.values()}
     project_names = project_names_of(paperclip(pc, "GET", f"/api/companies/{company}/projects"))
     for issue in issues:
@@ -319,6 +344,15 @@ def main():
                 psql(db, withdraw_all_query(qident))
             continue
         rt = route(issue, pods, task_workspaces, default_pipeline_ws)
+        owner = rt["pipeline_slug"] if rt["pod"] else "hq"
+        if moved(issue["id"], owner, owners):
+            print(f"  {qident}: skipped (moved from {owners[issue['id']]}; quarantined)")
+            if not dry:
+                psql(db, withdraw_all_query(qident))
+            continue
+        if not dry and issue["id"] not in owners:
+            psql(db, own_query(issue["id"], owner))
+            owners[issue["id"]] = owner
         if not dry:
             # Before reading documents: a task that moved loses its old drafts even if it has no outbox yet.
             psql(db, withdraw_moved_query(qident, rt["outbox_ws"] or ws))

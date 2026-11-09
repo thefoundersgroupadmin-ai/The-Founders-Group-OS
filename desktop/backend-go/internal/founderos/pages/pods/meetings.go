@@ -162,6 +162,8 @@ func (s *Store) TaskBriefs(ctx context.Context, b TaskBoard) (int, error) {
 			errs = append(errs, err)
 			continue
 		}
+		_ = s.ownTask(ctx, issue, p.ID, "brief")
+
 		if _, err := s.Pool.Exec(ctx, `UPDATE founderos_pod_meetings SET brief_issue_id = $2 WHERE id = $1`, j.id, issue); err != nil {
 			errs = append(errs, err)
 			continue
@@ -182,7 +184,9 @@ type Brief struct {
 // first, so a crash or timeout can never email one twice (Codex M6 review #2).
 // Paused and handed-over pods email nothing; briefs stay in the portal.
 func (s *Store) ClaimBriefs(ctx context.Context) ([]Brief, error) {
-	rows, err := s.Pool.Query(ctx, `UPDATE founderos_pod_meetings m SET brief_sent_at = now()
+	s.sweep(ctx, briefNotice)
+	rows, err := s.Pool.Query(ctx, `UPDATE founderos_pod_meetings m SET brief_sent_at = now(), brief_delivery = 'sending',
+		brief_attempts = m.brief_attempts + 1
 		FROM founderos_client_pods p
 		WHERE p.id = m.pod_id AND m.id IN (
 			SELECT m2.id FROM founderos_pod_meetings m2 JOIN founderos_client_pods p2 ON p2.id = m2.pod_id
@@ -205,8 +209,12 @@ func (s *Store) ClaimBriefs(ctx context.Context) ([]Brief, error) {
 	return out, rows.Err()
 }
 
-// BriefDelivered logs how a claimed brief went: emailed (why == "") or not.
-func (s *Store) BriefDelivered(ctx context.Context, b Brief, why string) error {
+// BriefDelivered records how a claimed brief went: emailed (why == ""), or
+// not, retried later when retry is set (see delivery.go).
+func (s *Store) BriefDelivered(ctx context.Context, b Brief, why string, retry bool) error {
+	if err := s.finish(ctx, briefNotice, b.ID, why, retry); err != nil {
+		return err
+	}
 	if why != "" {
 		return s.Log(ctx, b.PodID, "brief", "Call brief for "+b.Name+" is in your portal (not emailed: "+clip(why, 120)+")", "")
 	}

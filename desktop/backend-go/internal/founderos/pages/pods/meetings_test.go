@@ -76,7 +76,7 @@ func TestBookedMeetingsAreRecordedOnceAndGetACallBrief(t *testing.T) {
 	if err != nil || len(ready) != 1 || ready[0].Client != "Brightvale" {
 		t.Fatalf("ready briefs %+v %v", ready, err)
 	}
-	if err := s.BriefDelivered(ctx, ready[0], ""); err != nil {
+	if err := s.BriefDelivered(ctx, ready[0], "", false); err != nil {
 		t.Fatal(err)
 	}
 	if again, _ := s.ClaimBriefs(ctx); len(again) != 0 {

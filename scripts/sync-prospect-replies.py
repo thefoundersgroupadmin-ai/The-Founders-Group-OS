@@ -83,6 +83,56 @@ def company_contacts(contacts, sender):
     return [c[0] for c in contacts if c[3].strip().lower().rsplit("@", 1)[-1] == domain]
 
 
+def message_claim_query(slug, mid, sender, when):
+    """Record an inbound message once per pod mailbox (Codex final review #2) and
+    return what was done with it ('' = not yet)."""
+    pod = f"(select id from founderos_client_pods where slug={sql(slug)})"
+    return ("insert into founderos_pod_reply_messages (pod_id, message_id, sender, received_at) "
+            f"values ({pod}, {sql(mid)}, {sql(sender)}, {sql(when) if when else 'null'}) on conflict (pod_id, message_id) do nothing; "
+            f"select routed from founderos_pod_reply_messages where pod_id={pod} and message_id={sql(mid)}")
+
+
+def message_done_query(slug, mid, routed, issue_id, contact_id):
+    return (f"update founderos_pod_reply_messages set routed={sql(routed)}, issue_id={sql(issue_id) if issue_id else 'null'}, "
+            f"contact_id={sql(contact_id)} where pod_id=(select id from founderos_client_pods where slug={sql(slug)}) "
+            f"and message_id={sql(mid)}")
+
+
+def sender_contact(company_cid, sender, company):
+    """A colleague replying from a new address gets a contact of their own, so
+    the reply is answered to the person who wrote it (Codex final review #2)."""
+    import hashlib
+    return company_cid + "-" + hashlib.sha1(sender.strip().lower().encode()).hexdigest()[:8], sender.split("@")[0], company
+
+
+def sender_contact_query(ws, cid, name, sender, company):
+    return ("insert into founderos_funnel_contacts (id, workspace_id, name, status, venture, created_at, email, company, relationship) "
+            f"values ({sql(cid)}, {sql(ws)}, {sql(name)}, 'engaged', 'client', now(), {sql(sender.strip().lower())}, {sql(company)}, 'warm') "
+            "on conflict (id) do nothing")
+
+
+def taken_over_query(ws, ids):
+    """Whether a person already took this conversation (or this company's) over."""
+    return (f"select count(*) from founderos_pod_conversations where workspace_id={sql(ws)} and taken_over_at is not null "
+            f"and contact_id in ({', '.join(sql(i) for i in ids)})")
+
+
+def person_handoff_query(slug, mid, cid, sender, subject, body):
+    """A new message in a conversation a person took over goes to that person, not the AI (#3)."""
+    summary = f"{sender} wrote again: {subject[:160]}\n\n{(body or '')[:1500]}"
+    return ("insert into founderos_pod_handoffs (pod_id, issue_id, contact_id, summary) "
+            f"select id, {sql('msg:' + slug + ':' + mid)}, {sql(cid)}, {sql(summary)} from founderos_client_pods "
+            f"where slug={sql(slug)} on conflict (issue_id) do nothing")
+
+
+def seen_for(seen, slug):
+    """The pod mailbox's own seen Message-IDs (Codex final review #2): entries are
+    namespaced "pod/<slug>/<id>"; older un-namespaced entries still count as seen."""
+    prefix = f"pod/{slug}/"
+    return {m[len(prefix):] if m.startswith(prefix) else m for m in seen
+            if m.startswith(prefix) or not m.startswith("pod/")}
+
+
 def pod_mailbox(env, slug):
     """The pod's own IMAP login from POD_<SLUG>_* keys (as TFG OS saves them), or None."""
     pre = "POD_" + slug.upper().replace("-", "_") + "_"
@@ -297,7 +347,7 @@ def pod_pass():
         if not domains:
             continue
         try:
-            found = search_replies(box, domains, since, seen)
+            found = search_replies(box, domains, since, seen_for(seen, slug))
         except (imaplib.IMAP4.error, OSError) as e:
             print(f"{slug}: mailbox unreadable ({e}); will retry")
             continue
@@ -309,6 +359,14 @@ def pod_pass():
             if dry:
                 print(f"  {company}: {sender} | {subject}")
                 continue
+            done = psql(db, message_claim_query(slug, mid, sender, str(when) if when else ""))
+            if done and done[0] and done[0][0]:
+                seen.add(f"pod/{slug}/{mid}")
+                continue
+            if not exact or exact[3].strip().lower() != sender.strip().lower():
+                cid, name, company = sender_contact(cid, sender, company)
+                psql(db, sender_contact_query(ws, cid, name, sender, company))
+            company_ids = company_contacts(pod_contacts, sender) + [cid]
             if is_opt_out(body):
                 # Under the pod send gate's lock, so a send in flight finishes first and none follows.
                 psql(db, f"select pg_advisory_xact_lock(hashtext('founderos-pod-send:' || {sql(ws)})); "
@@ -319,9 +377,20 @@ def pod_pass():
                 psql(db, "insert into founderos_client_activity (pod_id, kind, summary, ref) "
                          f"select id, 'opted_out', {sql(company + ' asked not to be contacted again')}, {sql(cid)} "
                          f"from founderos_client_pods where slug={sql(slug)}")
+                psql(db, message_done_query(slug, mid, "opt_out", None, cid))
+            elif int(psql(db, taken_over_query(ws, company_ids))[0][0]) > 0:
+                # A person has this conversation: the new message goes to them, not the AI.
+                psql(db, person_handoff_query(slug, mid, cid, sender, subject, body))
+                psql(db, message_done_query(slug, mid, "person", None, cid))
+                psql(db, "insert into founderos_client_activity (pod_id, kind, summary, ref) "
+                         f"select id, 'reply_received', {sql(company + ' wrote again; sent to your team: ' + subject[:120])}, {sql(cid)} "
+                         f"from founderos_client_pods where slug={sql(slug)}")
             else:
                 issue = paperclip(pc, "POST", f"/api/companies/{pc['PAPERCLIP_COMPANY_ID']}/issues",
                                   pod_reply_task(pod, sender, company, subject, when, body))
+                psql(db, message_done_query(slug, mid, "ai", issue["id"], cid))
+                psql(db, "insert into founderos_pod_task_owner (issue_id, pod_id, kind) "
+                         f"select {sql(issue['id'])}, id, 'reply' from founderos_client_pods where slug={sql(slug)} on conflict do nothing")
                 psql(db, "insert into founderos_pod_conversations (issue_id, workspace_id, contact_id) "
                          f"values ({sql(issue['id'])}, {sql(ws)}, {sql(cid)}) on conflict do nothing")
                 kind = "handoff_requested" if HUMAN.search((body or "")[:800]) else "reply_received"
@@ -329,7 +398,7 @@ def pod_pass():
                          f"select id, {sql(kind)}, {sql(company + ' replied: ' + subject[:140])}, {sql(issue.get('identifier') or cid)} "
                          f"from founderos_client_pods where slug={sql(slug)}")
             # One reply stops follow-ups to everyone at that company in this pod.
-            ids = company_contacts(pod_contacts, sender) or [cid]
+            ids = company_ids
             psql(db, "update founderos_funnel_contacts set status='engaged', relationship='warm' "
                      f"where workspace_id={sql(ws)} and id in ({', '.join(sql(i) for i in ids)}) and status in ('first_touch','nurtured')")
             seq = int(psql(db, f"select coalesce(max(seq),0)+1 from founderos_funnel_touches where contact_id={sql(cid)}")[0][0])
@@ -337,7 +406,7 @@ def pod_pass():
                      f"values ({sql(cid + '-reply-' + str(seq))}, {sql(ws)}, {sql(cid)}, {seq}, 'engaged', 'email', "
                      f"{sql(('Opted out: ' if is_opt_out(body) else 'Replied: ') + subject[:170])}, 'manual', "
                      f"{sql(datetime.now().date().isoformat())}) on conflict (id) do nothing")
-            seen.add(mid)
+            seen.add(f"pod/{slug}/{mid}")
             POD_STATE.parent.mkdir(parents=True, exist_ok=True)
             POD_STATE.write_text(json.dumps(sorted(seen)))
 

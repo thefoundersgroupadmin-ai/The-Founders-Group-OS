@@ -405,6 +405,7 @@
 					<details class="mt-2 border-b py-1" style="border-color: var(--bn-hairline)">
 						<summary class="cursor-pointer text-[12px]">Week of {w.week}{w.metrics.dryRun ? ' (test run)' : ''} · reached {w.metrics.prospectsReached} · replies {w.metrics.replies} · reply rate {w.metrics.replyRatePct}% of {w.metrics.cohortSize ?? 0} · booked {w.metrics.meetingsBooked} · held {w.metrics.meetingsHeld}</summary>
 						<p class="mt-1 whitespace-pre-wrap text-[12px]">{w.review || 'Review on its way from the AI SDR.'}</p>
+						{#if w.corrected}<p class="bn-dim mt-1 font-mono text-[11px]">Numbers updated after this review was written (late booking, recording or reply).</p>{/if}
 					</details>
 				{:else}
 					<p class="bn-dim mt-2 font-mono text-[12px]">The first weekly review arrives the Monday after the pod starts running.</p>

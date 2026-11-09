@@ -341,7 +341,11 @@ func pushWeekly(ctx context.Context, s *pods.Store, portal Portal, p pods.Pod, c
 	}
 	out := make([]Weekly, 0, len(weeks))
 	for _, w := range weeks {
-		out = append(out, Weekly{ClientID: client, WeekStart: w.Start, Metrics: w.M, Review: w.Review})
+		review := w.Review
+		if w.Corrected {
+			review += pods.CorrectedNote
+		}
+		out = append(out, Weekly{ClientID: client, WeekStart: w.Start, Metrics: w.M, Review: review})
 	}
 	return portal.UpsertWeekly(ctx, out)
 }

@@ -253,6 +253,8 @@ func (s *Store) TaskCoaching(ctx context.Context, b TaskBoard) (int, error) {
 			errs = append(errs, err)
 			continue
 		}
+		_ = s.ownTask(ctx, issue, p.ID, "coaching")
+
 		if _, err := s.Pool.Exec(ctx, `UPDATE founderos_pod_meetings SET coaching_issue_id = $2 WHERE id = $1`, j.id, issue); err != nil {
 			errs = append(errs, err)
 			continue
@@ -267,7 +269,9 @@ func (s *Store) TaskCoaching(ctx context.Context, b TaskBoard) (int, error) {
 // M6 review #2); a failed send is logged and the notes stay in the portal.
 // Paused and handed-over pods email nothing (#8).
 func (s *Store) ClaimCoaching(ctx context.Context) ([]Brief, error) {
-	rows, err := s.Pool.Query(ctx, `UPDATE founderos_pod_meetings m SET coaching_sent_at = now()
+	s.sweep(ctx, coachingNotice)
+	rows, err := s.Pool.Query(ctx, `UPDATE founderos_pod_meetings m SET coaching_sent_at = now(), coaching_delivery = 'sending',
+		coaching_attempts = m.coaching_attempts + 1
 		FROM founderos_client_pods p
 		WHERE p.id = m.pod_id AND m.id IN (
 			SELECT m2.id FROM founderos_pod_meetings m2 JOIN founderos_client_pods p2 ON p2.id = m2.pod_id
@@ -290,8 +294,11 @@ func (s *Store) ClaimCoaching(ctx context.Context) ([]Brief, error) {
 	return out, rows.Err()
 }
 
-// CoachingDelivered logs how a claimed set of notes went: emailed (why == "") or not.
-func (s *Store) CoachingDelivered(ctx context.Context, b Brief, why string) error {
+// CoachingDelivered records how a claimed set of notes went (see delivery.go).
+func (s *Store) CoachingDelivered(ctx context.Context, b Brief, why string, retry bool) error {
+	if err := s.finish(ctx, coachingNotice, b.ID, why, retry); err != nil {
+		return err
+	}
 	if why != "" {
 		return s.Log(ctx, b.PodID, "coaching", "Coaching notes for the call with "+b.Name+" are in your portal (not emailed: "+clip(why, 120)+")", "")
 	}

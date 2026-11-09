@@ -114,5 +114,18 @@ class PodRoutingTest(unittest.TestCase):
         self.assertTrue(sync.scan_for_hq_addresses({"id": "i2", "projectId": "other"}, self.PODS))
 
 
+
+class TaskOwnershipTest(unittest.TestCase):
+    """Codex final review #1, #11."""
+
+    def test_a_moved_task_is_quarantined(self):
+        pods = {"proj-b": {"slug": "client-b"}}
+        self.assertEqual(sync.owner_of({"projectId": "proj-b"}, pods), "client-b")
+        self.assertEqual(sync.owner_of({"projectId": "other"}, pods), "hq")
+        owners = {"i1": "client-a", "i2": "client-b"}
+        self.assertTrue(sync.moved("i1", "client-b", owners))
+        self.assertFalse(sync.moved("i2", "client-b", owners))
+        self.assertFalse(sync.moved("new", "client-b", owners))
+
 if __name__ == "__main__":
     unittest.main()

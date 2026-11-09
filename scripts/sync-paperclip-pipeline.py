@@ -86,6 +86,27 @@ def target_for(issue, pods, task_workspaces):
     return task_workspaces.get(issue["id"], WORKSPACE_SLUG)
 
 
+# Task ownership and report tasks (Codex final review #1, #11): see the outbox
+# importer. A task first seen under one owner (pod slug or "hq") and later moved
+# is quarantined; briefs, coaching and weekly reviews never add prospects.
+OWNERS_SQL = ("SELECT coalesce(json_object_agg(o.issue_id, coalesce(p.slug, 'hq')), '{}') "
+              "FROM founderos_pod_task_owner o LEFT JOIN founderos_client_pods p ON p.id = o.pod_id")
+REPORT_TASKS_SQL = ("SELECT coalesce(json_agg(i), '[]') FROM ("
+                    "SELECT brief_issue_id AS i FROM founderos_pod_meetings WHERE brief_issue_id IS NOT NULL "
+                    "UNION SELECT coaching_issue_id FROM founderos_pod_meetings WHERE coaching_issue_id IS NOT NULL "
+                    "UNION SELECT review_issue_id FROM founderos_pod_weekly WHERE review_issue_id IS NOT NULL) r")
+
+
+def owner_of(issue, pods):
+    pod = pods.get(issue.get("projectId") or "")
+    return pod["slug"] if pod else "hq"
+
+
+def moved(issue_id, owner, owners):
+    first = owners.get(issue_id)
+    return first is not None and first != owner
+
+
 def scan_for_hq_addresses(issue, pods):
     """Only HQ tasks' free-text documents may supply addresses for HQ accounts."""
     return (issue.get("projectId") or "") not in pods
@@ -203,6 +224,14 @@ def main():
         r = subprocess.run(["psql", db, "-At", "-c", POD_ROUTES_QUERY], capture_output=True, text=True)
         return r.returncode, r.stdout, r.stderr
     pods = load_pods(run_pod_query)
+
+    def json_query(q):
+        r = subprocess.run(["psql", db, "-At", "-c", q], capture_output=True, text=True)
+        if r.returncode != 0:
+            sys.exit("task ownership unavailable, nothing imported: " + (r.stderr or "").strip()[:200])
+        return json.loads(r.stdout.strip() or "null")
+    owners = json_query(OWNERS_SQL) or {}
+    report_tasks = set(json_query(REPORT_TASKS_SQL) or [])
     pod_products = {p["slug"]: p["client_name"] for p in pods.values()}
 
 
@@ -235,6 +264,11 @@ def main():
             continue
         if quarantined(issue, pods, project_names):
             print(f"skipped {ident}: client project with no pod", file=sys.stderr)
+            continue
+        if moved(issue["id"], owner_of(issue, pods), owners):
+            print(f"skipped {ident}: moved from {owners[issue['id']]} (quarantined)", file=sys.stderr)
+            continue
+        if issue["id"] in report_tasks:
             continue
         docs = paperclip(pc, f"/api/issues/{issue['id']}/documents")
         docs = docs.get("documents", docs) if isinstance(docs, dict) else docs

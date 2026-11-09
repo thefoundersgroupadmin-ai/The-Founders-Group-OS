@@ -120,15 +120,22 @@ func (b PodBoard) UpdateScheduleTrigger(ctx context.Context, triggerID, cron, ti
 	return err
 }
 
-// CreateTask opens a task for an agent in a project (a pod's enquiry or reply).
-func (b PodBoard) CreateTask(ctx context.Context, projectID, agentID, title, description string) (string, error) {
+// CreateTask opens a task for an agent in a project (a pod's enquiry, brief,
+// coaching or review). The key makes it safe to retry: the board replays the
+// task first created with that key instead of opening a second one, so a
+// timeout or a crash after creation never duplicates work.
+func (b PodBoard) CreateTask(ctx context.Context, key, projectID, agentID, title, description string) (string, error) {
 	co, err := b.company()
 	if err != nil {
 		return "", err
 	}
-	out, err := b.C.send(ctx, "paperclip.pod.task", http.MethodPost, "/api/companies/"+co+"/issues", map[string]any{
+	body := map[string]any{
 		"title": title, "description": description, "status": "todo", "priority": "high", "workMode": "standard",
-		"projectId": projectID, "assigneeAgentId": agentID})
+		"projectId": projectID, "assigneeAgentId": agentID}
+	if key != "" {
+		body["idempotencyKey"] = key
+	}
+	out, err := b.C.send(ctx, "paperclip.pod.task", http.MethodPost, "/api/companies/"+co+"/issues", body)
 	if err != nil {
 		return "", err
 	}
@@ -136,4 +143,25 @@ func (b PodBoard) CreateTask(ctx context.Context, projectID, agentID, title, des
 		return id, nil
 	}
 	return "", errors.New("board did not return a task id")
+}
+
+// TaskStatus reads a task's status on the board (todo, in_progress, blocked,
+// done, cancelled, ...).
+func (b PodBoard) TaskStatus(ctx context.Context, issueID string) (string, error) {
+	out, err := b.C.get(ctx, "/api/issues/"+issueID, issueTimeout)
+	if err != nil {
+		return "", err
+	}
+	if m, ok := out.(map[string]any); ok {
+		if st, ok := m["status"].(string); ok {
+			return st, nil
+		}
+	}
+	return "", errors.New("board did not return the task's status")
+}
+
+// Nudge comments on a task, which wakes its agent.
+func (b PodBoard) Nudge(ctx context.Context, issueID, message string) error {
+	_, err := b.C.send(ctx, "paperclip.pod.nudge", http.MethodPost, "/api/issues/"+issueID+"/comments", map[string]any{"body": message})
+	return err
 }

@@ -174,3 +174,8 @@ export function resultsSummary(
 		weeksCovered: last.length
 	};
 }
+
+/** The board task id of a stuck-task alert ("task:<id>"), or "" for other alerts. */
+export function stuckTaskOf(key: string): string {
+	return key.startsWith('task:') ? key.slice(5) : '';
+}

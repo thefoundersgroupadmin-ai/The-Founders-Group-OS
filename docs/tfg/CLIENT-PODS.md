@@ -129,3 +129,32 @@ Guarantees added to M1 (full review in the build log):
 9. [x] Dry run via approved sink with separate simulated receipts
 10. [x] Agent packets per pod (no HQ handover); routines provisioned per pod, idempotently
 11. [x] /os/clients admin view; full gates; Codex review
+
+## Follow-through (9 Nov 2026, Codex open items)
+
+- **CRM updates.** After a meeting is logged, later facts reach the client's CRM
+  as notes, once each: moved, cancelled, held or no-show, a brief or coaching
+  written after logging, a contact's stage change, an opt-out. Facts are
+  fingerprinted in `founderos_pod_crm_ids` (kind `fact`); first sight is silent.
+- **Repeat-safe tasks.** Every pod task (enquiry, reply, brief, coaching, review)
+  is created with a board idempotency key (`tfg-pod:<pod>:<kind>:<id>`), so a
+  retry replays the original. An ownership write that fails is retried by
+  replaying, never left unowned. A reply import that crashed mid-task resumes.
+- **Stuck tasks.** `pods.WatchTasks` (every 5 min) nudges a slow task once with a
+  board comment (which wakes the agent), then marks it stuck. Enquiry and reply:
+  20 min / 1 h; brief: 2 h / 6 h, or sooner when the call is under an hour away;
+  coaching and review: 6 h / 24 h. Nothing is re-created automatically.
+- **Alerts.** `pods.RefreshAlerts` keeps one row per open problem in
+  `founderos_pod_alerts`: calendar or CRM failing (`founderos_pod_health`),
+  stuck tasks, prospect emails failed/uncertain/stuck sending, rep notices not
+  delivered or with no recipient, hand-offs not passed on, enquiries not tasked,
+  replies needing a check. Each is pushed once (notify kind `pods`), shown under
+  "Needs attention" on the AI SDR page and counted on the client list, and closes
+  when it clears.
+- **Thread attribution.** Each outbox email's Message-ID is
+  `<tfg.<outbox id>.<attempt>.<random>@<sender domain>>`. The reply import reads
+  In-Reply-To/References, matches only emails this pod sent, and records the
+  answered email (`founderos_pod_reply_messages.outbox_id`, `threaded`); without
+  thread headers, the latest email to that person before the reply. In-thread
+  replies from unknown addresses are now picked up and belong to whoever the
+  email went to. Weekly subject-line stats count replies per answered email.

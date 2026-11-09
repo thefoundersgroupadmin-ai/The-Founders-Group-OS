@@ -134,9 +134,15 @@ func nullIf(s string) any {
 	return s
 }
 
-// TaskBoard opens a task for an agent in a project.
+// TaskBoard opens a task for an agent in a project. The key makes a retry
+// replay the task first created with it instead of opening a second one.
 type TaskBoard interface {
-	CreateTask(ctx context.Context, projectID, agentID, title, description string) (string, error)
+	CreateTask(ctx context.Context, key, projectID, agentID, title, description string) (string, error)
+}
+
+// taskKey names one piece of work for the board's replay protection.
+func taskKey(podID, kind string, id any) string {
+	return fmt.Sprintf("tfg-pod:%s:%s:%v", podID, kind, id)
 }
 
 func inboundBrief(p Pod, e Enquiry) string {
@@ -227,14 +233,17 @@ func (s *Store) TaskInbound(ctx context.Context, b TaskBoard) (int, error) {
 			}
 			continue
 		}
-		issue, err := b.CreateTask(ctx, j.proj, j.ag, clip(p.ClientName+": enquiry from "+who, 200), inboundBrief(p, j.e))
+		issue, err := b.CreateTask(ctx, taskKey(p.ID, "enquiry", j.id), j.proj, j.ag, clip(p.ClientName+": enquiry from "+who, 200), inboundBrief(p, j.e))
 		if err != nil {
 			_, _ = s.Pool.Exec(ctx, `UPDATE founderos_pod_inbound SET error = $2 WHERE id = $1`, j.id, clip(err.Error(), 300))
 			errs = append(errs, err)
 			continue
 		}
+		// Unowned, the task is not recorded: the next pass replays it by its key
+		// and tries again, so a task never runs without an owner.
 		if err := s.ownTask(ctx, issue, p.ID, "enquiry"); err != nil {
 			errs = append(errs, err)
+			continue
 		}
 
 		if _, err := s.Pool.Exec(ctx, `INSERT INTO founderos_pod_conversations (issue_id, workspace_id, contact_id, source)

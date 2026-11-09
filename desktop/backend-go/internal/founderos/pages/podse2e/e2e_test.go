@@ -50,7 +50,7 @@ func (b *board) AddScheduleTrigger(context.Context, string, string, string) (str
 	return b.id("trigger"), nil
 }
 func (b *board) UpdateScheduleTrigger(context.Context, string, string, string) error { return nil }
-func (b *board) CreateTask(_ context.Context, project, agent, title, body string) (string, error) {
+func (b *board) CreateTask(_ context.Context, key, project, agent, title, body string) (string, error) {
 	b.tasks = append(b.tasks, title+"\n"+body)
 	return b.id("issue"), nil
 }

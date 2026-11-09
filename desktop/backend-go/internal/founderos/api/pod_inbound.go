@@ -21,6 +21,7 @@ import (
 	"github.com/rhl/businessos-backend/internal/founderos/connectors/caldotcom"
 	"github.com/rhl/businessos-backend/internal/founderos/connectors/email"
 	"github.com/rhl/businessos-backend/internal/founderos/connectors/fathomcalls"
+	"github.com/rhl/businessos-backend/internal/founderos/notify"
 	"github.com/rhl/businessos-backend/internal/founderos/pages/pods"
 )
 
@@ -148,6 +149,17 @@ func startPodLoops(d *Deps) {
 					if k, err := syncPodCRMs(ctx, d, st); k > 0 || err != nil {
 						slog.Info("client pods: CRM sync", "written", k, "err", err)
 					}
+					cancel()
+				}
+				// Every five minutes: nudge or flag slow AI tasks, then raise alerts.
+				if n%10 == 5 {
+					ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+					if nudged, stuck, err := st.WatchTasks(ctx, podWatchFor(d), time.Now()); nudged+stuck > 0 || err != nil {
+						slog.Info("client pods: slow AI tasks", "nudged", nudged, "stuck", stuck, "err", err)
+					}
+					cancel()
+					ctx, cancel = context.WithTimeout(context.Background(), time.Minute)
+					pushPodAlerts(ctx, st)
 					cancel()
 				}
 				if n%10 == 0 {
@@ -278,17 +290,19 @@ func readPodCalendarsHold(ctx context.Context, d *Deps, st *pods.Store) (int, ma
 		if key == "" {
 			// Set up for Cal.com but no key: bookings can't be seen, so hold (Codex fix review #5).
 			hold[p.Slug] = true
+			_ = st.SetHealth(ctx, p.ID, "calendar", false, "No Cal.com key is set for this client; add it on the AI SDR page.")
 			continue
 		}
 		var meetings []pods.Meeting
 		failed := false
+		var why error
 		// Each pod's calendar gets its own time budget: a slow one never uses up the others'.
 		pctx, pcancel := context.WithTimeout(ctx, 20*time.Second)
 		for _, status := range []string{"upcoming", "past", "cancelled"} {
 			bs, err := cal.BookingsWithKey(pctx, key, status)
 			if err != nil {
 				errs = append(errs, fmt.Errorf("%s: %w", p.Slug, err))
-				failed = true
+				failed, why = true, err
 				break
 			}
 			for _, b := range bs {
@@ -305,6 +319,7 @@ func readPodCalendarsHold(ctx context.Context, d *Deps, st *pods.Store) (int, ma
 		pcancel()
 		if failed {
 			hold[p.Slug] = true
+			_ = st.SetHealth(ctx, p.ID, "calendar", false, "Cal.com could not be read: "+why.Error())
 			continue
 		}
 		k, err := st.RecordMeetings(ctx, p.Slug, meetings)
@@ -312,7 +327,10 @@ func readPodCalendarsHold(ctx context.Context, d *Deps, st *pods.Store) (int, ma
 		if err != nil {
 			hold[p.Slug] = true
 			errs = append(errs, err)
+			_ = st.SetHealth(ctx, p.ID, "calendar", false, "Bookings could not be saved: "+err.Error())
+			continue
 		}
+		_ = st.SetHealth(ctx, p.ID, "calendar", true, "")
 	}
 	return added, hold, errors.Join(errs...)
 }
@@ -434,4 +452,18 @@ func readPodRecordings(ctx context.Context, d *Deps, st *pods.Store) (int, error
 		}
 	}
 	return added, errors.Join(errs...)
+}
+
+// pushPodAlerts refreshes every pod's alerts and pushes each new one to the
+// owner's devices once.
+func pushPodAlerts(ctx context.Context, st *pods.Store) int {
+	fresh, err := st.RefreshAlerts(ctx)
+	if err != nil {
+		slog.Warn("client pods: alerts", "err", err)
+	}
+	for _, a := range fresh {
+		notify.Publish(ctx, notify.Event{ID: "pod-alert-" + a.Slug + "-" + a.Key + "-" + a.FirstSeen.Format("20060102T150405"),
+			Kind: notify.KindPods, Title: a.Client + ": " + a.Title, Body: a.Detail, URL: "/os/pods/" + a.Slug})
+	}
+	return len(fresh)
 }

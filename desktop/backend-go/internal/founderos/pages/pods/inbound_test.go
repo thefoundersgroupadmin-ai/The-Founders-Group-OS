@@ -60,12 +60,24 @@ func TestAnInboundLinkAcceptsEnquiriesForItsPodOnly(t *testing.T) {
 }
 
 // fakeTasks records tasks the inbound tasker opens.
-type fakeTasks struct{ titles, bodies []string }
+// Like the board, a key seen before replays its first task.
+type fakeTasks struct {
+	titles, bodies []string
+	byKey          map[string]string
+}
 
-func (f *fakeTasks) CreateTask(_ context.Context, projectID, agentID, title, description string) (string, error) {
+func (f *fakeTasks) CreateTask(_ context.Context, key, projectID, agentID, title, description string) (string, error) {
+	if id, ok := f.byKey[key]; ok && key != "" {
+		return id, nil
+	}
 	f.titles = append(f.titles, title)
 	f.bodies = append(f.bodies, description)
-	return "issue-" + string(rune('a'+len(f.titles))), nil
+	id := "issue-" + string(rune('a'+len(f.titles)))
+	if f.byKey == nil {
+		f.byKey = map[string]string{}
+	}
+	f.byKey[key] = id
+	return id, nil
 }
 
 func TestEachEnquiryBecomesATaskForThePodsOwnAgentAndAConversation(t *testing.T) {

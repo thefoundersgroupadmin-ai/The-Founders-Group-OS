@@ -62,6 +62,9 @@ func syncPodCRMs(ctx context.Context, d *Deps, st *pods.Store) (int, error) {
 		crm := podCRM(d, fresh)
 		if crm == nil {
 			unlock()
+			if fresh.CRMProvider != "" && fresh.CRMProvider != "none" {
+				_ = st.SetHealth(ctx, p.ID, "crm", false, "The "+fresh.CRMProvider+" connection has no key; reconnect it on the AI SDR page.")
+			}
 			continue
 		}
 		n, err := crmsync.SyncPod(ctx, d.Pool, p.ID, crm)
@@ -70,7 +73,11 @@ func syncPodCRMs(ctx context.Context, d *Deps, st *pods.Store) (int, error) {
 		if err != nil {
 			errs = append(errs, fmt.Errorf("%s (%s): %w", p.Slug, crm.Name(), err))
 			_ = st.Log(ctx, p.ID, "crm_error", "CRM sync stopped: "+err.Error(), "")
-		} else if n > 0 {
+			_ = st.SetHealth(ctx, p.ID, "crm", false, crm.Name()+": "+err.Error())
+		} else {
+			_ = st.SetHealth(ctx, p.ID, "crm", true, "")
+		}
+		if err == nil && n > 0 {
 			_ = st.Log(ctx, p.ID, "crm_synced", fmt.Sprintf("%d updates written to your %s", n, crm.Name()), "")
 		}
 	}

@@ -7,8 +7,8 @@
 	import { page } from '$app/state';
 	import { founderosFetch, founderosUrl } from '$lib/founderos/api';
 	import { Badge, PageHeader, Pressable, Rise, Slab } from '$lib/founderos/kit';
-	import { APPROVAL_BADGE, DOC_LABELS, STATUS_BADGE, actionsFor, meetingStage, parseDomains, resultsSummary, setupChecklist, waitingReason } from '$lib/founderos/pages/pods/pods';
-	import type { Activity, AgentBinding, ClientApproval, Mailbox, Pod, PodDoc, PodMeeting, WeeklyBody } from '$lib/founderos/pages/pods/types';
+	import { APPROVAL_BADGE, DOC_LABELS, STATUS_BADGE, actionsFor, meetingStage, parseDomains, resultsSummary, setupChecklist, stuckTaskOf, waitingReason } from '$lib/founderos/pages/pods/pods';
+	import type { Activity, AgentBinding, ClientApproval, Mailbox, Pod, PodAlert, PodDoc, PodMeeting, WeeklyBody } from '$lib/founderos/pages/pods/types';
 	import { STATUS_BADGE as OUTBOX_BADGE, recipientLine } from '$lib/founderos/pages/outbox/outbox';
 	import type { OutboxBody, OutboxItem } from '$lib/founderos/pages/outbox/types';
 
@@ -42,6 +42,7 @@
 	let calendarConnected = $state(false);
 	let calcomKey = $state('');
 	let crm = $state<{ provider: string; connected: boolean; synced: number } | null>(null);
+	let alerts = $state<PodAlert[]>([]);
 	let crmForm = $state({ provider: 'hubspot', token: '', clientId: '', clientSecret: '', refreshToken: '', loginUrl: '', newAccount: false });
 
 	const err = (e: unknown) => (e instanceof Error ? e.message : 'request failed');
@@ -59,6 +60,7 @@
 			failure = err(e);
 			return;
 		}
+		founderosFetch<{ alerts: PodAlert[] }>(`${base}/alerts`).then((b) => (alerts = b.alerts)).catch(() => {});
 		founderosFetch<{ mailbox: Mailbox }>(`${base}/mailbox`).then((b) => (mailbox = b.mailbox)).catch(() => {});
 		founderosFetch<OutboxBody>(`${base}/outbox`).then((b) => (outbox = b)).catch(() => {});
 		founderosFetch<{ activity: Activity[] }>(`${base}/activity`).then((b) => (activity = b.activity)).catch(() => {});
@@ -113,6 +115,8 @@
 			await founderosFetch(`${base}/mailbox`, { method: 'PUT', json: mb });
 			mb = { ...mb, pass: '' };
 		});
+	const recheckAlerts = () => act(() => founderosFetch(`${base}/alerts/refresh`, { method: 'POST' }));
+	const resolveTask = (issue: string) => act(() => founderosFetch(`${base}/tasks/${encodeURIComponent(issue)}/resolved`, { method: 'POST' }));
 	const linkPortal = () => act(() => founderosFetch(`${base}/portal`, { method: 'PUT', json: { portalClientId: portalId } }));
 	const proposeList = () =>
 		act(async () => {
@@ -188,6 +192,27 @@
 	{:else}
 		<Rise i={1}>
 			{#if note}<Slab><p class="font-mono text-[12px]" style="color: var(--bn-err)">{note}</p></Slab>{/if}
+
+			{#if alerts.length > 0}
+				<Slab>
+					<div class="mb-2 flex items-center justify-between gap-2">
+						<p class="font-mono text-[10px] uppercase tracking-[0.15em]" style="color: var(--bn-err)">Needs attention · {alerts.length}</p>
+						<Pressable tone="secondary" disabled={busy} onclick={recheckAlerts}>Check again</Pressable>
+					</div>
+					{#each alerts as a (a.key)}
+						<div class="flex flex-wrap items-start justify-between gap-2 border-t py-2 first:border-t-0" style="border-color: var(--bn-border)">
+							<div class="min-w-0 flex-1">
+								<p class="text-[13px] font-semibold">{a.title}</p>
+								<p class="bn-dim text-[12px]">{a.detail}</p>
+								<p class="bn-muted font-mono text-[10px]">since {new Date(a.firstSeen).toLocaleString()}</p>
+							</div>
+							{#if stuckTaskOf(a.key)}
+								<Pressable tone="secondary" disabled={busy} onclick={() => resolveTask(stuckTaskOf(a.key))}>Dealt with</Pressable>
+							{/if}
+						</div>
+					{/each}
+				</Slab>
+			{/if}
 
 			<Slab>
 				<p class="bn-dim mb-2 font-mono text-[10px] uppercase tracking-[0.15em]">Status</p>

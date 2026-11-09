@@ -578,14 +578,14 @@ func TestSendReplyUsesTheConfiguredDisplayName(t *testing.T) {
 }
 
 func TestBuildMessageEncodesAHostileDisplayName(t *testing.T) {
-	got := string(buildMessage("nader@x.example", "Nader\r\nBcc: evil@x.com", []string{"a@b.example"}, "s", "t", time.Now()))
+	got := string(buildMessage("nader@x.example", "Nader\r\nBcc: evil@x.com", []string{"a@b.example"}, "s", "t", time.Now(), ""))
 	if strings.Contains(got, "\r\nBcc:") {
 		t.Errorf("a CRLF in the display name injected a header:\n%s", got)
 	}
 }
 
 func TestBuildMessageNeutralizesLineBreaksInFrom(t *testing.T) {
-	got := buildMessage("hello@vantage.example\r\nBcc: evil@x.com", "", []string{"alex@personal.example"}, "s", "t", time.Now())
+	got := buildMessage("hello@vantage.example\r\nBcc: evil@x.com", "", []string{"alex@personal.example"}, "s", "t", time.Now(), "")
 	if strings.Contains(string(got), "\r\nBcc:") {
 		t.Errorf("a CRLF in From injected a header:\n%s", got)
 	}
@@ -766,5 +766,19 @@ func TestAPodSendRefusesAMailboxWhoseFromIsNotThePodsSender(t *testing.T) {
 		ExpectFrom: "sam@bv.example", To: "x@y.example", Subject: "s", Text: "t", RecipientApproved: true})
 	if !errors.Is(err, ErrSenderMismatch) {
 		t.Fatalf("sent from a mailbox that is not the pod's sender: %v", err)
+	}
+}
+
+// Codex: replies were attributed by subject, not thread. An outbox email's
+// Message-ID carries its outbox id so a reply's headers lead back to it; an
+// unsafe id cannot inject a header.
+func TestAGivenMessageIDNamesTheEmailAndCannotInjectHeaders(t *testing.T) {
+	got := string(buildMessage("sam@bv.example", "", []string{"a@b.example"}, "s", "t", time.Now(), "tfg.pc-the-3-665e.1.ab12cd"))
+	if !strings.Contains(got, "Message-ID: <tfg.pc-the-3-665e.1.ab12cd@bv.example>\r\n") {
+		t.Fatalf("message id: %s", got)
+	}
+	got = string(buildMessage("sam@bv.example", "", []string{"a@b.example"}, "s", "t", time.Now(), "x>\r\nBcc: evil@x.com"))
+	if strings.Contains(got, "Bcc:") || !strings.Contains(got, "Message-ID: <xBccevilx.com@bv.example>") {
+		t.Fatalf("unsafe id not cleaned: %s", got)
 	}
 }

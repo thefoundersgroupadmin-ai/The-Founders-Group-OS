@@ -99,6 +99,43 @@ class FinalReviewRepliesTest(unittest.TestCase):
         self.assertIn("on conflict (issue_id) do nothing", h)
 
 
+class ThreadTest(unittest.TestCase):
+    """Codex: replies are credited to the email they answer, by thread."""
+
+    def test_thread_headers_name_the_outbox_email_nearest_first(self):
+        irt = "<tfg.pc-the-3-665e.1.ab12cd@bv.example>"
+        refs = "<other@gmail.com> <tfg.pc-the-3-111a.0.0a0b0c@bv.example> <tfg.pc-the-3-665e.1.ab12cd@bv.example>"
+        self.assertEqual(sync.thread_outbox_ids(irt, refs), ["pc-the-3-665e", "pc-the-3-111a"])
+        self.assertEqual(sync.thread_outbox_ids("", "<abc@gmail.com>"), [])
+        self.assertEqual(sync.thread_outbox_ids("<tfg.x'; drop table y.1.ab12@z>", ""), [])
+
+    def test_a_thread_only_matches_this_pods_sent_email(self):
+        q = sync.thread_query("w-a", ["o2", "o1"])
+        self.assertIn("o.workspace_id='w-a'", q)
+        self.assertIn("o.status='sent'", q)
+        self.assertLess(q.index("when 'o2' then 0"), q.index("when 'o1' then 1"))
+        self.assertIsNone(sync.thread_query("w-a", []))
+
+    def test_without_a_thread_the_latest_email_before_the_reply_counts(self):
+        q = sync.latest_sent_query("w-a", "Ana@Acme.example", "c1", "2026-11-09T10:00:00+00:00")
+        self.assertIn("lower(o.to_address)='ana@acme.example'", q)
+        self.assertIn("o.sent_at <= '2026-11-09T10:00:00+00:00'", q)
+        self.assertIn("order by o.sent_at desc limit 1", q)
+
+    def test_the_claim_records_what_the_reply_answered(self):
+        q = sync.message_claim_query("client-a", "<m1@x>", "ana@acme.example", "", "o2", True)
+        self.assertIn("'o2', true", q)
+        self.assertEqual(q.count(";"), 0)
+
+    def test_dates_and_task_keys(self):
+        self.assertEqual(sync.received_iso("Mon, 09 Nov 2026 10:00:00 +0000"), "2026-11-09T10:00:00+00:00")
+        self.assertEqual(sync.received_iso("not a date"), "")
+        k = sync.reply_task_key("client-a", "<m1@x>")
+        self.assertEqual(k, sync.reply_task_key("client-a", "<m1@x>"))
+        self.assertNotEqual(k, sync.reply_task_key("client-b", "<m1@x>"))
+        self.assertLessEqual(len(sync.reply_task_key("client-a", "<" + "x" * 900 + ">")), 255)
+
+
 class SingleInstanceTest(unittest.TestCase):
     def test_a_second_run_exits(self):
         import tempfile

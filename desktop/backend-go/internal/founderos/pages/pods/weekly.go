@@ -285,7 +285,7 @@ func (s *Store) TaskWeeklyReviews(ctx context.Context, b TaskBoard, now time.Tim
 				}
 			}
 			base, _ := s.GetBaseline(ctx, p.ID)
-			issue, err := b.CreateTask(ctx, proj, agent, clip(p.ClientName+": weekly pipeline review, week of "+m.Week, 200),
+			issue, err := b.CreateTask(ctx, taskKey(p.ID, "review", m.Week), proj, agent, clip(p.ClientName+": weekly pipeline review, week of "+m.Week, 200),
 				reviewTask(p, m, older, base, s.pipelineSummary(ctx, p), s.reviewEvidence(ctx, p, start, start.AddDate(0, 0, 7))))
 			if err != nil {
 				errs = append(errs, err)
@@ -293,6 +293,7 @@ func (s *Store) TaskWeeklyReviews(ctx context.Context, b TaskBoard, now time.Tim
 			}
 			if err := s.ownTask(ctx, issue, p.ID, "review"); err != nil {
 				errs = append(errs, err)
+				continue
 			}
 
 			if _, err := s.Pool.Exec(ctx, `UPDATE founderos_pod_weekly SET review_issue_id = $2 WHERE id = $1 AND review_issue_id IS NULL`, w.id, issue); err != nil {
@@ -335,14 +336,14 @@ func (s *Store) reviewEvidence(ctx context.Context, p Pod, from, to time.Time) s
 			sb.WriteString("Deals in play:\n" + strings.Join(lines, "\n") + "\n\n")
 		}
 	}
-	rows, err = s.Pool.Query(ctx, `SELECT o.subject, count(*), count(DISTINCT r.a)
-		FROM founderos_outbox o LEFT JOIN (
-			SELECT DISTINCT lower(fc.email) a FROM founderos_pod_conversations c
-			JOIN founderos_funnel_contacts fc ON fc.id = c.contact_id AND fc.workspace_id = c.workspace_id
-			WHERE c.workspace_id = $1 AND c.source = 'email') r ON r.a = lower(o.to_address)
+	// A reply counts for the exact email it answered (its thread, else the
+	// latest email to that person before it), never every email to them.
+	rows, err = s.Pool.Query(ctx, `SELECT o.subject, count(*),
+		count(*) FILTER (WHERE EXISTS (SELECT 1 FROM founderos_pod_reply_messages r WHERE r.pod_id = $4 AND r.outbox_id = o.id))
+		FROM founderos_outbox o
 		WHERE o.workspace_id = $1 AND o.status = 'sent' AND coalesce(o.sequence_key, '') <> 'reply'
 		AND o.sent_at >= $2::timestamptz - interval '28 days' AND o.sent_at < $3
-		GROUP BY o.subject ORDER BY count(*) DESC LIMIT 10`, p.WorkspaceID, from, to)
+		GROUP BY o.subject ORDER BY count(*) DESC LIMIT 10`, p.WorkspaceID, from, to, p.ID)
 	if err == nil {
 		var lines []string
 		for rows.Next() {

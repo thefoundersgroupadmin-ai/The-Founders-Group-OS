@@ -2,11 +2,14 @@ package api
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"log/slog"
 	"net/http"
 	"os"
+	"regexp"
 	"strconv"
 	"strings"
 	"sync"
@@ -35,7 +38,7 @@ const outboxWorkspace = "founderos"
 // call's recipient sign-off.
 func outboxSender(d *Deps) outbox.SendFunc {
 	return func(ctx context.Context, it outbox.Item) error {
-		r := email.Reply{To: it.To, Subject: it.Subject, Text: it.Body, RecipientApproved: true, RequireAccount: it.RequireAccount, ViaPodGate: it.ViaPodGate, ExpectFrom: it.ExpectFrom}
+		r := email.Reply{To: it.To, Subject: it.Subject, Text: it.Body, RecipientApproved: true, RequireAccount: it.RequireAccount, ViaPodGate: it.ViaPodGate, ExpectFrom: it.ExpectFrom, MessageID: outboxMessageID(it)}
 		if it.AccountID != nil {
 			r.AccountID = *it.AccountID
 		}
@@ -230,4 +233,18 @@ func registerOutbox(s *gin.RouterGroup, d *Deps) {
 		}
 		c.JSON(http.StatusOK, gin.H{"ok": true, "item": it})
 	})
+}
+
+var outboxIDSafe = regexp.MustCompile(`^[A-Za-z0-9_-]{1,80}$`)
+
+// outboxMessageID names an outbox email so replies lead back to it: their
+// In-Reply-To/References carry <tfg.<outbox id>.<attempt>.<random>@domain>,
+// which the reply import matches within the same workspace only.
+func outboxMessageID(it outbox.Item) string {
+	if !outboxIDSafe.MatchString(it.ID) {
+		return ""
+	}
+	r := make([]byte, 6)
+	_, _ = rand.Read(r)
+	return fmt.Sprintf("tfg.%s.%d.%s", it.ID, it.Attempt, hex.EncodeToString(r))
 }

@@ -165,7 +165,7 @@ func TestLateDataIsRecountedAndAFailedReviewTaskIsRetried(t *testing.T) {
 
 type failingTasks struct{}
 
-func (failingTasks) CreateTask(context.Context, string, string, string, string) (string, error) {
+func (failingTasks) CreateTask(context.Context, string, string, string, string, string) (string, error) {
 	return "", errors.New("board down")
 }
 
@@ -182,5 +182,28 @@ func TestAReviewIsFlaggedWhenItsNumbersChangeLater(t *testing.T) {
 	weeks, err := s.Weeks(ctx, p.ID, 5)
 	if err != nil || len(weeks) != 2 || weeks[0].Corrected || !weeks[1].Corrected {
 		t.Fatalf("corrected flags: %+v %v", weeks, err)
+	}
+}
+
+// Codex: subject lines are credited by the reply's thread, not by address.
+func TestSubjectLinesAreCreditedOnlyWithTheEmailARepliedTo(t *testing.T) {
+	s := &Store{Pool: catalogdb.TestDB(t)}
+	ctx := context.Background()
+	p := readyPod(t, s, "Brightvale")
+	exec := func(q string, args ...any) {
+		t.Helper()
+		if _, err := s.Pool.Exec(ctx, q, args...); err != nil {
+			t.Fatal(err)
+		}
+	}
+	now := time.Now()
+	// Two emails to the same person; they answered the second.
+	exec(`INSERT INTO founderos_outbox (id, workspace_id, source, to_address, subject, body, status, sent_at, sequence_key) VALUES
+		('o1', $1, 'test', 'a@x.example', 'Three warehouses', 'b', 'sent', $2, 's0'),
+		('o2', $1, 'test', 'a@x.example', 'Quick follow-up', 'b', 'sent', $3, 's1')`, p.WorkspaceID, now.Add(-72*time.Hour), now.Add(-24*time.Hour))
+	exec(`INSERT INTO founderos_pod_reply_messages (pod_id, message_id, sender, outbox_id, threaded) VALUES ($1, '<m1>', 'a@x.example', 'o2', true)`, p.ID)
+	ev := s.reviewEvidence(ctx, p, now.AddDate(0, 0, -7), now.Add(time.Hour))
+	if !strings.Contains(ev, `"Quick follow-up": sent 1, replied 1`) || !strings.Contains(ev, `"Three warehouses": sent 1, replied 0`) {
+		t.Fatalf("evidence:\n%s", ev)
 	}
 }

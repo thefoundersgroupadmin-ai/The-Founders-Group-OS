@@ -156,7 +156,7 @@ func (s *Store) TaskBriefs(ctx context.Context, b TaskBoard) (int, error) {
 			name = j.email
 		}
 		when := j.at.Format("Mon 2 Jan 15:04 MST")
-		issue, err := b.CreateTask(ctx, j.proj, j.ag, clip(p.ClientName+": call brief for "+name, 200),
+		issue, err := b.CreateTask(ctx, taskKey(p.ID, "brief", j.id), j.proj, j.ag, clip(p.ClientName+": call brief for "+name, 200),
 			briefTask(p, j.title, name, j.email, when, strings.TrimSpace(j.kno)))
 		if err != nil {
 			errs = append(errs, err)
@@ -164,6 +164,7 @@ func (s *Store) TaskBriefs(ctx context.Context, b TaskBoard) (int, error) {
 		}
 		if err := s.ownTask(ctx, issue, p.ID, "brief"); err != nil {
 			errs = append(errs, err)
+			continue
 		}
 
 		if _, err := s.Pool.Exec(ctx, `UPDATE founderos_pod_meetings SET brief_issue_id = $2 WHERE id = $1`, j.id, issue); err != nil {

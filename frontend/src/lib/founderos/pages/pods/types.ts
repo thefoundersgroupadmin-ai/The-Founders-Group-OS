@@ -46,3 +46,4 @@ export type WeekMetrics = {
 };
 export type Baseline = { meetingsPerMonth: number; replyRatePct: number; note: string; setAt?: string };
 export type WeeklyBody = { weeks: { week: string; metrics: WeekMetrics; review: string; corrected?: boolean; delivery?: string }[]; baseline: Baseline; thisWeek: WeekMetrics };
+export type PodAlert = { key: string; title: string; detail: string; firstSeen: string };

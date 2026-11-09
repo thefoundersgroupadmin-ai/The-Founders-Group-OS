@@ -247,7 +247,7 @@ func (s *Store) TaskCoaching(ctx context.Context, b TaskBoard) (int, error) {
 			errs = append(errs, err)
 			continue
 		}
-		issue, err := b.CreateTask(ctx, j.pr, j.a, clip(p.ClientName+": coaching notes for the call with "+j.name, 200),
+		issue, err := b.CreateTask(ctx, taskKey(p.ID, "coaching", j.id), j.pr, j.a, clip(p.ClientName+": coaching notes for the call with "+j.name, 200),
 			coachingTask(p, docs, j.title, j.name, when, j.brief, j.tr))
 		if err != nil {
 			errs = append(errs, err)
@@ -255,6 +255,7 @@ func (s *Store) TaskCoaching(ctx context.Context, b TaskBoard) (int, error) {
 		}
 		if err := s.ownTask(ctx, issue, p.ID, "coaching"); err != nil {
 			errs = append(errs, err)
+			continue
 		}
 
 		if _, err := s.Pool.Exec(ctx, `UPDATE founderos_pod_meetings SET coaching_issue_id = $2 WHERE id = $1`, j.id, issue); err != nil {

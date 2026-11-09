@@ -33,8 +33,14 @@ func (p podBoard) UpdateScheduleTrigger(ctx context.Context, triggerID, cron, tz
 	return p.b.UpdateScheduleTrigger(ctx, triggerID, cron, tz)
 }
 
-func (p podBoard) CreateTask(ctx context.Context, projectID, agentID, title, description string) (string, error) {
-	return p.b.CreateTask(ctx, projectID, agentID, title, description)
+func (p podBoard) CreateTask(ctx context.Context, key, projectID, agentID, title, description string) (string, error) {
+	return p.b.CreateTask(ctx, key, projectID, agentID, title, description)
+}
+func (p podBoard) TaskStatus(ctx context.Context, issueID string) (string, error) {
+	return p.b.TaskStatus(ctx, issueID)
+}
+func (p podBoard) Nudge(ctx context.Context, issueID, message string) error {
+	return p.b.Nudge(ctx, issueID, message)
 }
 
 // podBoardFor is swapped in tests.
@@ -55,3 +61,6 @@ func resyncPodAgent(ctx context.Context, d *Deps, st *pods.Store, slug string) s
 	}
 	return ""
 }
+
+// podWatchFor is swapped in tests.
+var podWatchFor = func(d *Deps) pods.TaskWatch { return podBoard{paperclip.PodBoard{C: paperclip.New(d.Resolver)}} }

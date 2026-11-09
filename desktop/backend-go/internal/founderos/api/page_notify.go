@@ -64,6 +64,7 @@ var notifyKindLabels = map[string]string{
 	notify.KindAgent:    "An agent finished a task",
 	notify.KindBrief:    "Morning brief",
 	notify.KindHealth:   "The Conductor stops answering",
+	notify.KindPods:     "A client's AI SDR needs attention",
 }
 
 func notifyStatusOf(d *Deps, id string) notifyStatus {

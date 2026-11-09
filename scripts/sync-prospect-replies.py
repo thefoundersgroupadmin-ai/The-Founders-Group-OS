@@ -23,7 +23,7 @@ import sys
 import urllib.request
 from datetime import date, datetime, timedelta
 from email.header import decode_header, make_header
-from email.utils import parseaddr
+from email.utils import parseaddr, parsedate_to_datetime
 from pathlib import Path
 
 REPO = Path(__file__).resolve().parent.parent
@@ -83,13 +83,16 @@ def company_contacts(contacts, sender):
     return [c[0] for c in contacts if c[3].strip().lower().rsplit("@", 1)[-1] == domain]
 
 
-def message_claim_query(slug, mid, sender, when):
+def message_claim_query(slug, mid, sender, when, outbox_id=None, threaded=False):
     """Record an inbound message once per pod mailbox (Codex final review #2) and
     return what was done with it ('' = not yet). One statement, so the only
-    output is the routing state (Codex fix review: command tags were misread)."""
+    output is the routing state (Codex fix review: command tags were misread).
+    outbox_id is the email it answers; threaded says whether that came from the
+    reply's own thread headers or, failing those, the latest email to them."""
     pod = f"(select id from founderos_client_pods where slug={sql(slug)})"
-    return ("with ins as (insert into founderos_pod_reply_messages (pod_id, message_id, sender, received_at) "
-            f"values ({pod}, {sql(mid)}, {sql(sender)}, {sql(when) if when else 'null'}) "
+    return ("with ins as (insert into founderos_pod_reply_messages (pod_id, message_id, sender, received_at, outbox_id, threaded) "
+            f"values ({pod}, {sql(mid)}, {sql(sender)}, {sql(when) if when else 'null'}, "
+            f"{sql(outbox_id) if outbox_id else 'null'}, {'true' if threaded else 'false'}) "
             "on conflict (pod_id, message_id) do nothing returning routed) "
             "select coalesce((select routed from ins), "
             f"(select routed from founderos_pod_reply_messages where pod_id={pod} and message_id={sql(mid)}), '')")
@@ -126,6 +129,55 @@ def person_handoff_query(slug, mid, cid, sender, subject, body):
     return ("insert into founderos_pod_handoffs (pod_id, issue_id, contact_id, summary) "
             f"select id, {sql('msg:' + slug + ':' + mid)}, {sql(cid)}, {sql(summary)} from founderos_client_pods "
             f"where slug={sql(slug)} on conflict (issue_id) do nothing")
+
+
+# The Message-ID TFG OS gives each outbox email: <tfg.<outbox id>.<attempt>.<random>@domain>.
+THREAD_ID = re.compile(r"<tfg\.([A-Za-z0-9_-]{1,80})\.\d+\.[0-9a-f]{4,32}@[^>\s]+>")
+
+
+def thread_outbox_ids(in_reply_to, references):
+    """Outbox ids a reply's thread headers point at, nearest first: In-Reply-To,
+    then References from the most recent back."""
+    ids = THREAD_ID.findall(in_reply_to or "")
+    for i in reversed(THREAD_ID.findall(references or "")):
+        if i not in ids:
+            ids.append(i)
+    return ids
+
+
+def thread_query(ws, ids):
+    """The first of these outbox emails that this pod actually sent: never
+    another workspace's, so a crafted header can't cross clients."""
+    if not ids:
+        return None
+    order = " ".join(f"when {sql(i)} then {n}" for n, i in enumerate(ids))
+    return ("select o.id, coalesce(o.contact_id, ''), coalesce(o.company, '') from founderos_outbox o "
+            f"where o.workspace_id={sql(ws)} and o.status='sent' and o.id in ({', '.join(sql(i) for i in ids)}) "
+            f"order by case o.id {order} end limit 1")
+
+
+def latest_sent_query(ws, sender, contact_id, when):
+    """Without thread headers: the latest email this pod sent to that address
+    (or contact) before the reply arrived."""
+    before = f"and o.sent_at <= {sql(when)}::timestamptz " if when else ""
+    return ("select o.id from founderos_outbox o "
+            f"where o.workspace_id={sql(ws)} and o.status='sent' and coalesce(o.sequence_key, '') <> 'reply' "
+            f"and (lower(o.to_address)={sql(sender.strip().lower())} or o.contact_id={sql(contact_id)}) {before}"
+            "order by o.sent_at desc limit 1")
+
+
+def received_iso(when):
+    """A message's Date header as ISO time, or "" when it can't be read."""
+    try:
+        return parsedate_to_datetime(str(when)).isoformat() if when else ""
+    except (TypeError, ValueError, IndexError):
+        return ""
+
+
+def reply_task_key(slug, mid):
+    """The board key for one reply's AI task: a retry replays the same task."""
+    import hashlib
+    return f"tfg-pod:{slug}:reply:" + hashlib.sha256(mid.encode()).hexdigest()[:32]
 
 
 def seen_for(seen, slug):
@@ -305,24 +357,37 @@ def hq_pass():
 POD_STATE = Path.home() / ".founderos/state/pod-replies.json"
 
 
-def search_replies(mailbox, domains, since, seen):
-    """New messages from watched domains/addresses in one mailbox."""
+def search_replies(mailbox, domains, since, seen, own=()):
+    """New messages in one mailbox: from watched domains/addresses, and any
+    reply in the thread of an email TFG OS sent (someone forwarded it, or a
+    colleague answered from another address). Each carries the outbox ids its
+    thread headers point at; a thread-only hit has no contact yet (None)."""
     m = imaplib.IMAP4_SSL(mailbox["host"], mailbox["port"], timeout=30)
     m.login(mailbox["user"], mailbox["pass"])
     m.select("INBOX", readonly=True)
-    found = []
+    found, got = [], set()
+
+    def take(num, contact, accept):
+        _, parts = m.fetch(num, "(BODY.PEEK[])")
+        msg = email.message_from_bytes(parts[0][1])
+        mid = (msg.get("Message-ID") or "").strip() or f"msg:{num.decode()}"
+        sender = parseaddr(msg.get("From", ""))[1].lower()
+        if mid in seen or mid in got or sender in own or not accept(sender):
+            return
+        got.add(mid)
+        refs = thread_outbox_ids(msg.get("In-Reply-To", ""), msg.get("References", ""))
+        found.append((mid, contact, sender, str(make_header(decode_header(msg.get("Subject", "")))),
+                      msg.get("Date", ""), text_body(msg), refs))
+
     for domain, contact in domains.items():
         whole = "@" in domain
         _, data = m.search(None, f'(SINCE {since} FROM "{domain if whole else "@" + domain}")')
         for num in data[0].split():
-            _, parts = m.fetch(num, "(BODY.PEEK[])")
-            msg = email.message_from_bytes(parts[0][1])
-            mid = (msg.get("Message-ID") or "").strip() or f"{domain}:{num.decode()}"
-            sender = parseaddr(msg.get("From", ""))[1].lower()
-            if mid in seen or not (sender == domain if whole else sender.endswith("@" + domain)):
-                continue
-            found.append((mid, contact, sender, str(make_header(decode_header(msg.get("Subject", "")))),
-                          msg.get("Date", ""), text_body(msg)))
+            take(num, contact, lambda s, d=domain, w=whole: s == d if w else s.endswith("@" + d))
+    for header in ("In-Reply-To", "References"):
+        _, data = m.search(None, f'(SINCE {since} HEADER {header} "<tfg.")')
+        for num in data[0].split():
+            take(num, None, lambda s: bool(s))
     m.logout()
     return found
 
@@ -363,35 +428,50 @@ def pod_pass():
         if not domains:
             continue
         try:
-            found = search_replies(box, domains, since, seen_for(seen, slug))
+            found = search_replies(box, domains, since, seen_for(seen, slug), own={box["user"].lower()})
         except (imaplib.IMAP4.error, OSError) as e:
             print(f"{slug}: mailbox unreadable ({e}); will retry")
             continue
         print(f"{slug}: {len(found)} new repl{'y' if len(found) == 1 else 'ies'}")
-        for mid, (cid, cws, company), sender, subject, when, body in found:
+        for mid, contact, sender, subject, when, body, refs in found:
+            # The email it answers, by its thread first (Codex: attribution by thread).
+            thread = psql(db, thread_query(ws, refs)) if refs else []
+            thread = thread[0] if thread and thread[0] and thread[0][0] else None
+            if contact is None:
+                if not thread or not thread[1]:
+                    continue  # a thread header naming no email this pod sent: not ours
+                contact = (thread[1], ws, thread[2])
+            cid, cws, company = contact
             exact = reply_contact(pod_contacts, sender)
             if exact:
                 cid, company = exact[0], exact[2] or company
+            elif thread and thread[1]:
+                # Someone else answered in the thread: it belongs to whoever the email went to.
+                cid, company = thread[1], thread[2] or company
             if dry:
                 print(f"  {company}: {sender} | {subject}")
                 continue
-            done = psql(db, message_claim_query(slug, mid, sender, str(when) if when else ""))
+            when_iso = received_iso(when)
+            outbox_id, threaded = (thread[0], True) if thread else (None, False)
+            if not outbox_id:
+                last = psql(db, latest_sent_query(ws, sender, cid, when_iso))
+                outbox_id = last[0][0] if last and last[0] and last[0][0] else None
+            done = psql(db, message_claim_query(slug, mid, sender, when_iso, outbox_id, threaded))
             state = done[0][0] if done and done[0] else ""
-            if state == "creating":
-                # A run stopped between creating the AI task and recording it: never
-                # create a second one; flag it for a person (Codex round 3).
-                psql(db, message_done_query(slug, mid, "check", None, cid))
-                psql(db, "insert into founderos_client_activity (pod_id, kind, summary, ref) "
-                         f"select id, 'reply_check', {sql('A reply from ' + sender + ' may not have reached the AI SDR; check the task board')}, {sql(mid)} "
-                         f"from founderos_client_pods where slug={sql(slug)}")
-            if state:
+            # A run that stopped between creating the AI task and recording it
+            # finishes the job: the board replays the task by its key, so no
+            # second one is opened (Codex: idempotent task creation).
+            resume = state == "creating"
+            if state and not resume:
                 seen.add(f"pod/{slug}/{mid}")
                 continue
             if not exact or exact[3].strip().lower() != sender.strip().lower():
                 cid, name, company = sender_contact(cid, sender, company)
                 psql(db, sender_contact_query(ws, cid, name, sender, company))
             company_ids = company_contacts(pod_contacts, sender) + [cid]
-            if is_opt_out(body):
+            route = "ai" if resume else "opt_out" if is_opt_out(body) else \
+                "person" if int(psql(db, taken_over_query(ws, company_ids))[0][0]) > 0 else "ai"
+            if route == "opt_out":
                 # Under the pod send gate's lock, so a send in flight finishes first and none follows.
                 psql(db, f"select pg_advisory_xact_lock(hashtext('founderos-pod-send:' || {sql(ws)})); "
                          "insert into founderos_email_suppression (workspace_id, address, reason) "
@@ -402,7 +482,7 @@ def pod_pass():
                          f"select id, 'opted_out', {sql(company + ' asked not to be contacted again')}, {sql(cid)} "
                          f"from founderos_client_pods where slug={sql(slug)}")
                 psql(db, message_done_query(slug, mid, "opt_out", None, cid))
-            elif int(psql(db, taken_over_query(ws, company_ids))[0][0]) > 0:
+            elif route == "person":
                 # A person has this conversation: the new message goes to them, not the AI.
                 psql(db, person_handoff_query(slug, mid, cid, sender, subject, body))
                 psql(db, message_done_query(slug, mid, "person", None, cid))
@@ -411,8 +491,9 @@ def pod_pass():
                          f"from founderos_client_pods where slug={sql(slug)}")
             else:
                 psql(db, message_done_query(slug, mid, "creating", None, cid))
-                issue = paperclip(pc, "POST", f"/api/companies/{pc['PAPERCLIP_COMPANY_ID']}/issues",
-                                  pod_reply_task(pod, sender, company, subject, when, body))
+                task = pod_reply_task(pod, sender, company, subject, when, body)
+                task["idempotencyKey"] = reply_task_key(slug, mid)
+                issue = paperclip(pc, "POST", f"/api/companies/{pc['PAPERCLIP_COMPANY_ID']}/issues", task)
                 psql(db, message_done_query(slug, mid, "ai", issue["id"], cid))
                 psql(db, "insert into founderos_pod_task_owner (issue_id, pod_id, kind) "
                          f"select {sql(issue['id'])}, id, 'reply' from founderos_client_pods where slug={sql(slug)} on conflict do nothing")

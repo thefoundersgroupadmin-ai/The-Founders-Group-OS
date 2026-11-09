@@ -99,7 +99,7 @@ type Portal interface {
 }
 
 // Activity kinds that stay inside TFG (operator plumbing, not client news).
-var internalKinds = map[string]bool{"agent_synced": true, "mailbox": true, "pod_created": true}
+var internalKinds = map[string]bool{"agent_synced": true, "mailbox": true, "pod_created": true, "task_watch": true}
 
 // Sync runs one pass over every linked pod; one pod's failure does not stop the rest.
 func Sync(ctx context.Context, s *pods.Store, portal Portal) error {

@@ -92,3 +92,62 @@ func TestThePodsWorkReachesTheClientsCRMOnce(t *testing.T) {
 		t.Fatalf("notes %v", f.notes)
 	}
 }
+
+// Codex: CRM records were written once and never updated. Later changes now
+// reach the CRM as notes, once each, and nothing is noted on the first pass.
+func TestLaterChangesReachTheCRMAsNotesOnce(t *testing.T) {
+	s := &pods.Store{Pool: catalogdb.TestDB(t)}
+	ctx := context.Background()
+	p, err := s.Create(ctx, pods.NewPod{ClientName: "Brightvale", OwnerID: "u1"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	exec := func(q string, args ...any) {
+		t.Helper()
+		if _, err := s.Pool.Exec(ctx, q, args...); err != nil {
+			t.Fatal(err)
+		}
+	}
+	exec(`INSERT INTO founderos_funnel_contacts (id, workspace_id, name, status, venture, created_at, email, person, company)
+		VALUES ('ct-p', $1, 'Priya Shah', 'first_touch', 'client', now(), 'priya@brightvale.example', 'Priya Shah', 'Brightvale')`, p.WorkspaceID)
+	if _, err := s.RecordMeetings(ctx, p.Slug, []pods.Meeting{{UID: "b-1", Title: "Discovery call", Start: "2030-01-07T10:00:00Z",
+		AttendeeEmail: "priya@brightvale.example", AttendeeName: "Priya Shah"}}); err != nil {
+		t.Fatal(err)
+	}
+	f := &fakeCRM{contacts: map[string]Contact{}}
+	pass := func() {
+		t.Helper()
+		if _, err := SyncPod(ctx, s.Pool, p.ID, f); err != nil {
+			t.Fatal(err)
+		}
+	}
+	pass()
+	if len(f.meetings) != 1 || len(f.notes) != 0 {
+		t.Fatalf("first pass: meetings %v notes %v", f.meetings, f.notes)
+	}
+	// The brief arrives, the call moves, then is held with coaching; the
+	// prospect then opts out.
+	exec(`UPDATE founderos_pod_meetings SET brief = 'Priya runs ops.', starts_at = '2030-01-08T10:00:00Z'`)
+	pass()
+	pass()
+	exec(`UPDATE founderos_pod_meetings SET outcome = 'held', coaching = 'Ask about budget sooner.'`)
+	exec(`INSERT INTO founderos_email_suppression (workspace_id, address, reason) VALUES ($1, 'priya@brightvale.example', 'reply')`, p.WorkspaceID)
+	pass()
+	pass()
+	all := strings.Join(f.notes, "\n")
+	for _, want := range []string{"Call brief for Discovery call", "Priya runs ops.", "moved to Tue 8 Jan 2030", "was held", "Ask about budget sooner.", "Asked not to be contacted"} {
+		if strings.Count(all, want) != 1 {
+			t.Errorf("want %q once in notes:\n%s", want, all)
+		}
+	}
+	if len(f.notes) != 5 {
+		t.Fatalf("notes %d:\n%s", len(f.notes), all)
+	}
+	// Cancelling it is noted once.
+	exec(`UPDATE founderos_pod_meetings SET status = 'cancelled'`)
+	pass()
+	pass()
+	if !strings.Contains(f.notes[len(f.notes)-1], "was cancelled") || len(f.notes) != 6 || len(f.meetings) != 1 {
+		t.Fatalf("after cancel: %v / %v", f.notes, f.meetings)
+	}
+}

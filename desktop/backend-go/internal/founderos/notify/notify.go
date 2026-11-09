@@ -31,11 +31,12 @@ const (
 	KindAgent    = "agent"    // an agent finished a task
 	KindBrief    = "brief"    // the morning summary
 	KindHealth   = "health"   // the Conductor can't answer
+	KindPods     = "pods"     // a client's AI SDR needs attention
 	KindTest     = "test"
 )
 
 // Kinds lists the switchable kinds in the order the page shows them.
-var Kinds = []string{KindHealth, KindApproval, KindOutbox, KindReply, KindSent, KindAgent, KindBrief}
+var Kinds = []string{KindHealth, KindPods, KindApproval, KindOutbox, KindReply, KindSent, KindAgent, KindBrief}
 
 // Event is one thing worth telling someone.
 type Event struct {

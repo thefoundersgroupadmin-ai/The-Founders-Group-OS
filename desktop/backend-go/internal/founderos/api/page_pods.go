@@ -115,7 +115,12 @@ func registerPods(s *gin.RouterGroup, d *Deps) {
 		for _, p := range list {
 			out = append(out, podOut(p))
 		}
-		c.JSON(http.StatusOK, gin.H{"pods": out})
+		// Open alerts per pod, for the list's "needs attention" marks.
+		alerts, _ := st.OpenAlertCounts(c.Request.Context())
+		if alerts == nil {
+			alerts = map[string]int{}
+		}
+		c.JSON(http.StatusOK, gin.H{"pods": out, "alerts": alerts})
 	})
 	s.POST("/pods", func(c *gin.Context) {
 		st, v, ok := store(c)
@@ -678,6 +683,49 @@ func registerPods(s *gin.RouterGroup, d *Deps) {
 			out = append(out, gin.H{"week": w.Start, "metrics": w.M, "review": w.Review, "corrected": w.Corrected, "delivery": w.Delivery})
 		}
 		c.JSON(http.StatusOK, gin.H{"weeks": out, "baseline": base, "thisWeek": now})
+	})
+	// Open alerts: what about this AI SDR needs a person right now.
+	s.GET("/pods/:slug/alerts", func(c *gin.Context) {
+		st, p, ok := pod(c)
+		if !ok {
+			return
+		}
+		list, err := st.Alerts(c.Request.Context(), p.ID)
+		if err != nil {
+			podError(c, err)
+			return
+		}
+		c.JSON(http.StatusOK, gin.H{"alerts": list})
+	})
+	// Refresh this pod's alerts now (after fixing something), without waiting
+	// for the five-minute check.
+	s.POST("/pods/:slug/alerts/refresh", func(c *gin.Context) {
+		st, p, ok := pod(c)
+		if !ok {
+			return
+		}
+		pushPodAlerts(c.Request.Context(), st)
+		list, err := st.Alerts(c.Request.Context(), p.ID)
+		if err != nil {
+			podError(c, err)
+			return
+		}
+		c.JSON(http.StatusOK, gin.H{"alerts": list})
+	})
+	// A person dealt with a stuck AI task: stop flagging it.
+	s.POST("/pods/:slug/tasks/:issue/resolved", func(c *gin.Context) {
+		st, p, ok := pod(c)
+		if !ok {
+			return
+		}
+		ctx := c.Request.Context()
+		if err := st.ResolveStuck(ctx, p.Slug, c.Param("issue")); err != nil {
+			podError(c, err)
+			return
+		}
+		_ = st.Log(ctx, p.ID, "task_watch", "A stuck AI task was marked dealt with", c.Param("issue"))
+		pushPodAlerts(ctx, st)
+		c.JSON(http.StatusOK, gin.H{"ok": true})
 	})
 	// Hand-off bundle (owner only): everything the client owns, as one zip.
 	s.GET("/pods/:slug/handoff-bundle", func(c *gin.Context) {

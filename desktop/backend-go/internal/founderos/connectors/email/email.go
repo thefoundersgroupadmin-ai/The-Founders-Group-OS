@@ -21,6 +21,7 @@ import (
 	"mime/quotedprintable"
 	"net"
 	"net/mail"
+	"regexp"
 	"strconv"
 	"strings"
 	"sync"
@@ -113,6 +114,10 @@ type Reply struct {
 	To         string
 	Subject    string
 	Text       string
+	// MessageID, when set, is the local part of the Message-ID header (before
+	// "@<sender domain>"), so a reply's thread headers lead back to this email.
+	// Only letters, digits, '.', '_' and '-' are kept.
+	MessageID string
 	// RecipientApproved is the mail guard's per-call MAIL_ALLOW_EXTERNAL: set
 	// only when a person approved this exact message and recipient (the
 	// /os/outbox approve), never as a default.
@@ -612,7 +617,7 @@ func (c *Connector) SendReply(ctx context.Context, r Reply) error {
 		if err != nil {
 			return err
 		}
-		if _, err := w.Write(buildMessage(cfg.From, cfg.FromName, rcpts, r.Subject, r.Text, c.now())); err != nil {
+		if _, err := w.Write(buildMessage(cfg.From, cfg.FromName, rcpts, r.Subject, r.Text, c.now(), r.MessageID)); err != nil {
 			_ = w.Close()
 			return fmt.Errorf("%w: %v", ErrDeliveryUncertain, err)
 		}
@@ -632,13 +637,19 @@ func (c *Connector) SendReply(ctx context.Context, r Reply) error {
 
 var headerSafe = strings.NewReplacer("\r", " ", "\n", " ")
 
-func buildMessage(from, fromName string, to []string, subject, text string, now time.Time) []byte {
+var messageIDUnsafe = regexp.MustCompile(`[^A-Za-z0-9._-]`)
+
+func buildMessage(from, fromName string, to []string, subject, text string, now time.Time, messageID string) []byte {
 	if subject == "" {
 		subject = "(no subject)"
 	}
-	domain := from[strings.LastIndex(from, "@")+1:]
-	id := make([]byte, 12)
-	_, _ = rand.Read(id)
+	domain := headerSafe.Replace(from[strings.LastIndex(from, "@")+1:])
+	raw := make([]byte, 12)
+	_, _ = rand.Read(raw)
+	local := hex.EncodeToString(raw)
+	if m := messageIDUnsafe.ReplaceAllString(messageID, ""); m != "" {
+		local = clipID(m)
+	}
 
 	var b bytes.Buffer
 	fromHeader := headerSafe.Replace(from)
@@ -650,7 +661,7 @@ func buildMessage(from, fromName string, to []string, subject, text string, now 
 	fmt.Fprintf(&b, "To: %s\r\n", headerSafe.Replace(strings.Join(to, ", ")))
 	fmt.Fprintf(&b, "Subject: %s\r\n", mime.QEncoding.Encode("utf-8", headerSafe.Replace(subject)))
 	fmt.Fprintf(&b, "Date: %s\r\n", now.Format(time.RFC1123Z))
-	fmt.Fprintf(&b, "Message-ID: <%s@%s>\r\n", hex.EncodeToString(id), domain)
+	fmt.Fprintf(&b, "Message-ID: <%s@%s>\r\n", local, domain)
 	b.WriteString("MIME-Version: 1.0\r\n")
 	b.WriteString("Content-Type: text/plain; charset=utf-8\r\n")
 	b.WriteString("Content-Transfer-Encoding: quoted-printable\r\n\r\n")
@@ -659,4 +670,11 @@ func buildMessage(from, fromName string, to []string, subject, text string, now 
 	_ = qp.Close()
 	b.WriteString("\r\n")
 	return b.Bytes()
+}
+
+func clipID(s string) string {
+	if len(s) > 120 {
+		return s[:120]
+	}
+	return s
 }

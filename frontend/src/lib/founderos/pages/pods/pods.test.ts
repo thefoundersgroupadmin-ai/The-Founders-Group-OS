@@ -98,3 +98,11 @@ describe('meetings and results (M6)', () => {
 		expect(resultsSummary({ ...body, weeks: [w('2026-08-03', 5, 5, 5)] }, now)).toMatchObject({ meetings: 0, replyRate: null, weeksCovered: 0 });
 	});
 });
+
+describe('stuckTaskOf', () => {
+	it('finds the board task of a stuck-task alert only', async () => {
+		const { stuckTaskOf } = await import('./pods');
+		expect(stuckTaskOf('task:abc-123')).toBe('abc-123');
+		expect(stuckTaskOf('health:calendar')).toBe('');
+	});
+});

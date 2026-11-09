@@ -8,14 +8,18 @@
 	import type { Pod } from '$lib/founderos/pages/pods/types';
 
 	let pods = $state<Pod[] | null>(null);
+	let alerts = $state<Record<string, number>>({});
 	let failure = $state<string | null>(null);
 	let form = $state({ clientName: '', package: 'custom', reps: 4 });
 	let note = $state('');
 	let busy = $state(false);
 
 	function load() {
-		founderosFetch<{ pods: Pod[] }>('/pods')
-			.then((b) => (pods = b.pods))
+		founderosFetch<{ pods: Pod[]; alerts?: Record<string, number> }>('/pods')
+			.then((b) => {
+				pods = b.pods;
+				alerts = b.alerts ?? {};
+			})
 			.catch((e: unknown) => (failure = e instanceof Error ? e.message : 'unreachable'));
 	}
 	onMount(load);
@@ -67,7 +71,10 @@
 									<p class="text-[14px] font-semibold">{p.clientName}</p>
 									<p class="bn-dim font-mono text-[11px]">{p.package} · {p.reps} reps · {p.senderEmail || 'no sender yet'}</p>
 								</div>
-								<Badge tone={STATUS_BADGE[p.status].tone}>{STATUS_BADGE[p.status].label}</Badge>
+								<div class="flex items-center gap-2">
+									{#if alerts[p.slug]}<Badge tone="err">{alerts[p.slug]} need{alerts[p.slug] === 1 ? 's' : ''} attention</Badge>{/if}
+									<Badge tone={STATUS_BADGE[p.status].tone}>{STATUS_BADGE[p.status].label}</Badge>
+								</div>
 							</div>
 						</Slab>
 					</a>

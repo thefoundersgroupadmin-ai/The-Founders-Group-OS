@@ -63,7 +63,11 @@ func (s *Store) WatchTasks(ctx context.Context, b TaskWatch, now time.Time) (nud
 		FROM founderos_pod_task_owner o JOIN founderos_client_pods p ON p.id = o.pod_id
 		WHERE o.settled_at IS NULL AND o.kind IN ('enquiry', 'reply', 'brief', 'coaching', 'review')
 		AND p.status IN ('live', 'dry_run', 'paused')
-		ORDER BY o.stuck_at IS NOT NULL, o.created_at LIMIT 200`)
+		AND (o.stuck_at IS NULL OR o.issue_id IN (
+			-- Stuck ones are rechecked a rotating 50 at a time, so no backlog
+			-- crowds out new work or keeps a later one from clearing.
+			SELECT issue_id FROM founderos_pod_task_owner WHERE stuck_at IS NOT NULL AND settled_at IS NULL ORDER BY random() LIMIT 50))
+		ORDER BY o.stuck_at IS NOT NULL, o.created_at LIMIT 250`)
 	if err != nil {
 		return 0, 0, err
 	}

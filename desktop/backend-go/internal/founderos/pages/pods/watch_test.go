@@ -157,6 +157,22 @@ func TestABriefStillMissingJustBeforeTheCallIsFlaggedEarly(t *testing.T) {
 	if _, stuck, err := s.WatchTasks(ctx, w, now.Add(5*time.Minute)); err != nil || stuck != 1 {
 		t.Fatalf("not flagged before the call: %d %v", stuck, err)
 	}
+	if fresh, _ := s.RefreshAlerts(ctx); len(fresh) != 1 {
+		t.Fatalf("no alert for the stuck brief: %+v", fresh)
+	}
+	// The brief arrives late: the task settles and the alert closes by itself (Codex round 4 #4).
+	if _, err := s.Pool.Exec(ctx, `UPDATE founderos_pod_meetings SET brief = 'Late but here' WHERE brief_issue_id = 'brief-1'`); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := s.WatchTasks(ctx, w, now.Add(10*time.Minute)); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.RefreshAlerts(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if open, _ := s.Alerts(ctx, p.ID); len(open) != 0 {
+		t.Fatalf("alert stayed open after the brief arrived: %+v", open)
+	}
 }
 
 func TestBrokenConnectionsAndFailedNoticesRaiseAlertsThatClear(t *testing.T) {

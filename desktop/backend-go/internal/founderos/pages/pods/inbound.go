@@ -167,6 +167,13 @@ func inboundBrief(p Pod, e Enquiry) string {
 // TaskInbound turns new enquiries into tasks for each pod's own AI SDR and
 // records the conversation, so its reply may go out. Returns how many it tasked.
 func (s *Store) TaskInbound(ctx context.Context, b TaskBoard) (int, error) {
+	// The board forgets task keys after seven days, so an enquiry still not
+	// tasked after six is never retried blind: a person replies (Codex round 4 #2).
+	if _, err := s.Pool.Exec(ctx, `UPDATE founderos_pod_inbound SET status = 'failed',
+		error = 'waited over six days for the AI SDR; reply by hand'
+		WHERE status = 'new' AND received_at < now() - interval '6 days'`); err != nil {
+		return 0, err
+	}
 	rows, err := s.Pool.Query(ctx, `SELECT i.id, i.name, i.email, i.company, i.phone, i.message, i.contact_id, p.slug,
 		a.project_id, a.agent_id FROM founderos_pod_inbound i JOIN founderos_client_pods p ON p.id = i.pod_id
 		LEFT JOIN founderos_pod_agents a ON a.pod_id = p.id WHERE i.status = 'new' ORDER BY i.received_at LIMIT 20`)

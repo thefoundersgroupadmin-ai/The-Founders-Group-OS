@@ -118,6 +118,34 @@ func TestEachEnquiryBecomesATaskForThePodsOwnAgentAndAConversation(t *testing.T)
 	}
 }
 
+// Codex round 4 #2: an enquiry untasked for over six days is never replayed
+// blind (the board forgets task keys after seven); it goes to a person.
+func TestAnEnquiryTooOldToReplayGoesToAPerson(t *testing.T) {
+	s := &Store{Pool: catalogdb.TestDB(t)}
+	ctx := context.Background()
+	p := readyPod(t, s, "Brightvale")
+	if _, err := s.Provision(ctx, newFakeBoard(), p.Slug); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.Pool.Exec(ctx, `UPDATE founderos_client_pods SET status = 'dry_run' WHERE id = $1`, p.ID); err != nil {
+		t.Fatal(err)
+	}
+	token, _ := s.NewInboundToken(ctx, p.Slug)
+	if _, err := s.Intake(ctx, token, Enquiry{Email: "tom@harbour.example", Message: "Hi"}, "ip"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.Pool.Exec(ctx, `UPDATE founderos_pod_inbound SET received_at = now() - interval '7 days'`); err != nil {
+		t.Fatal(err)
+	}
+	f := &fakeTasks{}
+	if n, err := s.TaskInbound(ctx, f); err != nil || n != 0 || len(f.titles) != 0 {
+		t.Fatalf("an old enquiry was tasked: %d %v", n, err)
+	}
+	if fresh, _ := s.RefreshAlerts(ctx); len(fresh) != 1 || fresh[0].Key != "enquiry" {
+		t.Fatalf("no alert for the old enquiry: %+v", fresh)
+	}
+}
+
 // Codex fix review #3: a buyer a person took over who writes in again through
 // the website form goes to the person, not the AI.
 func TestARepeatEnquiryAfterATakeoverGoesToThePerson(t *testing.T) {

@@ -40,7 +40,7 @@ const briefLead = time.Hour
 type watched struct {
 	issue, podID, kind, client string
 	created                    time.Time
-	nudged                     *time.Time
+	nudged, stuckAt            *time.Time
 	done, gone                 bool
 	callAt                     *time.Time
 }
@@ -48,7 +48,7 @@ type watched struct {
 // WatchTasks checks every open pod task once and returns how many it nudged
 // and how many it marked stuck.
 func (s *Store) WatchTasks(ctx context.Context, b TaskWatch, now time.Time) (nudged, stuck int, err error) {
-	rows, err := s.Pool.Query(ctx, `SELECT o.issue_id, o.pod_id::text, o.kind, p.client_name, o.created_at, o.nudged_at,
+	rows, err := s.Pool.Query(ctx, `SELECT o.issue_id, o.pod_id::text, o.kind, p.client_name, o.created_at, o.nudged_at, o.stuck_at,
 		CASE o.kind
 			WHEN 'brief' THEN EXISTS (SELECT 1 FROM founderos_pod_meetings m WHERE m.brief_issue_id = o.issue_id AND m.brief <> '')
 			WHEN 'coaching' THEN EXISTS (SELECT 1 FROM founderos_pod_meetings m WHERE m.coaching_issue_id = o.issue_id AND m.coaching <> '')
@@ -61,7 +61,7 @@ func (s *Store) WatchTasks(ctx context.Context, b TaskWatch, now time.Time) (nud
 			ELSE EXISTS (SELECT 1 FROM founderos_pod_conversations c WHERE c.issue_id = o.issue_id AND c.taken_over_at IS NOT NULL) END,
 		(SELECT m.starts_at FROM founderos_pod_meetings m WHERE o.kind = 'brief' AND m.brief_issue_id = o.issue_id LIMIT 1)
 		FROM founderos_pod_task_owner o JOIN founderos_client_pods p ON p.id = o.pod_id
-		WHERE o.settled_at IS NULL AND o.stuck_at IS NULL AND o.kind IN ('enquiry', 'reply', 'brief', 'coaching', 'review')
+		WHERE o.settled_at IS NULL AND o.kind IN ('enquiry', 'reply', 'brief', 'coaching', 'review')
 		AND p.status IN ('live', 'dry_run', 'paused')
 		ORDER BY o.created_at LIMIT 200`)
 	if err != nil {
@@ -70,7 +70,7 @@ func (s *Store) WatchTasks(ctx context.Context, b TaskWatch, now time.Time) (nud
 	var list []watched
 	for rows.Next() {
 		var w watched
-		if err := rows.Scan(&w.issue, &w.podID, &w.kind, &w.client, &w.created, &w.nudged, &w.done, &w.gone, &w.callAt); err != nil {
+		if err := rows.Scan(&w.issue, &w.podID, &w.kind, &w.client, &w.created, &w.nudged, &w.stuckAt, &w.done, &w.gone, &w.callAt); err != nil {
 			rows.Close()
 			return 0, 0, err
 		}
@@ -84,8 +84,24 @@ func (s *Store) WatchTasks(ctx context.Context, b TaskWatch, now time.Time) (nud
 	for _, w := range list {
 		rule := stallRules[w.kind]
 		if w.done || w.gone {
+			// Including a task already flagged stuck whose work arrived late:
+			// the alert closes by itself (Codex round 4 #4).
 			if err := s.settle(ctx, w.issue); err != nil {
 				errs = append(errs, err)
+			}
+			if w.stuckAt != nil {
+				_ = s.Log(ctx, w.podID, "task_watch", "The "+rule.what+" arrived after all", w.issue)
+			}
+			continue
+		}
+		if w.stuckAt != nil {
+			// Already flagged: only an enquiry or reply finished on the board clears it.
+			if w.kind == "enquiry" || w.kind == "reply" {
+				if st, err := b.TaskStatus(ctx, w.issue); err == nil && (st == "done" || st == "cancelled") {
+					if err := s.settle(ctx, w.issue); err != nil {
+						errs = append(errs, err)
+					}
+				}
 			}
 			continue
 		}

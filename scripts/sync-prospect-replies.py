@@ -83,6 +83,27 @@ def company_contacts(contacts, sender):
     return [c[0] for c in contacts if c[3].strip().lower().rsplit("@", 1)[-1] == domain]
 
 
+def thread_company(contacts, contact_id):
+    """The contact a thread's email went to, and everyone at their company: a
+    reply forwarded to someone elsewhere still belongs to their conversation
+    (takeover, follow-ups) (Codex round 4 #1)."""
+    first = next((c for c in contacts if c[0] == contact_id), None)
+    if not first:
+        return [contact_id] if contact_id else []
+    return company_contacts(contacts, first[3]) + [contact_id]
+
+
+# Paperclip keeps task keys for seven days; a task first tried longer ago than
+# this is never replayed blind (Codex round 4 #2): a person checks it.
+REPLAY_DAYS = 6
+
+
+def claim_age_query(slug, mid):
+    """Days since a message was first claimed."""
+    return ("select coalesce(extract(epoch from now() - created_at) / 86400, 0)::int from founderos_pod_reply_messages "
+            f"where pod_id=(select id from founderos_client_pods where slug={sql(slug)}) and message_id={sql(mid)}")
+
+
 def message_claim_query(slug, mid, sender, when, outbox_id=None, threaded=False):
     """Record an inbound message once per pod mailbox (Codex final review #2) and
     return what was done with it ('' = not yet). One statement, so the only
@@ -462,6 +483,12 @@ def pod_pass():
             # finishes the job: the board replays the task by its key, so no
             # second one is opened (Codex: idempotent task creation).
             resume = state == "creating"
+            if resume and int(psql(db, claim_age_query(slug, mid))[0][0]) > REPLAY_DAYS:
+                psql(db, message_done_query(slug, mid, "check", None, cid))
+                psql(db, "insert into founderos_client_activity (pod_id, kind, summary, ref) "
+                         f"select id, 'reply_check', {sql('A reply from ' + sender + ' may not have reached the AI SDR; check the task board')}, {sql(mid)} "
+                         f"from founderos_client_pods where slug={sql(slug)}")
+                state, resume = "check", False
             if state and not resume:
                 seen.add(f"pod/{slug}/{mid}")
                 continue
@@ -469,6 +496,8 @@ def pod_pass():
                 cid, name, company = sender_contact(cid, sender, company)
                 psql(db, sender_contact_query(ws, cid, name, sender, company))
             company_ids = company_contacts(pod_contacts, sender) + [cid]
+            if thread and thread[1]:
+                company_ids += [i for i in thread_company(pod_contacts, thread[1]) if i not in company_ids]
             route = "ai" if resume else "opt_out" if is_opt_out(body) else \
                 "person" if int(psql(db, taken_over_query(ws, company_ids))[0][0]) > 0 else "ai"
             if route == "opt_out":
@@ -494,11 +523,13 @@ def pod_pass():
                 task = pod_reply_task(pod, sender, company, subject, when, body)
                 task["idempotencyKey"] = reply_task_key(slug, mid)
                 issue = paperclip(pc, "POST", f"/api/companies/{pc['PAPERCLIP_COMPANY_ID']}/issues", task)
-                psql(db, message_done_query(slug, mid, "ai", issue["id"], cid))
+                # Owner and conversation first, then "ai": a crash in between leaves
+                # it "creating", and the next pass replays and finishes (Codex round 4 #3).
                 psql(db, "insert into founderos_pod_task_owner (issue_id, pod_id, kind) "
                          f"select {sql(issue['id'])}, id, 'reply' from founderos_client_pods where slug={sql(slug)} on conflict do nothing")
                 psql(db, "insert into founderos_pod_conversations (issue_id, workspace_id, contact_id) "
                          f"values ({sql(issue['id'])}, {sql(ws)}, {sql(cid)}) on conflict do nothing")
+                psql(db, message_done_query(slug, mid, "ai", issue["id"], cid))
                 kind = "handoff_requested" if HUMAN.search((body or "")[:800]) else "reply_received"
                 psql(db, "insert into founderos_client_activity (pod_id, kind, summary, ref) "
                          f"select id, {sql(kind)}, {sql(company + ' replied: ' + subject[:140])}, {sql(issue.get('identifier') or cid)} "

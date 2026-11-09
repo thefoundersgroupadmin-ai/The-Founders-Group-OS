@@ -150,4 +150,10 @@ func TestLaterChangesReachTheCRMAsNotesOnce(t *testing.T) {
 	if !strings.Contains(f.notes[len(f.notes)-1], "was cancelled") || len(f.notes) != 6 || len(f.meetings) != 1 {
 		t.Fatalf("after cancel: %v / %v", f.notes, f.meetings)
 	}
+	// The opt-out is lifted: no note claiming they opted out (Codex round 4 #6).
+	exec(`DELETE FROM founderos_email_suppression`)
+	pass()
+	if len(f.notes) != 6 {
+		t.Fatalf("a note was written when the opt-out was lifted: %v", f.notes[6:])
+	}
 }

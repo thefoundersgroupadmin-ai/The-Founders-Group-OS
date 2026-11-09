@@ -158,19 +158,20 @@ func SyncPod(ctx context.Context, pool *pgxpool.Pool, podID string, crm CRM) (in
 	}
 
 	// 3. Meetings, with their call briefs.
-	mrows, err := pool.Query(ctx, `SELECT m.id::text, m.contact_id, m.title, m.brief, m.starts_at FROM founderos_pod_meetings m
+	mrows, err := pool.Query(ctx, `SELECT m.id::text, m.contact_id, m.title, m.brief, m.starts_at, coalesce(p.timezone, 'UTC')
+		FROM founderos_pod_meetings m JOIN founderos_client_pods p ON p.id = m.pod_id
 		WHERE m.pod_id = $1 AND m.status = 'booked' AND m.contact_id IS NOT NULL ORDER BY m.starts_at`, podID)
 	if err != nil {
 		return written, err
 	}
 	type meet struct {
-		id, contact, title, brief string
-		at                        *time.Time
+		id, contact, title, brief, tz string
+		at                            *time.Time
 	}
 	var ms []meet
 	for mrows.Next() {
 		var m meet
-		if err := mrows.Scan(&m.id, &m.contact, &m.title, &m.brief, &m.at); err != nil {
+		if err := mrows.Scan(&m.id, &m.contact, &m.title, &m.brief, &m.at, &m.tz); err != nil {
 			mrows.Close()
 			return written, err
 		}
@@ -193,6 +194,13 @@ func SyncPod(ctx context.Context, pool *pgxpool.Pool, podID string, crm CRM) (in
 		}
 		if err := remember(ctx, pool, podID, "meeting", m.id, rid); err != nil {
 			return written, err
+		}
+		// What the CRM was just given is the baseline for later change notes
+		// (Codex round 4 #5): its time, status and brief, as logged.
+		for local, v := range map[string]string{m.id + ":time": whenOf(m.at, m.tz), m.id + ":status": "booked", m.id + ":brief": m.brief} {
+			if err := remember(ctx, pool, podID, factKind, local, fingerprint(v)); err != nil {
+				return written, err
+			}
 		}
 		written++
 	}
@@ -247,6 +255,18 @@ func SyncPod(ctx context.Context, pool *pgxpool.Pool, podID string, crm CRM) (in
 
 const factKind = "fact"
 
+// whenOf formats a meeting time in the pod's timezone, as notes show it.
+func whenOf(at *time.Time, tz string) string {
+	if at == nil {
+		return ""
+	}
+	loc, err := time.LoadLocation(tz)
+	if err != nil {
+		loc = time.UTC
+	}
+	return at.In(loc).Format("Mon 2 Jan 2006, 15:04 MST")
+}
+
 // fact returns the stored fingerprint for a fact and whether one exists.
 func fact(ctx context.Context, pool *pgxpool.Pool, pod, local string) (string, bool, error) {
 	return mapped(ctx, pool, pod, factKind, local)
@@ -277,14 +297,7 @@ func syncChanges(ctx context.Context, pool *pgxpool.Pool, podID, ws string, crm 
 			rows.Close()
 			return 0, err
 		}
-		when := ""
-		if at != nil {
-			loc, lerr := time.LoadLocation(tz)
-			if lerr != nil {
-				loc = time.UTC
-			}
-			when = at.In(loc).Format("Mon 2 Jan 2006, 15:04 MST")
-		}
+		when := whenOf(at, tz)
 		name := strings.TrimSpace(title)
 		if name == "" {
 			name = "Meeting"
@@ -334,7 +347,11 @@ func syncChanges(ctx context.Context, pool *pgxpool.Pool, podID, ws string, crm 
 		if optedOut {
 			opt = "yes"
 		}
-		cs = append(cs, change{id + ":optout", opt, id, "Asked not to be contacted again. The AI SDR will not email them."})
+		optNote := "Asked not to be contacted again. The AI SDR will not email them."
+		if !optedOut {
+			optNote = "" // lifted: recorded silently, never a false opt-out note (Codex round 4 #6)
+		}
+		cs = append(cs, change{id + ":optout", opt, id, optNote})
 	}
 	crows.Close()
 	if err := crows.Err(); err != nil {
@@ -365,7 +382,7 @@ func syncChanges(ctx context.Context, pool *pgxpool.Pool, podID, ws string, crm 
 		}
 		if !silent {
 			if written >= room {
-				break
+				continue // noted on a later pass; silent baselines still recorded
 			}
 			if err := crm.AddNote(ctx, rid, c.note); err != nil {
 				return written, err

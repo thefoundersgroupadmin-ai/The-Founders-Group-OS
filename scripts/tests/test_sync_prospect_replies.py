@@ -127,6 +127,13 @@ class ThreadTest(unittest.TestCase):
         self.assertIn("'o2', true", q)
         self.assertEqual(q.count(";"), 0)
 
+    def test_a_forwarded_reply_still_belongs_to_the_original_company(self):
+        contacts = [("c-ana", "w", "Acme", "ana@acme.example"), ("c-bo", "w", "Acme", "bo@acme.example"),
+                    ("c-x", "w", "Other", "x@other.example")]
+        self.assertEqual(sorted(sync.thread_company(contacts, "c-ana")), ["c-ana", "c-ana", "c-bo"])
+        self.assertEqual(sync.thread_company(contacts, "c-gone"), ["c-gone"])
+        self.assertIn("message_id='<m1>'", sync.claim_age_query("client-a", "<m1>"))
+
     def test_dates_and_task_keys(self):
         self.assertEqual(sync.received_iso("Mon, 09 Nov 2026 10:00:00 +0000"), "2026-11-09T10:00:00+00:00")
         self.assertEqual(sync.received_iso("not a date"), "")

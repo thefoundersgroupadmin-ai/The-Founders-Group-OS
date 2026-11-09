@@ -1,5 +1,6 @@
 import type { Handle } from "@sveltejs/kit";
 import { env } from "$env/dynamic/private";
+import { isForbiddenCrossSiteForm } from "$lib/server/csrf";
 
 function setSecurityHeaders(response: Response): Response {
   response.headers.set("X-Frame-Options", "SAMEORIGIN");
@@ -24,6 +25,11 @@ function isInternalApiPath(pathname: string): boolean {
 }
 
 export const handle: Handle = async ({ event, resolve }) => {
+  if (isForbiddenCrossSiteForm(event.request, event.url)) {
+    return setSecurityHeaders(
+      new Response("Cross-site POST form submissions are forbidden", { status: 403 }),
+    );
+  }
   // Same-origin /api/* proxy for the adapter-node (Docker) deployment.
   // The web frontend always calls its own origin (see lib/config/runtime.ts);
   // in production Cloudflare Pages proxies /api/* to the backend and in dev

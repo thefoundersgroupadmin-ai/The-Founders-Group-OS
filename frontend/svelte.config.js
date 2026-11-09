@@ -36,6 +36,9 @@ const config = {
     // { relative: true } here: relative ("./_app/...") refs are resolved against
     // the deep route path and 404 once the user navigates below root.
     paths: isElectronBuild ? { relative: false } : undefined,
+    // The cross-site form check is enforced in hooks.server.ts instead, so
+    // clients' website forms can post leads to /api/founderos/inbound/<token>.
+    csrf: { trustedOrigins: ["*"] },
   },
 };
 

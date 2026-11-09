@@ -73,5 +73,34 @@ func CORSMiddleware(cfg *config.Config) gin.HandlerFunc {
 		CustomSchemas: []string{"app://"},
 	}
 
-	return cors.New(corsConfig)
+	strict := cors.New(corsConfig)
+	return func(c *gin.Context) {
+		if isPublicFormPath(c.Request.URL.Path) {
+			publicFormCORS(c)
+			return
+		}
+		strict(c)
+	}
+}
+
+// isPublicFormPath reports whether path is a client website's lead form
+// endpoint (/api/founderos/inbound/<token>, docs/tfg/CLIENT-PODS.md). Any
+// website may post there: the token in the path is the credential, and no
+// cookies are honoured, so the origin allow-list does not apply.
+func isPublicFormPath(path string) bool {
+	return strings.HasPrefix(path, "/api/founderos/inbound/") || strings.HasPrefix(path, "/api/v1/founderos/inbound/")
+}
+
+// publicFormCORS allows any origin without credentials and answers preflights.
+func publicFormCORS(c *gin.Context) {
+	if c.GetHeader("Origin") != "" {
+		c.Header("Access-Control-Allow-Origin", "*")
+		c.Header("Access-Control-Allow-Methods", "POST, OPTIONS")
+		c.Header("Access-Control-Allow-Headers", "Content-Type, Accept")
+	}
+	if c.Request.Method == "OPTIONS" {
+		c.AbortWithStatus(204)
+		return
+	}
+	c.Next()
 }

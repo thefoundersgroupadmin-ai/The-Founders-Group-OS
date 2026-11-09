@@ -88,9 +88,13 @@ svelte-check 0 errors), Codex review, fixes, deploy, build-log entry.
   month-one baseline (pod settings). Portal SQL: `20261109000000_sdr_results.sql`.
 - **M7 Channels needing owner purchases:** warmed separate domains per pod, LinkedIn via a
   provider, contact enrichment (Apollo plan), Outlook/Meet.
-- **M8 Hand-off + end-to-end test:** export bundle (playbook, sequences, reports, CRM
-  config), onboarding checklist, full dry-run of a fictional client from signature to
-  hand-off, then Codex review of the whole system.
+- **M8 Hand-off + end-to-end test (built 9 Nov 2026):** onboarding checklist on the pod
+  page (go-live items plus portal, hand-off email, calendar, CRM, website form,
+  recorder, baseline); hand-off bundle (`GET /pods/:slug/handoff-bundle`, owner only:
+  documents, AI SDR instructions, emails sent, pipeline, opt-outs, meetings with briefs
+  and coaching, weekly results and reviews, settings, README; no secrets); end-to-end
+  test of a fictional client from signature to hand-off
+  (`internal/founderos/pages/podse2e`); final Codex whole-system review.
 
 ## Codex design review (8 Nov 2026), adopted
 

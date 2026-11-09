@@ -124,7 +124,8 @@ func (s *Store) TaskBriefs(ctx context.Context, b TaskBoard) (int, error) {
 		FROM founderos_pod_meetings m JOIN founderos_client_pods p ON p.id = m.pod_id
 		JOIN founderos_pod_agents a ON a.pod_id = p.id AND a.agent_id <> '' AND a.project_id <> ''
 		LEFT JOIN founderos_funnel_contacts c ON c.id = m.contact_id
-		WHERE m.brief_issue_id IS NULL AND m.starts_at > now() AND m.status = 'booked' ORDER BY m.starts_at LIMIT 20`)
+		WHERE m.brief_issue_id IS NULL AND m.starts_at > now() AND m.status = 'booked'
+		AND (m.brief_task_tried_at IS NULL OR m.brief_task_tried_at > now() - interval '6 days') ORDER BY m.starts_at LIMIT 20`)
 	if err != nil {
 		return 0, err
 	}
@@ -156,6 +157,10 @@ func (s *Store) TaskBriefs(ctx context.Context, b TaskBoard) (int, error) {
 			name = j.email
 		}
 		when := j.at.Format("Mon 2 Jan 15:04 MST")
+		if err := s.firstTry(ctx, "founderos_pod_meetings", "brief", j.id); err != nil {
+			errs = append(errs, err)
+			continue
+		}
 		issue, err := b.CreateTask(ctx, taskKey(p.ID, "brief", j.id), j.proj, j.ag, clip(p.ClientName+": call brief for "+name, 200),
 			briefTask(p, j.title, name, j.email, when, strings.TrimSpace(j.kno)))
 		if err != nil {

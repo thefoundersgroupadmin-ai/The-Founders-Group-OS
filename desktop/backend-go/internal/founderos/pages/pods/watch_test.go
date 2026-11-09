@@ -230,3 +230,52 @@ func TestBrokenConnectionsAndFailedNoticesRaiseAlertsThatClear(t *testing.T) {
 		t.Fatalf("open after hand-over %+v", open)
 	}
 }
+
+// Codex round 5: a brief first tried over six days ago is never retried blind
+// (the board's key may be gone); it is raised for a person. A stuck report
+// cancelled on the board clears; stuck tasks never crowd out new ones.
+func TestOldUntaskedWorkGoesToAPersonAndCancelledStuckTasksClear(t *testing.T) {
+	s := &Store{Pool: catalogdb.TestDB(t)}
+	ctx := context.Background()
+	p := readyPod(t, s, "Brightvale")
+	if _, err := s.Provision(ctx, newFakeBoard(), p.Slug); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.Pool.Exec(ctx, `UPDATE founderos_client_pods SET status = 'dry_run' WHERE id = $1`, p.ID); err != nil {
+		t.Fatal(err)
+	}
+	now := time.Now()
+	if _, err := s.Pool.Exec(ctx, `INSERT INTO founderos_pod_meetings (pod_id, booking_uid, attendee_email, starts_at, brief_task_tried_at)
+		VALUES ($1, 'old', 'a@x.example', $2, now() - interval '7 days'), ($1, 'new', 'b@x.example', $2, NULL)`, p.ID, now.Add(48*time.Hour)); err != nil {
+		t.Fatal(err)
+	}
+	f := &fakeTasks{}
+	if n, err := s.TaskBriefs(ctx, f); err != nil || n != 1 || len(f.titles) != 1 {
+		t.Fatalf("briefs tasked %d %v %v", n, err, f.titles)
+	}
+	var tried int
+	_ = s.Pool.QueryRow(ctx, `SELECT count(*) FROM founderos_pod_meetings WHERE booking_uid = 'new' AND brief_task_tried_at IS NOT NULL`).Scan(&tried)
+	if tried != 1 {
+		t.Fatal("first try not recorded")
+	}
+	fresh, _ := s.RefreshAlerts(ctx)
+	if len(fresh) != 1 || fresh[0].Key != "task:expired" {
+		t.Fatalf("alerts %+v", fresh)
+	}
+	// A stuck review, cancelled on the board, settles.
+	if _, err := s.Pool.Exec(ctx, `INSERT INTO founderos_pod_task_owner (issue_id, pod_id, kind, created_at, stuck_at, stuck_reason)
+		VALUES ('rev-x', $1, 'review', now() - interval '2 days', now(), 'slow')`, p.ID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.Pool.Exec(ctx, `INSERT INTO founderos_pod_weekly (pod_id, week_start, review_issue_id) VALUES ($1, '2026-11-02', 'rev-x')`, p.ID); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := s.WatchTasks(ctx, &fakeWatch{status: map[string]string{"rev-x": "cancelled"}}, now); err != nil {
+		t.Fatal(err)
+	}
+	var settled bool
+	_ = s.Pool.QueryRow(ctx, `SELECT settled_at IS NOT NULL FROM founderos_pod_task_owner WHERE issue_id = 'rev-x'`).Scan(&settled)
+	if !settled {
+		t.Fatal("a cancelled stuck review stayed stuck")
+	}
+}

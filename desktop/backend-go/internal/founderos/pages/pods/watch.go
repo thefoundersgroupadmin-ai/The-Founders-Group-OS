@@ -63,7 +63,7 @@ func (s *Store) WatchTasks(ctx context.Context, b TaskWatch, now time.Time) (nud
 		FROM founderos_pod_task_owner o JOIN founderos_client_pods p ON p.id = o.pod_id
 		WHERE o.settled_at IS NULL AND o.kind IN ('enquiry', 'reply', 'brief', 'coaching', 'review')
 		AND p.status IN ('live', 'dry_run', 'paused')
-		ORDER BY o.created_at LIMIT 200`)
+		ORDER BY o.stuck_at IS NOT NULL, o.created_at LIMIT 200`)
 	if err != nil {
 		return 0, 0, err
 	}
@@ -95,12 +95,12 @@ func (s *Store) WatchTasks(ctx context.Context, b TaskWatch, now time.Time) (nud
 			continue
 		}
 		if w.stuckAt != nil {
-			// Already flagged: only an enquiry or reply finished on the board clears it.
-			if w.kind == "enquiry" || w.kind == "reply" {
-				if st, err := b.TaskStatus(ctx, w.issue); err == nil && (st == "done" || st == "cancelled") {
-					if err := s.settle(ctx, w.issue); err != nil {
-						errs = append(errs, err)
-					}
+			// Already flagged: cancelled on the board clears any kind; done clears
+			// an enquiry or reply (reports clear when their document arrives).
+			if st, err := b.TaskStatus(ctx, w.issue); err == nil &&
+				(st == "cancelled" || (st == "done" && (w.kind == "enquiry" || w.kind == "reply"))) {
+				if err := s.settle(ctx, w.issue); err != nil {
+					errs = append(errs, err)
 				}
 			}
 			continue
@@ -166,6 +166,13 @@ func (s *Store) WatchTasks(ctx context.Context, b TaskWatch, now time.Time) (nud
 		}
 	}
 	return nudged, stuck, errors.Join(errs...)
+}
+
+// firstTry records when a task was first attempted (table and kind are fixed
+// names from this package, never input).
+func (s *Store) firstTry(ctx context.Context, table, kind string, id int64) error {
+	_, err := s.Pool.Exec(ctx, fmt.Sprintf(`UPDATE %s SET %s_task_tried_at = coalesce(%s_task_tried_at, now()) WHERE id = $1`, table, kind, kind), id)
+	return err
 }
 
 func (s *Store) settle(ctx context.Context, issue string) error {

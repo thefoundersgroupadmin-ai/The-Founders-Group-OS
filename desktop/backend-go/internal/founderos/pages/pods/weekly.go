@@ -244,7 +244,7 @@ func (s *Store) TaskWeeklyReviews(ctx context.Context, b TaskBoard, now time.Tim
 			start time.Time
 			needs bool
 		}
-		rows, err := s.Pool.Query(ctx, `SELECT id, week_start, review_issue_id IS NULL FROM founderos_pod_weekly
+		rows, err := s.Pool.Query(ctx, `SELECT id, week_start, review_issue_id IS NULL AND (review_task_tried_at IS NULL OR review_task_tried_at > now() - interval '6 days') FROM founderos_pod_weekly
 			WHERE pod_id = $1 AND week_start >= $2 ORDER BY week_start`, p.ID, from.AddDate(0, 0, -14).Format("2006-01-02"))
 		if err != nil {
 			errs = append(errs, err)
@@ -285,6 +285,10 @@ func (s *Store) TaskWeeklyReviews(ctx context.Context, b TaskBoard, now time.Tim
 				}
 			}
 			base, _ := s.GetBaseline(ctx, p.ID)
+			if err := s.firstTry(ctx, "founderos_pod_weekly", "review", w.id); err != nil {
+				errs = append(errs, err)
+				continue
+			}
 			issue, err := b.CreateTask(ctx, taskKey(p.ID, "review", m.Week), proj, agent, clip(p.ClientName+": weekly pipeline review, week of "+m.Week, 200),
 				reviewTask(p, m, older, base, s.pipelineSummary(ctx, p), s.reviewEvidence(ctx, p, start, start.AddDate(0, 0, 7))))
 			if err != nil {

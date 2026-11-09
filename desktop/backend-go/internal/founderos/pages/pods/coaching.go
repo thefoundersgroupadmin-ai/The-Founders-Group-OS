@@ -210,6 +210,7 @@ func (s *Store) TaskCoaching(ctx context.Context, b TaskBoard) (int, error) {
 		FROM founderos_pod_meetings m JOIN founderos_client_pods p ON p.id = m.pod_id
 		JOIN founderos_pod_agents a ON a.pod_id = p.id AND a.agent_id <> '' AND a.project_id <> ''
 		WHERE m.coaching_issue_id IS NULL AND m.transcript <> '' AND m.outcome = 'held' AND m.status = 'booked'
+		AND (m.coaching_task_tried_at IS NULL OR m.coaching_task_tried_at > now() - interval '6 days')
 		AND p.status IN ('live', 'dry_run', 'paused')
 		ORDER BY m.starts_at LIMIT 10`)
 	if err != nil {
@@ -244,6 +245,10 @@ func (s *Store) TaskCoaching(ctx context.Context, b TaskBoard) (int, error) {
 		}
 		docs, err := s.docsFor(ctx, p)
 		if err != nil {
+			errs = append(errs, err)
+			continue
+		}
+		if err := s.firstTry(ctx, "founderos_pod_meetings", "coaching", j.id); err != nil {
 			errs = append(errs, err)
 			continue
 		}

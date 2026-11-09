@@ -402,6 +402,12 @@ func syncChanges(ctx context.Context, pool *pgxpool.Pool, podID, ws string, crm 
 // contact's stage is recorded silently the first time.
 func informative(local, value string) bool {
 	switch {
+	// A meeting logged before baselines were recorded at log time: it went in
+	// booked, perhaps without a brief, so a cancellation or brief is news.
+	case strings.HasSuffix(local, ":status"):
+		return value != "booked"
+	case strings.HasSuffix(local, ":brief"):
+		return value != ""
 	case strings.HasSuffix(local, ":outcome"), strings.HasSuffix(local, ":coaching"):
 		return value != ""
 	case strings.HasSuffix(local, ":optout"):

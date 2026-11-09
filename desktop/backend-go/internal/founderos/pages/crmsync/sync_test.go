@@ -157,3 +157,40 @@ func TestLaterChangesReachTheCRMAsNotesOnce(t *testing.T) {
 		t.Fatalf("a note was written when the opt-out was lifted: %v", f.notes[6:])
 	}
 }
+
+// Codex round 5: a meeting logged before baselines existed (no facts stored)
+// still gets its cancellation and brief noted.
+func TestAMeetingLoggedBeforeTheUpgradeStillGetsItsChangesNoted(t *testing.T) {
+	s := &pods.Store{Pool: catalogdb.TestDB(t)}
+	ctx := context.Background()
+	p, err := s.Create(ctx, pods.NewPod{ClientName: "Brightvale", OwnerID: "u1"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	exec := func(q string, args ...any) {
+		t.Helper()
+		if _, err := s.Pool.Exec(ctx, q, args...); err != nil {
+			t.Fatal(err)
+		}
+	}
+	exec(`INSERT INTO founderos_funnel_contacts (id, workspace_id, name, status, venture, created_at, email, person)
+		VALUES ('ct-p', $1, 'Priya', 'engaged', 'client', now(), 'priya@bv.example', 'Priya Shah')`, p.WorkspaceID)
+	if _, err := s.RecordMeetings(ctx, p.Slug, []pods.Meeting{{UID: "b-1", Title: "Discovery call", Start: "2030-01-07T10:00:00Z",
+		AttendeeEmail: "priya@bv.example"}}); err != nil {
+		t.Fatal(err)
+	}
+	f := &fakeCRM{contacts: map[string]Contact{}}
+	if _, err := SyncPod(ctx, s.Pool, p.ID, f); err != nil {
+		t.Fatal(err)
+	}
+	// As if logged by the old version: no meeting facts stored.
+	exec(`DELETE FROM founderos_pod_crm_ids WHERE local_kind = 'fact' AND local_id LIKE '%:%' AND local_id NOT LIKE 'ct-%'`)
+	exec(`UPDATE founderos_pod_meetings SET status = 'cancelled', brief = 'Priya runs ops.'`)
+	if _, err := SyncPod(ctx, s.Pool, p.ID, f); err != nil {
+		t.Fatal(err)
+	}
+	all := strings.Join(f.notes, "\n")
+	if !strings.Contains(all, "was cancelled") || !strings.Contains(all, "Priya runs ops.") {
+		t.Fatalf("notes:\n%s", all)
+	}
+}

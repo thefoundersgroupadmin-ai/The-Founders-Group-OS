@@ -122,6 +122,15 @@ func (s *Store) problems(ctx context.Context, p Pod) ([]Alert, error) {
 			add("notice:"+n.prefix+":nobody", plural(missing, n.what, n.what+"s")+" had nobody to go to", "Set the rep's email (hand-off email) on the AI SDR's settings.")
 		}
 	}
+	// Work the AI SDR was asked for over six days ago and never got: a person does it.
+	if n := count(`SELECT (SELECT count(*) FROM founderos_pod_meetings WHERE pod_id = $1 AND brief_issue_id IS NULL AND status = 'booked'
+			AND starts_at > now() AND brief_task_tried_at < now() - interval '6 days')
+		+ (SELECT count(*) FROM founderos_pod_meetings WHERE pod_id = $1 AND coaching_issue_id IS NULL
+			AND coaching_task_tried_at < now() - interval '6 days')
+		+ (SELECT count(*) FROM founderos_pod_weekly WHERE pod_id = $1 AND review_issue_id IS NULL AND review_task_tried_at < now() - interval '6 days')`, p.ID); n > 0 {
+		add("task:expired", plural(n, "brief, coaching note or review", "briefs, coaching notes or reviews")+" could not be given to the AI SDR for six days",
+			"Write them by hand, or check the task board: TFG OS will not retry them in case one already exists there.")
+	}
 	if n := count(`SELECT count(*) FROM founderos_pod_handoffs WHERE pod_id = $1 AND notified_at IS NULL
 		AND (coalesce(error, '') <> '' OR created_at < now() - interval '30 minutes')`, p.ID); n > 0 {
 		add("handoff", plural(n, "buyer ready for a person has", "buyers ready for a person have")+" not been passed to the rep",

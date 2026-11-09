@@ -89,6 +89,8 @@ func registerPodCRM(s *gin.RouterGroup, d *Deps, pod func(*gin.Context) (*pods.S
 		}
 		var in struct {
 			Provider, Token, ClientID, ClientSecret, RefreshToken, LoginURL string
+			// NewAccount: a different account of the same CRM (Codex round 3).
+			NewAccount bool
 		}
 		if err := c.ShouldBindJSON(&in); err != nil {
 			c.JSON(http.StatusBadRequest, gin.H{"error": "provider and credentials expected"})
@@ -134,12 +136,16 @@ func registerPodCRM(s *gin.RouterGroup, d *Deps, pod func(*gin.Context) (*pods.S
 		// Another CRM: record ids from the old one must never be written to, so
 		// the mapping starts afresh. Same CRM (e.g. a rotated token): the mapping
 		// stays, so nothing already logged is written twice.
-		if p.CRMProvider != "" && p.CRMProvider != in.Provider {
+		// Read the pod again under the lock: concurrent reconnects never decide on stale state.
+		if fresh, err := st.Get(c.Request.Context(), p.Slug); err == nil {
+			p = fresh
+		}
+		if (p.CRMProvider != "" && p.CRMProvider != in.Provider) || in.NewAccount {
 			if _, err := d.Pool.Exec(c.Request.Context(), `DELETE FROM founderos_pod_crm_ids WHERE pod_id = $1`, p.ID); err != nil {
 				podError(c, err)
 				return
 			}
-			_ = st.Log(c.Request.Context(), p.ID, "settings", "CRM changed from "+p.CRMProvider+" to "+in.Provider+"; records are written to the new CRM from scratch", "")
+			_ = st.Log(c.Request.Context(), p.ID, "settings", "CRM changed ("+p.CRMProvider+" to "+in.Provider+", new account); records are written to it from scratch", "")
 		}
 		if err := integrations.UpsertEnv(path, values); err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "could not write ~/.founderos/.env"})

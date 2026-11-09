@@ -133,12 +133,13 @@ type Week struct {
 	// Corrected: late or corrected records changed the numbers after the
 	// review was written (Codex final review #9).
 	Corrected bool
+	Delivery  string
 }
 
 // Weeks lists the pod's stored weeks, newest first.
 func (s *Store) Weeks(ctx context.Context, podID string, limit int) ([]Week, error) {
 	rows, err := s.Pool.Query(ctx, `SELECT week_start::text, metrics, review,
-		review <> '' AND review_metrics IS NOT NULL AND review_metrics <> metrics
+		review <> '' AND review_metrics IS NOT NULL AND review_metrics <> metrics, review_delivery
 		FROM founderos_pod_weekly WHERE pod_id = $1 ORDER BY week_start DESC LIMIT $2`, podID, limit)
 	if err != nil {
 		return nil, err
@@ -148,7 +149,7 @@ func (s *Store) Weeks(ctx context.Context, podID string, limit int) ([]Week, err
 	for rows.Next() {
 		var w Week
 		var raw []byte
-		if err := rows.Scan(&w.Start, &raw, &w.Review, &w.Corrected); err != nil {
+		if err := rows.Scan(&w.Start, &raw, &w.Review, &w.Corrected, &w.Delivery); err != nil {
 			return nil, err
 		}
 		_ = json.Unmarshal(raw, &w.M)

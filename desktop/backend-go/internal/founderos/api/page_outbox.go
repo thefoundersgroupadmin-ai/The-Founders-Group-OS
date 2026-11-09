@@ -110,11 +110,18 @@ func startAutoFollowUps(d *Deps) {
 				// unreadable is held, never the others (Codex final review #5).
 				{
 					st := &pods.Store{Pool: d.Pool}
-					_, hold, cerr := readPodCalendarsHold(ctx, d, st)
+					// Calendars get their own budget; a pod not read in time is held, and
+					// dispatch keeps its own full budget (Codex round 3).
+					cctx, ccancel := context.WithTimeout(context.Background(), 90*time.Second)
+					_, hold, cerr := readPodCalendarsHold(cctx, d, st)
+					ccancel()
 					if cerr != nil {
 						slog.Warn("founderos pods: some client calendars unreadable; those pods held", "held", len(hold), "err", cerr)
 					}
-					if res, err := outbox.DispatchPodsExcept(ctx, d.Pool, ownDomain, outboxSender(d), hold); res.Sent+res.Simulated > 0 || err != nil {
+					dctx, dcancel := context.WithTimeout(context.Background(), 3*time.Minute)
+					res, err := outbox.DispatchPodsExcept(dctx, d.Pool, ownDomain, outboxSender(d), hold)
+					dcancel()
+					if res.Sent+res.Simulated > 0 || err != nil {
 						slog.Info("founderos pods: dispatch pass", "sent", res.Sent, "simulated", res.Simulated, "waiting", res.Waiting, "err", err)
 					}
 				}

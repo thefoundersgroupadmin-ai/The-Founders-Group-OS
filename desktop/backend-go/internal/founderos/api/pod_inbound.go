@@ -189,6 +189,9 @@ func notifyHandoffs(ctx context.Context, d *Deps, st *pods.Store) (int, error) {
 			_ = st.MarkHandoff(ctx, h.ID, "no hand-off email set for this client")
 			continue
 		}
+		if st.HandedOver(ctx, h.PodID) {
+			continue // handed over during this batch: no more mail (Codex round 3)
+		}
 		body := fmt.Sprintf("A buyer is ready for a person at %s.\n\n%s\n\nThe full conversation and research are in your portal: https://thefoundersgroup.net/portal\n\nThe Founders Group", h.Client, h.Summary)
 		err := commsSourcesFor(d).SendEmail(ctx, email.Reply{To: h.To, Subject: "Hand-off: a buyer wants to talk (" + h.Client + ")",
 			Text: body, RecipientApproved: true})

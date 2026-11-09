@@ -98,5 +98,16 @@ class FinalReviewRepliesTest(unittest.TestCase):
         self.assertIn("'msg:client-a:<m9@x>'", h)
         self.assertIn("on conflict (issue_id) do nothing", h)
 
+
+class SingleInstanceTest(unittest.TestCase):
+    def test_a_second_run_exits(self):
+        import tempfile
+        from pathlib import Path
+        p = Path(tempfile.mkdtemp()) / "x.lock"
+        first = sync.single_instance(p)
+        with self.assertRaises(SystemExit):
+            sync.single_instance(p)
+        first.close()
+
 if __name__ == "__main__":
     unittest.main()

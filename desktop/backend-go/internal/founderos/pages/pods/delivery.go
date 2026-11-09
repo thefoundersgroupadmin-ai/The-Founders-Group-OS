@@ -87,3 +87,10 @@ func (s *Store) ownTask(ctx context.Context, issue, podID, kind string) error {
 		ON CONFLICT (issue_id) DO NOTHING`, issue, podID, kind)
 	return err
 }
+
+// HandedOver reports whether the pod was handed over (no more mail of any kind).
+func (s *Store) HandedOver(ctx context.Context, podID string) bool {
+	var done bool
+	_ = s.Pool.QueryRow(ctx, `SELECT status = 'handed_over' FROM founderos_client_pods WHERE id = $1`, podID).Scan(&done)
+	return done
+}

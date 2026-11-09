@@ -327,9 +327,22 @@ def search_replies(mailbox, domains, since, seen):
     return found
 
 
+def single_instance(path):
+    """Only one reply import at a time (Codex round 3): a second run exits."""
+    import fcntl
+    path.parent.mkdir(parents=True, exist_ok=True)
+    f = open(path, "w")
+    try:
+        fcntl.flock(f, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except OSError:
+        sys.exit("another reply import is running")
+    return f
+
+
 def pod_pass():
     """Replies to each client pod's outreach, in that pod's own mailbox, handled
     with that pod's context only (docs/tfg/CLIENT-PODS.md)."""
+    _lock = single_instance(POD_STATE.with_suffix(".lock"))  # held until the pass ends
     dry = "--dry-run" in sys.argv
     days = int(sys.argv[sys.argv.index("--days") + 1]) if "--days" in sys.argv else 14
     pc = read_env("~/.founderos/.env")
@@ -363,7 +376,15 @@ def pod_pass():
                 print(f"  {company}: {sender} | {subject}")
                 continue
             done = psql(db, message_claim_query(slug, mid, sender, str(when) if when else ""))
-            if done and done[0] and done[0][0]:
+            state = done[0][0] if done and done[0] else ""
+            if state == "creating":
+                # A run stopped between creating the AI task and recording it: never
+                # create a second one; flag it for a person (Codex round 3).
+                psql(db, message_done_query(slug, mid, "check", None, cid))
+                psql(db, "insert into founderos_client_activity (pod_id, kind, summary, ref) "
+                         f"select id, 'reply_check', {sql('A reply from ' + sender + ' may not have reached the AI SDR; check the task board')}, {sql(mid)} "
+                         f"from founderos_client_pods where slug={sql(slug)}")
+            if state:
                 seen.add(f"pod/{slug}/{mid}")
                 continue
             if not exact or exact[3].strip().lower() != sender.strip().lower():
@@ -389,6 +410,7 @@ def pod_pass():
                          f"select id, 'reply_received', {sql(company + ' wrote again; sent to your team: ' + subject[:120])}, {sql(cid)} "
                          f"from founderos_client_pods where slug={sql(slug)}")
             else:
+                psql(db, message_done_query(slug, mid, "creating", None, cid))
                 issue = paperclip(pc, "POST", f"/api/companies/{pc['PAPERCLIP_COMPANY_ID']}/issues",
                                   pod_reply_task(pod, sender, company, subject, when, body))
                 psql(db, message_done_query(slug, mid, "ai", issue["id"], cid))

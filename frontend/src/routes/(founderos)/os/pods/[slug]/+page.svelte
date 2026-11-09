@@ -42,7 +42,7 @@
 	let calendarConnected = $state(false);
 	let calcomKey = $state('');
 	let crm = $state<{ provider: string; connected: boolean; synced: number } | null>(null);
-	let crmForm = $state({ provider: 'hubspot', token: '', clientId: '', clientSecret: '', refreshToken: '', loginUrl: '' });
+	let crmForm = $state({ provider: 'hubspot', token: '', clientId: '', clientSecret: '', refreshToken: '', loginUrl: '', newAccount: false });
 
 	const err = (e: unknown) => (e instanceof Error ? e.message : 'request failed');
 
@@ -122,7 +122,7 @@
 	const connectCRM = () =>
 		act(async () => {
 			await founderosFetch(`${base}/crm`, { method: 'PUT', json: crmForm });
-			crmForm = { ...crmForm, token: '', clientSecret: '', refreshToken: '' };
+			crmForm = { ...crmForm, token: '', clientSecret: '', refreshToken: '', newAccount: false };
 		});
 	const connectCalendar = () =>
 		act(async () => {
@@ -344,6 +344,9 @@
 						<input type="password" bind:value={crmForm.token} placeholder={crmForm.provider === 'hubspot' ? 'HubSpot private app token' : 'Pipedrive API token'} aria-label="CRM token" class="pc-input rounded-[6px] px-2 py-1.5 text-[12px]" />
 					{/if}
 				</div>
+				{#if crm?.connected}
+					<label class="mt-2 flex items-center gap-2 text-[11px]"><input type="checkbox" bind:checked={crmForm.newAccount} /> This is a different account (records start fresh there)</label>
+				{/if}
 				<div class="mt-2"><Pressable tone="secondary" disabled={busy} onclick={connectCRM}>{crm?.connected ? 'Replace CRM connection' : 'Connect CRM'}</Pressable></div>
 			</Slab>
 
@@ -405,6 +408,7 @@
 					<details class="mt-2 border-b py-1" style="border-color: var(--bn-hairline)">
 						<summary class="cursor-pointer text-[12px]">Week of {w.week}{w.metrics.dryRun ? ' (test run)' : ''} · reached {w.metrics.prospectsReached} · replies {w.metrics.replies} · reply rate {w.metrics.replyRatePct}% of {w.metrics.cohortSize ?? 0} · booked {w.metrics.meetingsBooked} · held {w.metrics.meetingsHeld}</summary>
 						<p class="mt-1 whitespace-pre-wrap text-[12px]">{w.review || 'Review on its way from the AI SDR.'}</p>
+						{#if w.delivery && w.delivery !== 'sent' && w.delivery !== 'sending'}<p class="bn-dim mt-1 font-mono text-[11px]">Email to the client: {w.delivery.replace('_', ' ')}</p>{/if}
 						{#if w.corrected}<p class="bn-dim mt-1 font-mono text-[11px]">Numbers updated after this review was written (late booking, recording or reply).</p>{/if}
 					</details>
 				{:else}

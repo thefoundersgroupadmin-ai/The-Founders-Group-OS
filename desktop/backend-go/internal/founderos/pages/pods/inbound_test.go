@@ -105,3 +105,43 @@ func TestEachEnquiryBecomesATaskForThePodsOwnAgentAndAConversation(t *testing.T)
 		t.Fatal("an enquiry was tasked twice")
 	}
 }
+
+// Codex fix review #3: a buyer a person took over who writes in again through
+// the website form goes to the person, not the AI.
+func TestARepeatEnquiryAfterATakeoverGoesToThePerson(t *testing.T) {
+	s := &Store{Pool: catalogdb.TestDB(t)}
+	ctx := context.Background()
+	b := newFakeBoard()
+	p := readyPod(t, s, "Brightvale")
+	if _, err := s.Provision(ctx, b, p.Slug); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.SetStatus(ctx, p.Slug, StatusDryRun, ""); err != nil {
+		t.Fatal(err)
+	}
+	token, err := s.NewInboundToken(ctx, p.Slug)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.Intake(ctx, token, Enquiry{Name: "Cara", Email: "cara@globex.example", Message: "Pricing?"}, "web"); err != nil {
+		t.Fatal(err)
+	}
+	f := &fakeTasks{}
+	if k, err := s.TaskInbound(ctx, f); err != nil || k != 1 {
+		t.Fatalf("first enquiry: %d %v", k, err)
+	}
+	if _, err := s.Pool.Exec(ctx, `UPDATE founderos_pod_conversations SET taken_over_at = now()`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.Intake(ctx, token, Enquiry{Name: "Cara", Email: "cara@globex.example", Message: "Following up on pricing"}, "web"); err != nil {
+		t.Fatal(err)
+	}
+	if k, err := s.TaskInbound(ctx, f); err != nil || k != 0 || len(f.bodies) != 1 {
+		t.Fatalf("repeat enquiry went to the AI: %d %v", k, err)
+	}
+	var n int
+	_ = s.Pool.QueryRow(ctx, `SELECT count(*) FROM founderos_pod_handoffs WHERE issue_id LIKE 'form:%' AND summary LIKE '%Following up%'`).Scan(&n)
+	if n != 1 {
+		t.Fatalf("hand-off to the person: %d", n)
+	}
+}

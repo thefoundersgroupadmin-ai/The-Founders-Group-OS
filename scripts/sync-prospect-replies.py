@@ -85,11 +85,14 @@ def company_contacts(contacts, sender):
 
 def message_claim_query(slug, mid, sender, when):
     """Record an inbound message once per pod mailbox (Codex final review #2) and
-    return what was done with it ('' = not yet)."""
+    return what was done with it ('' = not yet). One statement, so the only
+    output is the routing state (Codex fix review: command tags were misread)."""
     pod = f"(select id from founderos_client_pods where slug={sql(slug)})"
-    return ("insert into founderos_pod_reply_messages (pod_id, message_id, sender, received_at) "
-            f"values ({pod}, {sql(mid)}, {sql(sender)}, {sql(when) if when else 'null'}) on conflict (pod_id, message_id) do nothing; "
-            f"select routed from founderos_pod_reply_messages where pod_id={pod} and message_id={sql(mid)}")
+    return ("with ins as (insert into founderos_pod_reply_messages (pod_id, message_id, sender, received_at) "
+            f"values ({pod}, {sql(mid)}, {sql(sender)}, {sql(when) if when else 'null'}) "
+            "on conflict (pod_id, message_id) do nothing returning routed) "
+            "select coalesce((select routed from ins), "
+            f"(select routed from founderos_pod_reply_messages where pod_id={pod} and message_id={sql(mid)}), '')")
 
 
 def message_done_query(slug, mid, routed, issue_id, contact_id):

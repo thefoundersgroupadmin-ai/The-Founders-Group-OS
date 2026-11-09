@@ -38,6 +38,7 @@ export type ClientApproval = { kind: string; ref: string; title: string; status:
 export type PodMeeting = {
 	id: number; uid: string; title: string; name: string; email: string; startsAt: string | null; brief: string; briefSent: boolean;
 	status: 'booked' | 'cancelled'; outcome: '' | 'held' | 'no_show'; hasTranscript: boolean; coaching: string; coachingSent: boolean;
+	briefDelivery?: string; coachingDelivery?: string;
 };
 export type WeekMetrics = {
 	week: string; dryRun: boolean; prospectsReached: number; emailsSent: number; simulated: number; replies: number; cohortSize: number; cohortReplied: number; replyRatePct: number;

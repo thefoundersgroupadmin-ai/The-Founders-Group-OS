@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"net/http"
 	"strings"
+	"sync"
 
 	"github.com/gin-gonic/gin"
 	"github.com/rhl/businessos-backend/internal/founderos/connectors/email"
@@ -50,11 +51,21 @@ func syncPodCRMs(ctx context.Context, d *Deps, st *pods.Store) (int, error) {
 		if p.Status != pods.StatusLive && p.Status != pods.StatusPaused {
 			continue
 		}
-		crm := podCRM(d, p)
+		// Under the pod's CRM lock, with the pod and its connection read afresh:
+		// a connection change is never mixed with the old one's records.
+		unlock := lockPodCRM(p.ID)
+		fresh, err := st.Get(ctx, p.Slug)
+		if err != nil || (fresh.Status != pods.StatusLive && fresh.Status != pods.StatusPaused) {
+			unlock()
+			continue
+		}
+		crm := podCRM(d, fresh)
 		if crm == nil {
+			unlock()
 			continue
 		}
 		n, err := crmsync.SyncPod(ctx, d.Pool, p.ID, crm)
+		unlock()
 		total += n
 		if err != nil {
 			errs = append(errs, fmt.Errorf("%s (%s): %w", p.Slug, crm.Name(), err))
@@ -117,6 +128,19 @@ func registerPodCRM(s *gin.RouterGroup, d *Deps, pod func(*gin.Context) (*pods.S
 		if !ok {
 			return
 		}
+		// No sync runs while the connection changes (Codex fix review #4).
+		unlock := lockPodCRM(p.ID)
+		defer unlock()
+		// Another CRM: record ids from the old one must never be written to, so
+		// the mapping starts afresh. Same CRM (e.g. a rotated token): the mapping
+		// stays, so nothing already logged is written twice.
+		if p.CRMProvider != "" && p.CRMProvider != in.Provider {
+			if _, err := d.Pool.Exec(c.Request.Context(), `DELETE FROM founderos_pod_crm_ids WHERE pod_id = $1`, p.ID); err != nil {
+				podError(c, err)
+				return
+			}
+			_ = st.Log(c.Request.Context(), p.ID, "settings", "CRM changed from "+p.CRMProvider+" to "+in.Provider+"; records are written to the new CRM from scratch", "")
+		}
 		if err := integrations.UpsertEnv(path, values); err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "could not write ~/.founderos/.env"})
 			return
@@ -125,13 +149,7 @@ func registerPodCRM(s *gin.RouterGroup, d *Deps, pod func(*gin.Context) (*pods.S
 			podError(c, err)
 			return
 		}
-		// A new connection may be another account: record ids from the old one
-		// must never be written to (Codex final review #4). Start the mapping afresh.
-		if _, err := d.Pool.Exec(c.Request.Context(), `DELETE FROM founderos_pod_crm_ids WHERE pod_id = $1`, p.ID); err != nil {
-			podError(c, err)
-			return
-		}
-		_ = st.Log(c.Request.Context(), p.ID, "settings", "CRM connected ("+in.Provider+"); records will be written to this account from scratch", "")
+		_ = st.Log(c.Request.Context(), p.ID, "settings", "CRM connected ("+in.Provider+")", "")
 		c.Header("Cache-Control", "no-store")
 		reply(c, st, p.Slug)
 	})
@@ -144,4 +162,14 @@ func registerPodCRM(s *gin.RouterGroup, d *Deps, pod func(*gin.Context) (*pods.S
 		_ = d.Pool.QueryRow(c.Request.Context(), `SELECT count(*) FROM founderos_pod_crm_ids WHERE pod_id = $1`, p.ID).Scan(&n)
 		c.JSON(http.StatusOK, gin.H{"provider": p.CRMProvider, "connected": podCRM(d, p) != nil, "synced": n})
 	})
+}
+
+// podCRMLocks keeps a pod's CRM sync and a change of its CRM connection apart.
+var podCRMLocks sync.Map
+
+func lockPodCRM(podID string) func() {
+	m, _ := podCRMLocks.LoadOrStore(podID, &sync.Mutex{})
+	mu := m.(*sync.Mutex)
+	mu.Lock()
+	return mu.Unlock
 }

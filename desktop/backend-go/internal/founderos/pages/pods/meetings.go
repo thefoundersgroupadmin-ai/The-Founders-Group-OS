@@ -162,7 +162,9 @@ func (s *Store) TaskBriefs(ctx context.Context, b TaskBoard) (int, error) {
 			errs = append(errs, err)
 			continue
 		}
-		_ = s.ownTask(ctx, issue, p.ID, "brief")
+		if err := s.ownTask(ctx, issue, p.ID, "brief"); err != nil {
+			errs = append(errs, err)
+		}
 
 		if _, err := s.Pool.Exec(ctx, `UPDATE founderos_pod_meetings SET brief_issue_id = $2 WHERE id = $1`, j.id, issue); err != nil {
 			errs = append(errs, err)

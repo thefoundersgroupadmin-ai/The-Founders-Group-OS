@@ -31,14 +31,22 @@ func (s *Store) sweep(ctx context.Context, n notice) {
 		WHERE %s_delivery = 'sending' AND %s_sent_at < now() - interval '15 minutes'`, n.table, n.prefix, n.prefix, n.prefix))
 }
 
-// finish records how a claimed notice went.
+// NoRecipient is the reason given when the client has no rep email set.
+const NoRecipient = "no rep email set"
+
+// finish records how a claimed notice went: sent (why == ""), no recipient,
+// a definite failure to retry (retry), or otherwise uncertain: the mail
+// server may have taken it, so it is never sent again automatically
+// (Codex fix review: ambiguous SMTP outcomes).
 func (s *Store) finish(ctx context.Context, n notice, id int64, why string, retry bool) error {
 	var q string
 	switch {
 	case why == "":
 		q = `UPDATE %[1]s SET %[2]s_delivery = 'sent' WHERE id = $1`
-	case !retry:
+	case why == NoRecipient:
 		q = `UPDATE %[1]s SET %[2]s_delivery = 'no_recipient' WHERE id = $1`
+	case !retry:
+		q = `UPDATE %[1]s SET %[2]s_delivery = 'uncertain' WHERE id = $1`
 	default:
 		q = `UPDATE %[1]s SET %[2]s_delivery = CASE WHEN %[2]s_attempts >= 3 THEN 'failed' ELSE 'retry' END,
 			%[2]s_sent_at = CASE WHEN %[2]s_attempts >= 3 THEN %[2]s_sent_at ELSE NULL END WHERE id = $1`

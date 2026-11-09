@@ -81,6 +81,7 @@ class FinalReviewRepliesTest(unittest.TestCase):
     def test_each_message_is_recorded_once_per_pod(self):
         q = sync.message_claim_query("client-a", "<m1@x>", "ana@acme.example", "")
         self.assertIn("on conflict (pod_id, message_id) do nothing", q)
+        self.assertEqual(q.count(";"), 0, "one statement: psql must print only the routing state")
         self.assertIn("slug='client-a'", q)
 
     def test_a_colleague_gets_their_own_contact(self):

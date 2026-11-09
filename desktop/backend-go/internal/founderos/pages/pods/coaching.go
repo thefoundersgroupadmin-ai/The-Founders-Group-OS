@@ -253,7 +253,9 @@ func (s *Store) TaskCoaching(ctx context.Context, b TaskBoard) (int, error) {
 			errs = append(errs, err)
 			continue
 		}
-		_ = s.ownTask(ctx, issue, p.ID, "coaching")
+		if err := s.ownTask(ctx, issue, p.ID, "coaching"); err != nil {
+			errs = append(errs, err)
+		}
 
 		if _, err := s.Pool.Exec(ctx, `UPDATE founderos_pod_meetings SET coaching_issue_id = $2 WHERE id = $1`, j.id, issue); err != nil {
 			errs = append(errs, err)

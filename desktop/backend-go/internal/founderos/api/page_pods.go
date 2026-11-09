@@ -557,7 +557,8 @@ func registerPods(s *gin.RouterGroup, d *Deps) {
 			return
 		}
 		rows, err := d.Pool.Query(c.Request.Context(), `SELECT id, booking_uid, title, attendee_name, attendee_email, starts_at, brief,
-			brief_sent_at IS NOT NULL, status, outcome, transcript <> '', coaching, coaching_sent_at IS NOT NULL
+			brief_sent_at IS NOT NULL, status, outcome, transcript <> '', coaching, coaching_sent_at IS NOT NULL,
+			brief_delivery, coaching_delivery
 			FROM founderos_pod_meetings WHERE pod_id = $1 ORDER BY starts_at DESC NULLS LAST LIMIT 100`, p.ID)
 		if err != nil {
 			podError(c, err)
@@ -570,12 +571,15 @@ func registerPods(s *gin.RouterGroup, d *Deps) {
 			var uid, title, name, mail, brief, status, outcome, coaching string
 			var at *time.Time
 			var sent, hasTranscript, coachingSent bool
-			if err := rows.Scan(&id, &uid, &title, &name, &mail, &at, &brief, &sent, &status, &outcome, &hasTranscript, &coaching, &coachingSent); err != nil {
+			var briefDelivery, coachingDelivery string
+			if err := rows.Scan(&id, &uid, &title, &name, &mail, &at, &brief, &sent, &status, &outcome, &hasTranscript, &coaching, &coachingSent,
+				&briefDelivery, &coachingDelivery); err != nil {
 				podError(c, err)
 				return
 			}
 			out = append(out, gin.H{"id": id, "uid": uid, "title": title, "name": name, "email": mail, "startsAt": at, "brief": brief,
-				"briefSent": sent, "status": status, "outcome": outcome, "hasTranscript": hasTranscript, "coaching": coaching, "coachingSent": coachingSent})
+				"briefSent": sent, "status": status, "outcome": outcome, "hasTranscript": hasTranscript, "coaching": coaching, "coachingSent": coachingSent,
+				"briefDelivery": briefDelivery, "coachingDelivery": coachingDelivery})
 		}
 		c.JSON(http.StatusOK, gin.H{"meetings": out, "calendarConnected": podCalendarKey(d, p.Slug) != "",
 			"recorderConnected": podRecorderKey(d, p.Slug) != ""})

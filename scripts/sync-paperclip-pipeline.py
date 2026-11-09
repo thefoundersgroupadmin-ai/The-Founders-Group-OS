@@ -270,6 +270,16 @@ def main():
             continue
         if issue["id"] in report_tasks:
             continue
+        if issue["id"] not in owners and not dry:
+            # First sight records the owner here too, whichever importer runs first.
+            own = owner_of(issue, pods)
+            r = subprocess.run(["psql", db, "-At", "-q", "-c",
+                                "INSERT INTO founderos_pod_task_owner (issue_id, pod_id) VALUES "
+                                f"({sql(issue['id'])}, (SELECT id FROM founderos_client_pods WHERE slug = {sql(own)})) "
+                                "ON CONFLICT (issue_id) DO NOTHING"], capture_output=True, text=True)
+            if r.returncode != 0:
+                sys.exit("could not record task ownership, nothing imported: " + (r.stderr or "").strip()[:200])
+            owners[issue["id"]] = own
         docs = paperclip(pc, f"/api/issues/{issue['id']}/documents")
         docs = docs.get("documents", docs) if isinstance(docs, dict) else docs
         for d in docs:

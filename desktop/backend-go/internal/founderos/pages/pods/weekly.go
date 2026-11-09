@@ -290,7 +290,9 @@ func (s *Store) TaskWeeklyReviews(ctx context.Context, b TaskBoard, now time.Tim
 				errs = append(errs, err)
 				continue
 			}
-			_ = s.ownTask(ctx, issue, p.ID, "review")
+			if err := s.ownTask(ctx, issue, p.ID, "review"); err != nil {
+				errs = append(errs, err)
+			}
 
 			if _, err := s.Pool.Exec(ctx, `UPDATE founderos_pod_weekly SET review_issue_id = $2 WHERE id = $1 AND review_issue_id IS NULL`, w.id, issue); err != nil {
 				errs = append(errs, err)

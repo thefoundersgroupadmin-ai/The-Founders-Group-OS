@@ -205,13 +205,37 @@ func (s *Store) TaskInbound(ctx context.Context, b TaskBoard) (int, error) {
 		if who == "" {
 			who = j.e.Email
 		}
+		// A buyer a person already took over goes to that person, not the AI
+		// (Codex fix review #3: repeat form enquiries).
+		var taken bool
+		if err := s.Pool.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM founderos_pod_conversations c
+			LEFT JOIN founderos_funnel_contacts fc ON fc.id = c.contact_id AND fc.workspace_id = c.workspace_id
+			WHERE c.workspace_id = $1 AND c.taken_over_at IS NOT NULL
+			AND (c.contact_id = $2 OR lower(fc.email) = lower($3)))`, p.WorkspaceID, j.contact, j.e.Email).Scan(&taken); err != nil {
+			errs = append(errs, err)
+			continue
+		}
+		if taken {
+			summary := who + " <" + j.e.Email + "> sent another enquiry through your website.\n\n" + clip(j.e.Message, 1500)
+			if _, err := s.Pool.Exec(ctx, `INSERT INTO founderos_pod_handoffs (pod_id, issue_id, contact_id, summary)
+				VALUES ($1, $2, $3, $4) ON CONFLICT (issue_id) DO NOTHING`, p.ID, fmt.Sprintf("form:%d", j.id), j.contact, summary); err != nil {
+				errs = append(errs, err)
+				continue
+			}
+			if _, err := s.Pool.Exec(ctx, `UPDATE founderos_pod_inbound SET status = 'tasked', issue_id = 'person', error = '' WHERE id = $1`, j.id); err != nil {
+				errs = append(errs, err)
+			}
+			continue
+		}
 		issue, err := b.CreateTask(ctx, j.proj, j.ag, clip(p.ClientName+": enquiry from "+who, 200), inboundBrief(p, j.e))
 		if err != nil {
 			_, _ = s.Pool.Exec(ctx, `UPDATE founderos_pod_inbound SET error = $2 WHERE id = $1`, j.id, clip(err.Error(), 300))
 			errs = append(errs, err)
 			continue
 		}
-		_ = s.ownTask(ctx, issue, p.ID, "enquiry")
+		if err := s.ownTask(ctx, issue, p.ID, "enquiry"); err != nil {
+			errs = append(errs, err)
+		}
 
 		if _, err := s.Pool.Exec(ctx, `INSERT INTO founderos_pod_conversations (issue_id, workspace_id, contact_id, source)
 			VALUES ($1, $2, $3, 'form') ON CONFLICT DO NOTHING`, issue, p.WorkspaceID, j.contact); err != nil {
@@ -252,6 +276,14 @@ func (s *Store) PendingHandoffs(ctx context.Context) ([]Handoff, error) {
 		out = append(out, h)
 	}
 	return out, rows.Err()
+}
+
+// MarkHandoffUncertain records a hand-off whose email may or may not have
+// reached the mail server: never resent automatically.
+func (s *Store) MarkHandoffUncertain(ctx context.Context, id int64, why string) error {
+	_, err := s.Pool.Exec(ctx, `UPDATE founderos_pod_handoffs SET notified_at = now(), error = $2 WHERE id = $1`,
+		id, clip("uncertain: "+why, 300))
+	return err
 }
 
 // MarkHandoff records that a hand-off was emailed (why == "") or why it was not.

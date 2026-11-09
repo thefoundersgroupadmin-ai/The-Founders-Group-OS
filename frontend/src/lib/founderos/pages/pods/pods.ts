@@ -129,8 +129,21 @@ export function parseDomains(text: string): string[] {
 	return out;
 }
 
+const DELIVERY: Record<string, { tone: BadgeTone; label: string }> = {
+	failed: { tone: 'warn', label: 'failed to email' },
+	uncertain: { tone: 'warn', label: 'email uncertain: check the inbox' },
+	no_recipient: { tone: 'warn', label: 'no rep email set' },
+	retry: { tone: 'accent', label: 'email retrying' },
+	held: { tone: 'default', label: 'email waits: pod not running' }
+};
+
 /** Where a meeting is, from booking to coaching notes. */
 export function meetingStage(m: PodMeeting, now = new Date()): { tone: BadgeTone; label: string } {
+	const problem = (what: string, d?: string) => (d && DELIVERY[d] ? { tone: DELIVERY[d].tone, label: `${what} ${DELIVERY[d].label}` } : null);
+	if (m.status !== 'cancelled') {
+		const p = (m.coaching && problem('Coaching', m.coachingDelivery)) || (m.brief && !m.coaching && problem('Brief', m.briefDelivery));
+		if (p) return p;
+	}
 	if (m.status === 'cancelled') return { tone: 'default', label: 'Cancelled' };
 	if (m.outcome === 'no_show') return { tone: 'warn', label: 'No-show' };
 	if (m.coaching) return { tone: 'ok', label: m.coachingSent ? 'Coaching sent' : 'Coaching ready' };

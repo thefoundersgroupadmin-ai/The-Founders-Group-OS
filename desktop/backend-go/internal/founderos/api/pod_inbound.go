@@ -192,6 +192,12 @@ func notifyHandoffs(ctx context.Context, d *Deps, st *pods.Store) (int, error) {
 		body := fmt.Sprintf("A buyer is ready for a person at %s.\n\n%s\n\nThe full conversation and research are in your portal: https://thefoundersgroup.net/portal\n\nThe Founders Group", h.Client, h.Summary)
 		err := commsSourcesFor(d).SendEmail(ctx, email.Reply{To: h.To, Subject: "Hand-off: a buyer wants to talk (" + h.Client + ")",
 			Text: body, RecipientApproved: true})
+		if errors.Is(err, email.ErrDeliveryUncertain) {
+			// The mail server may have it: never email the rep twice.
+			errs = append(errs, err)
+			_ = st.MarkHandoffUncertain(ctx, h.ID, err.Error())
+			continue
+		}
 		if err != nil {
 			errs = append(errs, err)
 			_ = st.MarkHandoff(ctx, h.ID, err.Error())
@@ -214,7 +220,7 @@ func sendBriefs(ctx context.Context, d *Deps, st *pods.Store) (int, error) {
 	var errs []error
 	for _, b := range list {
 		if b.To == "" {
-			_ = st.BriefDelivered(ctx, b, "no rep email set", false)
+			_ = st.BriefDelivered(ctx, b, pods.NoRecipient, false)
 			continue
 		}
 		if !st.PodRunning(ctx, b.PodID) {
@@ -230,7 +236,7 @@ func sendBriefs(ctx context.Context, d *Deps, st *pods.Store) (int, error) {
 				"\n\nAlso in your portal: https://thefoundersgroup.net/portal\n\nThe Founders Group", RecipientApproved: true})
 		if err != nil {
 			errs = append(errs, err)
-			_ = st.BriefDelivered(ctx, b, err.Error(), true)
+			_ = st.BriefDelivered(ctx, b, err.Error(), !errors.Is(err, email.ErrDeliveryUncertain))
 			continue
 		}
 		_ = st.BriefDelivered(ctx, b, "", false)
@@ -267,12 +273,16 @@ func readPodCalendarsHold(ctx context.Context, d *Deps, st *pods.Store) (int, ma
 		}
 		key := podCalendarKey(d, p.Slug)
 		if key == "" {
+			// Set up for Cal.com but no key: bookings can't be seen, so hold (Codex fix review #5).
+			hold[p.Slug] = true
 			continue
 		}
 		var meetings []pods.Meeting
 		failed := false
+		// Each pod's calendar gets its own time budget: a slow one never uses up the others'.
+		pctx, pcancel := context.WithTimeout(ctx, 20*time.Second)
 		for _, status := range []string{"upcoming", "past", "cancelled"} {
-			bs, err := cal.BookingsWithKey(ctx, key, status)
+			bs, err := cal.BookingsWithKey(pctx, key, status)
 			if err != nil {
 				errs = append(errs, fmt.Errorf("%s: %w", p.Slug, err))
 				failed = true
@@ -289,6 +299,7 @@ func readPodCalendarsHold(ctx context.Context, d *Deps, st *pods.Store) (int, ma
 				meetings = append(meetings, m)
 			}
 		}
+		pcancel()
 		if failed {
 			hold[p.Slug] = true
 			continue
@@ -296,6 +307,7 @@ func readPodCalendarsHold(ctx context.Context, d *Deps, st *pods.Store) (int, ma
 		k, err := st.RecordMeetings(ctx, p.Slug, meetings)
 		added += k
 		if err != nil {
+			hold[p.Slug] = true
 			errs = append(errs, err)
 		}
 	}
@@ -312,7 +324,7 @@ func sendCoaching(ctx context.Context, d *Deps, st *pods.Store) (int, error) {
 	var errs []error
 	for _, b := range list {
 		if b.To == "" {
-			_ = st.CoachingDelivered(ctx, b, "no rep email set", false)
+			_ = st.CoachingDelivered(ctx, b, pods.NoRecipient, false)
 			continue
 		}
 		if !st.PodRunning(ctx, b.PodID) {
@@ -324,7 +336,7 @@ func sendCoaching(ctx context.Context, d *Deps, st *pods.Store) (int, error) {
 				"\n\nAlso in your portal: https://thefoundersgroup.net/portal\n\nThe Founders Group", RecipientApproved: true})
 		if err != nil {
 			errs = append(errs, err)
-			_ = st.CoachingDelivered(ctx, b, err.Error(), true)
+			_ = st.CoachingDelivered(ctx, b, err.Error(), !errors.Is(err, email.ErrDeliveryUncertain))
 			continue
 		}
 		_ = st.CoachingDelivered(ctx, b, "", false)
@@ -343,7 +355,7 @@ func sendReviews(ctx context.Context, d *Deps, st *pods.Store) (int, error) {
 	var errs []error
 	for _, r := range list {
 		if r.To == "" {
-			_ = st.ReviewDelivered(ctx, r, "no rep email set", false)
+			_ = st.ReviewDelivered(ctx, r, pods.NoRecipient, false)
 			continue
 		}
 		if !st.PodRunning(ctx, r.PodID) {
@@ -360,7 +372,7 @@ func sendReviews(ctx context.Context, d *Deps, st *pods.Store) (int, error) {
 			Text: pods.WeeklyText(r, m), RecipientApproved: true})
 		if err != nil {
 			errs = append(errs, err)
-			_ = st.ReviewDelivered(ctx, r, err.Error(), true)
+			_ = st.ReviewDelivered(ctx, r, err.Error(), !errors.Is(err, email.ErrDeliveryUncertain))
 			continue
 		}
 		_ = st.ReviewDelivered(ctx, r, "", false)

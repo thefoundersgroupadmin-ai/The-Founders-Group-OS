@@ -83,3 +83,32 @@ func TestNoticesAreRetriedHeldOrFlaggedNeverLostOrDoubled(t *testing.T) {
 		t.Fatalf("crashed send: %s", d)
 	}
 }
+
+// Codex fix review: an ambiguous SMTP outcome is uncertain, never retried.
+func TestAnAmbiguousSendIsNeverRetried(t *testing.T) {
+	s := &Store{Pool: catalogdb.TestDB(t)}
+	ctx := context.Background()
+	p := readyPod(t, s, "Brightvale")
+	if _, err := s.SetStatus(ctx, p.Slug, StatusDryRun, ""); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.Pool.Exec(ctx, `UPDATE founderos_client_pods SET handoff_email = 'rep@bv.example' WHERE id = $1`, p.ID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.Pool.Exec(ctx, `INSERT INTO founderos_pod_meetings (pod_id, booking_uid, attendee_email, starts_at, brief)
+		VALUES ($1, 'b1', 'a@x.example', now() + interval '1 day', 'brief')`, p.ID); err != nil {
+		t.Fatal(err)
+	}
+	got, _ := s.ClaimBriefs(ctx)
+	if err := s.BriefDelivered(ctx, got[0], "email: delivery uncertain: EOF", false); err != nil {
+		t.Fatal(err)
+	}
+	if again, _ := s.ClaimBriefs(ctx); len(again) != 0 {
+		t.Fatal("an uncertain brief was sent again")
+	}
+	var d string
+	_ = s.Pool.QueryRow(ctx, `SELECT brief_delivery FROM founderos_pod_meetings`).Scan(&d)
+	if d != "uncertain" {
+		t.Fatalf("delivery %s", d)
+	}
+}

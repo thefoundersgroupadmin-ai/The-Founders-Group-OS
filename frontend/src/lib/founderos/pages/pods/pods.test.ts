@@ -83,6 +83,8 @@ describe('meetings and results (M6)', () => {
 		expect(meetingStage(m({ outcome: 'held', hasTranscript: true, coaching: 'c', coachingSent: true }), after).label).toBe('Coaching sent');
 		expect(meetingStage(m({ outcome: 'no_show' }), after).label).toBe('No-show');
 		expect(meetingStage(m({ status: 'cancelled' }), after).label).toBe('Cancelled');
+		expect(meetingStage(m({ brief: 'x', briefDelivery: 'uncertain' }), before).label).toBe('Brief email uncertain: check the inbox');
+		expect(meetingStage(m({ coaching: 'c', coachingDelivery: 'failed' }), after).label).toBe('Coaching failed to email');
 	});
 	it('sums the four calendar weeks before this one against the baseline', () => {
 		const w = (week: string, booked: number, rate: number, cohort: number) => ({ week, review: '', metrics: { meetingsBooked: booked, replyRatePct: rate, cohortSize: cohort } as WeekMetrics });

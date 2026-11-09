@@ -290,9 +290,11 @@
   --bn-shadow-slab: 0 1px 2px rgb(0 0 0 / 0.4), 0 24px 70px -18px rgb(0 0 0 / 0.6);
   --bn-shadow-lift: 0 8px 22px rgba(0, 0, 0, 0.6);
   --bn-shadow-pop: 0 24px 60px rgba(0, 0, 0, 0.75);
-  --bn-font: 'JetBrains Mono', 'the operator Mono Fallback', ui-monospace, SFMono-Regular, monospace;
-  /* Monolith lettering: Tailwind's font-mono AND font-sans are JetBrains Mono
-     (FounderOS v1 tailwind.config.ts fontFamily), never the default SF stack */
+  /* One face everywhere (owner, 9 Nov 2026: no monospace): Outfit, the client
+     portal's typeface. Tailwind's font-mono AND font-sans both resolve to it;
+     --bn-code keeps a monospace face for the rare code block. */
+  --bn-font: 'Outfit', 'Avenir Next', 'Helvetica Neue', Arial, sans-serif;
+  --bn-code: 'JetBrains Mono', 'the operator Mono Fallback', ui-monospace, SFMono-Regular, monospace;
   --font-mono: var(--bn-font);
   --font-sans: var(--bn-font);
 
@@ -349,6 +351,8 @@
   background: var(--bn-bg);
   color: var(--bn-text);
   font-family: var(--bn-font);
+  /* figures keep fixed widths, so tables and counters still line up */
+  font-variant-numeric: tabular-nums;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
 }

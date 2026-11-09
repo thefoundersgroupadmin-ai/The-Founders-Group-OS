@@ -119,9 +119,10 @@ describe('Monolith Signal tokens', () => {
     });
   });
 
-  it('JetBrains Mono everywhere, mapped onto BusinessOS tokens', () => {
+  it('Outfit everywhere (owner, 9 Nov 2026: no monospace), mapped onto BusinessOS tokens', () => {
     const shared = block(':root[data-founderos-theme]');
-    expect(shared['--bn-font']).toContain('JetBrains Mono');
+    expect(shared['--bn-font']).toContain('Outfit');
+    expect(shared['--bn-font']).not.toMatch(/mono/i);
     for (const bos of ['--bos-v2-layer-background-primary', '--bos-text-primary-color', '--bos-border-color', '--radius', '--background', '--foreground']) {
       expect(css, `${bos} must be mapped`).toMatch(new RegExp(`${bos}\\s*:\\s*var\\(--bn-`));
     }
@@ -243,9 +244,10 @@ describe('every production skin', () => {
 // it), its generated Arial fallback face (that is what draws glyphs the font
 // lacks, like "→", the long Arial arrow), and an antialiased body.
 describe('lettering, as production draws it', () => {
-  it('Tailwind font-mono and font-sans resolve to JetBrains Mono on /os', () => {
+  it('Tailwind font-mono and font-sans resolve to Outfit on /os; code keeps a mono face', () => {
     const shared = block(':root[data-founderos-theme]');
-    expect(shared['--bn-font']).toBe("'JetBrains Mono', 'the operator Mono Fallback', ui-monospace, SFMono-Regular, monospace");
+    expect(shared['--bn-font']).toBe("'Outfit', 'Avenir Next', 'Helvetica Neue', Arial, sans-serif");
+    expect(shared['--bn-code']).toContain('JetBrains Mono');
     expect(shared['--font-mono']).toBe('var(--bn-font)');
     expect(shared['--font-sans']).toBe('var(--bn-font)');
   });
@@ -280,11 +282,11 @@ describe('BusinessOS universal rules stand down under the skin', () => {
 });
 
 describe('first paint', () => {
-  it('app.html runs the exact init script, before SvelteKit, and loads JetBrains Mono', () => {
+  it('app.html runs the exact init script, before SvelteKit, and loads its fonts', () => {
     const html = readFileSync(resolve(__dirname, '../../../app.html'), 'utf8');
     expect(html).toContain(`<script>${FOUNDEROS_THEME_INIT_SCRIPT}</script>`);
     expect(html.indexOf(FOUNDEROS_THEME_INIT_SCRIPT)).toBeLessThan(html.indexOf('%sveltekit.head%'));
-    expect(html).toMatch(/fonts\.googleapis\.com\/css2\?family=JetBrains\+Mono/);
+    expect(html).toMatch(/fonts\.googleapis\.com\/css2\?family=Outfit/);
   });
 
   // It used to pin BusinessOS's own 'theme' to dark on every page, which

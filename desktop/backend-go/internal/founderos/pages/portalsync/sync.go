@@ -30,6 +30,7 @@ type Pod struct {
 	Sender         string   `json:"sender"`
 	SendingRules   string   `json:"sending_rules"`
 	Missing        []string `json:"missing"`
+	Baseline       any      `json:"baseline,omitempty"`
 }
 
 type Approval struct {
@@ -63,6 +64,16 @@ type Meeting struct {
 	StartsAt *string `json:"starts_at"`
 	Brief    string  `json:"brief"`
 	Status   string  `json:"status"`
+	Outcome  string  `json:"outcome"`
+	Coaching string  `json:"coaching"`
+}
+
+// Weekly is one week of results and its review, as the portal shows it.
+type Weekly struct {
+	ClientID  string       `json:"client_id"`
+	WeekStart string       `json:"week_start"`
+	Metrics   pods.Metrics `json:"metrics"`
+	Review    string       `json:"review"`
 }
 
 type Request struct {
@@ -84,6 +95,7 @@ type Portal interface {
 	OpenRequests(ctx context.Context, clientID string) ([]Request, error)
 	CloseRequest(ctx context.Context, id, outcome string) error
 	UpsertMeetings(ctx context.Context, rows []Meeting) error
+	UpsertWeekly(ctx context.Context, rows []Weekly) error
 }
 
 // Activity kinds that stay inside TFG (operator plumbing, not client news).
@@ -134,13 +146,16 @@ func syncPod(ctx context.Context, s *pods.Store, portal Portal, p pods.Pod, clie
 		Sender: strings.TrimSpace(p.SenderName + " <" + p.SenderEmail + ">"),
 		SendingRules: fmt.Sprintf("Up to %d first emails and %d follow-ups a day, %02d:00-%02d:00 %s%s",
 			p.FirstEmailDailyCap, p.FollowUpDailyCap, p.SendWindowStart, p.SendWindowEnd, p.Timezone, weekends),
-		Missing: missing}); err != nil {
+		Missing: missing, Baseline: baselineOf(ctx, s, p)}); err != nil {
 		return err
 	}
 	if err := pushApprovals(ctx, s, portal, p, client); err != nil {
 		return err
 	}
 	if err := pushMeetings(ctx, s, portal, p, client); err != nil {
+		return err
+	}
+	if err := pushWeekly(ctx, s, portal, p, client); err != nil {
 		return err
 	}
 	return pushActivity(ctx, s, portal, p, client)
@@ -304,7 +319,29 @@ func pushMeetings(ctx context.Context, s *pods.Store, portal Portal, p pods.Pod,
 			v := m.StartsAt.UTC().Format(time.RFC3339)
 			at = &v
 		}
-		out = append(out, Meeting{ClientID: client, OSID: m.ID, Title: m.Title, Attendee: m.Attendee, StartsAt: at, Brief: m.Brief, Status: m.Status})
+		out = append(out, Meeting{ClientID: client, OSID: m.ID, Title: m.Title, Attendee: m.Attendee, StartsAt: at, Brief: m.Brief, Status: m.Status,
+			Outcome: m.Outcome, Coaching: m.Coaching})
 	}
 	return portal.UpsertMeetings(ctx, out)
+}
+
+// baselineOf is the client's starting numbers, or nil when never set.
+func baselineOf(ctx context.Context, s *pods.Store, p pods.Pod) any {
+	b, err := s.GetBaseline(ctx, p.ID)
+	if err != nil || b.SetAt == "" {
+		return nil
+	}
+	return b
+}
+
+func pushWeekly(ctx context.Context, s *pods.Store, portal Portal, p pods.Pod, client string) error {
+	weeks, err := s.Weeks(ctx, p.ID, 26)
+	if err != nil || len(weeks) == 0 {
+		return err
+	}
+	out := make([]Weekly, 0, len(weeks))
+	for _, w := range weeks {
+		out = append(out, Weekly{ClientID: client, WeekStart: w.Start, Metrics: w.M, Review: w.Review})
+	}
+	return portal.UpsertWeekly(ctx, out)
 }

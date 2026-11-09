@@ -8,12 +8,14 @@ import (
 	"errors"
 	"log/slog"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/rhl/businessos-backend/internal/founderos/connectors/caldotcom"
 	"github.com/rhl/businessos-backend/internal/founderos/connectors/email"
+	"github.com/rhl/businessos-backend/internal/founderos/connectors/fathomcalls"
 	"github.com/rhl/businessos-backend/internal/founderos/pages/integrations"
 	"github.com/rhl/businessos-backend/internal/founderos/pages/outbox"
 	"github.com/rhl/businessos-backend/internal/founderos/pages/pods"
@@ -554,8 +556,9 @@ func registerPods(s *gin.RouterGroup, d *Deps) {
 		if !ok {
 			return
 		}
-		rows, err := d.Pool.Query(c.Request.Context(), `SELECT booking_uid, title, attendee_name, attendee_email, starts_at, brief,
-			brief_sent_at IS NOT NULL FROM founderos_pod_meetings WHERE pod_id = $1 ORDER BY starts_at DESC NULLS LAST LIMIT 100`, p.ID)
+		rows, err := d.Pool.Query(c.Request.Context(), `SELECT id, booking_uid, title, attendee_name, attendee_email, starts_at, brief,
+			brief_sent_at IS NOT NULL, status, outcome, transcript <> '', coaching, coaching_sent_at IS NOT NULL
+			FROM founderos_pod_meetings WHERE pod_id = $1 ORDER BY starts_at DESC NULLS LAST LIMIT 100`, p.ID)
 		if err != nil {
 			podError(c, err)
 			return
@@ -563,16 +566,114 @@ func registerPods(s *gin.RouterGroup, d *Deps) {
 		defer rows.Close()
 		out := []gin.H{}
 		for rows.Next() {
-			var uid, title, name, mail, brief string
+			var id int64
+			var uid, title, name, mail, brief, status, outcome, coaching string
 			var at *time.Time
-			var sent bool
-			if err := rows.Scan(&uid, &title, &name, &mail, &at, &brief, &sent); err != nil {
+			var sent, hasTranscript, coachingSent bool
+			if err := rows.Scan(&id, &uid, &title, &name, &mail, &at, &brief, &sent, &status, &outcome, &hasTranscript, &coaching, &coachingSent); err != nil {
 				podError(c, err)
 				return
 			}
-			out = append(out, gin.H{"uid": uid, "title": title, "name": name, "email": mail, "startsAt": at, "brief": brief, "briefSent": sent})
+			out = append(out, gin.H{"id": id, "uid": uid, "title": title, "name": name, "email": mail, "startsAt": at, "brief": brief,
+				"briefSent": sent, "status": status, "outcome": outcome, "hasTranscript": hasTranscript, "coaching": coaching, "coachingSent": coachingSent})
 		}
-		c.JSON(http.StatusOK, gin.H{"meetings": out, "calendarConnected": podCalendarKey(d, p.Slug) != ""})
+		c.JSON(http.StatusOK, gin.H{"meetings": out, "calendarConnected": podCalendarKey(d, p.Slug) != "",
+			"recorderConnected": podRecorderKey(d, p.Slug) != ""})
+	})
+	// How a call went, by hand: held (with an optional pasted transcript from
+	// any recorder, e.g. Plaud) or no-show. A transcript gets coaching notes.
+	s.PUT("/pods/:slug/meetings/:id/outcome", func(c *gin.Context) {
+		st, p, ok := pod(c)
+		if !ok {
+			return
+		}
+		id, err := strconv.ParseInt(c.Param("id"), 10, 64)
+		var in struct {
+			Outcome    string `json:"outcome"`
+			Transcript string `json:"transcript"`
+		}
+		if err != nil || c.ShouldBindJSON(&in) != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "outcome expected"})
+			return
+		}
+		if err := st.SetCallOutcome(c.Request.Context(), p.Slug, id, in.Outcome, in.Transcript); err != nil {
+			podError(c, err)
+			return
+		}
+		c.JSON(http.StatusOK, gin.H{"ok": true})
+	})
+	// The client's own Fathom (owner only): recordings of booked calls are
+	// matched to them and get coaching notes. Saved like the calendar key.
+	s.PUT("/pods/:slug/recorder", func(c *gin.Context) {
+		st, p, ok := pod(c)
+		if !ok {
+			return
+		}
+		if who, _ := personOf(c); !who.Owner {
+			c.JSON(http.StatusForbidden, gin.H{"error": "only the TFG owner connects a client's call recorder"})
+			return
+		}
+		var in struct {
+			FathomKey string `json:"fathomKey"`
+		}
+		if err := c.ShouldBindJSON(&in); err != nil || strings.TrimSpace(in.FathomKey) == "" || !integrationsSafeValue(strings.TrimSpace(in.FathomKey)) {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "fathomKey expected"})
+			return
+		}
+		path, ok := integrationsEnvLocal(c, d)
+		if !ok {
+			return
+		}
+		if err := integrations.UpsertEnv(path, map[string]string{fathomcalls.PodKeyName(email.PodKeyPrefix(p.Slug)): strings.TrimSpace(in.FathomKey)}); err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "could not write ~/.founderos/.env"})
+			return
+		}
+		_ = st.Log(c.Request.Context(), p.ID, "settings", "Fathom call recorder connected", "")
+		c.Header("Cache-Control", "no-store")
+		c.JSON(http.StatusOK, gin.H{"ok": true})
+	})
+	// Where the client started (month one), to measure results against.
+	s.PUT("/pods/:slug/baseline", func(c *gin.Context) {
+		st, p, ok := pod(c)
+		if !ok {
+			return
+		}
+		var in pods.Baseline
+		if err := c.ShouldBindJSON(&in); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "baseline expected"})
+			return
+		}
+		if err := st.SetBaseline(c.Request.Context(), p.Slug, in); err != nil {
+			podError(c, err)
+			return
+		}
+		c.JSON(http.StatusOK, gin.H{"ok": true})
+	})
+	// Weekly results and reviews, newest first, with the baseline and this
+	// week so far.
+	s.GET("/pods/:slug/weekly", func(c *gin.Context) {
+		st, p, ok := pod(c)
+		if !ok {
+			return
+		}
+		ctx := c.Request.Context()
+		weeks, err := st.Weeks(ctx, p.ID, 26)
+		if err != nil {
+			podError(c, err)
+			return
+		}
+		base, _ := st.GetBaseline(ctx, p.ID)
+		from := pods.WeekOf(time.Now(), p.Timezone)
+		now, err := st.WeeklyMetrics(ctx, p, from, from.AddDate(0, 0, 7))
+		if err != nil {
+			podError(c, err)
+			return
+		}
+		out := make([]gin.H, 0, len(weeks))
+		for _, w := range weeks {
+			out = append(out, gin.H{"week": w.Start, "metrics": w.M, "review": w.Review})
+		}
+		c.JSON(http.StatusOK, gin.H{"weeks": out, "baseline": base, "thisWeek": now})
 	})
 	registerPodCRM(s, d, pod, reply)
 	s.GET("/pods/:slug/activity", func(c *gin.Context) {

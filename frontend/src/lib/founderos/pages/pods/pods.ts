@@ -1,6 +1,6 @@
 // Pure helpers for /os/pods (client AI SDR pods, docs/tfg/CLIENT-PODS.md).
 import type { BadgeTone } from '$lib/founderos/kit';
-import type { ClientApproval, Pod, PodStatus } from './types';
+import type { ClientApproval, Pod, PodStatus, PodMeeting, WeekMetrics, WeeklyBody } from './types';
 
 export const STATUS_BADGE: Record<PodStatus, { tone: BadgeTone; label: string }> = {
 	setup: { tone: 'default', label: 'Setting up' },
@@ -115,4 +115,30 @@ export function parseDomains(text: string): string[] {
 		if (host && host.includes('.') && !out.includes(host)) out.push(host);
 	}
 	return out;
+}
+
+/** Where a meeting is, from booking to coaching notes. */
+export function meetingStage(m: PodMeeting, now = new Date()): { tone: BadgeTone; label: string } {
+	if (m.status === 'cancelled') return { tone: 'default', label: 'Cancelled' };
+	if (m.outcome === 'no_show') return { tone: 'warn', label: 'No-show' };
+	if (m.coaching) return { tone: 'ok', label: m.coachingSent ? 'Coaching sent' : 'Coaching ready' };
+	if (m.hasTranscript) return { tone: 'accent', label: 'Coaching pending' };
+	const past = m.startsAt !== null && new Date(m.startsAt) < now;
+	if (past) return { tone: 'warn', label: m.outcome === 'held' ? 'Needs a transcript' : 'How did it go?' };
+	if (m.brief) return { tone: m.briefSent ? 'ok' : 'accent', label: m.briefSent ? 'Brief sent' : 'Brief ready' };
+	return { tone: 'default', label: 'Brief pending' };
+}
+
+/** The last four recorded weeks against the client's baseline (per month ≈ 4 weeks). */
+export function resultsSummary(body: WeeklyBody): { meetings: number; meetingsBefore: number | null; replyRate: number | null; replyRateBefore: number | null } {
+	const last = body.weeks.slice(0, 4);
+	const sum = (k: keyof WeekMetrics) => last.reduce((a, w) => a + (Number(w.metrics[k]) || 0), 0);
+	const reached = sum('prospectsReached');
+	const set = Boolean(body.baseline?.setAt);
+	return {
+		meetings: sum('meetingsBooked'),
+		meetingsBefore: set ? body.baseline.meetingsPerMonth : null,
+		replyRate: reached ? Math.round((sum('replies') / reached) * 1000) / 10 : null,
+		replyRateBefore: set ? body.baseline.replyRatePct : null
+	};
 }

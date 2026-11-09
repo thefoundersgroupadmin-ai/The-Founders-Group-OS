@@ -194,6 +194,18 @@ def brief_query(issue_id, body):
             f"WHERE brief_issue_id = {sql(issue_id)} AND brief_sent_at IS NULL")
 
 
+def coaching_query(issue_id, body):
+    """Coaching notes for the recorded call this task was opened for (until sent)."""
+    return (f"UPDATE founderos_pod_meetings SET coaching = {sql(body.strip()[:12000])} "
+            f"WHERE coaching_issue_id = {sql(issue_id)} AND coaching_sent_at IS NULL")
+
+
+def review_query(issue_id, body):
+    """The weekly pipeline review for the week this task was opened for (until sent)."""
+    return (f"UPDATE founderos_pod_weekly SET review = {sql(body.strip()[:16000])} "
+            f"WHERE review_issue_id = {sql(issue_id)} AND review_sent_at IS NULL")
+
+
 def recipient_matches_query(addr):
     """HQ drafts with no command binding find their pipeline by recipient, never inside a client pod."""
     return ("SELECT DISTINCT c.workspace_id::text AS workspace_id,w.slug FROM founderos_funnel_contacts c JOIN workspaces w ON w.id=c.workspace_id "
@@ -306,6 +318,10 @@ def main():
                     psql(db, takeover_query(rt["outbox_ws"], issue["id"]))
                 elif d.get("key") == "brief" and text.strip():
                     psql(db, brief_query(issue["id"], text))
+                elif d.get("key") == "coaching" and text.strip():
+                    psql(db, coaching_query(issue["id"], text))
+                elif d.get("key") == "review" and text.strip():
+                    psql(db, review_query(issue["id"], text))
                 elif d.get("key") == "qualification":
                     upd = qualification_update(rt["outbox_ws"], issue["id"], text)
                     if upd:

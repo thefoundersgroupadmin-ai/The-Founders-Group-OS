@@ -143,6 +143,15 @@ class PodRoutingTest(unittest.TestCase):
         self.assertIn("taken_over_at = coalesce(taken_over_at, now())", q)
         self.assertIn("workspace_id = 'w-bv'", q)
 
+    def test_coaching_and_review_documents_fill_their_rows_until_sent(self):
+        q = sync.coaching_query("issue-8", " Ask about budget earlier ")
+        self.assertIn("coaching_issue_id = 'issue-8'", q)
+        self.assertIn("coaching_sent_at IS NULL", q)
+        self.assertIn("'Ask about budget earlier'", q)
+        q = sync.review_query("issue-9", "Good week")
+        self.assertIn("review_issue_id = 'issue-9'", q)
+        self.assertIn("review_sent_at IS NULL", q)
+
     def test_a_brief_document_fills_its_meeting(self):
         q = sync.brief_query("issue-7", "Priya runs operations at Brightvale.")
         self.assertIn("UPDATE founderos_pod_meetings SET brief =", q)

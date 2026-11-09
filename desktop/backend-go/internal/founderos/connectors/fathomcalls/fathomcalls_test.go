@@ -335,3 +335,29 @@ func TestOnlyReadsLeave(t *testing.T) {
 }
 
 func strPtr(s string) *string { return &s }
+
+// A client pod reads its own Fathom account with its own key, never TFG's.
+func TestRecentWithKeyUsesThePodsOwnKey(t *testing.T) {
+	var sawKey string
+	f := newFake(t, func(r *http.Request) (int, string) {
+		sawKey = r.Header.Get("X-Api-Key")
+		if r.URL.Query().Get("include_transcript") != "true" || r.URL.Query().Get("created_after") == "" {
+			return 400, `{}`
+		}
+		return 200, `{"items": [` + fullItem(7, "Discovery", "2026-11-05T15:00:00Z") + `]}`
+	})
+	c := keyed(t, "tfg-own-key", f.srv.URL)
+	got, err := c.RecentWithKey(context.Background(), "pod-key", time.Now().Add(-72*time.Hour))
+	if err != nil || len(got) != 1 || got[0].ID() != "7" || len(TranscriptLines(got[0])) == 0 {
+		t.Fatalf("got %+v %v", got, err)
+	}
+	if sawKey != "pod-key" {
+		t.Fatalf("used key %q, want the pod's", sawKey)
+	}
+	if _, err := c.RecentWithKey(context.Background(), "", time.Now()); err != ErrNotConfigured {
+		t.Fatalf("no key: %v", err)
+	}
+	if PodKeyName("POD_BV_") != "POD_BV_FATHOM_KEY" {
+		t.Fatal("key name")
+	}
+}

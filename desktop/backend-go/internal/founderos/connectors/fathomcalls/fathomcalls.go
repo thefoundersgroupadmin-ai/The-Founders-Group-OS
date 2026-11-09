@@ -600,3 +600,28 @@ func (c *Connector) MeetingsFull(ctx context.Context, visit func(page []MeetingF
 		cursor = *page.NextCursor
 	}
 }
+
+// PodKeyName is the env name of a client pod's own Fathom key.
+func PodKeyName(podKeyPrefix string) string { return podKeyPrefix + "FATHOM_KEY" }
+
+// RecentWithKey reads up to 50 meetings recorded after `after`, with
+// transcripts, using an explicit key: a client pod's own Fathom account,
+// never TFG's.
+func (c *Connector) RecentWithKey(ctx context.Context, key string, after time.Time) ([]MeetingFull, error) {
+	if key == "" {
+		return nil, ErrNotConfigured
+	}
+	q := url.Values{"include_transcript": {"true"}, "limit": {"50"},
+		"created_after": {after.UTC().Format("2006-01-02T15:04:05.000Z")}}
+	body, err := c.getWithRetry(ctx, key, "/meetings?"+q.Encode())
+	if err != nil {
+		return nil, err
+	}
+	var page struct {
+		Items []MeetingFull `json:"items"`
+	}
+	if err := json.Unmarshal(body, &page); err != nil {
+		return nil, fmt.Errorf("unreadable /meetings page: %w", err)
+	}
+	return page.Items, nil
+}

@@ -20,6 +20,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/rhl/businessos-backend/internal/founderos/connectors/caldotcom"
 	"github.com/rhl/businessos-backend/internal/founderos/connectors/email"
+	"github.com/rhl/businessos-backend/internal/founderos/connectors/fathomcalls"
 	"github.com/rhl/businessos-backend/internal/founderos/pages/pods"
 )
 
@@ -121,6 +122,11 @@ func startPodLoops(d *Deps) {
 					slog.Info("client pods: call briefs requested", "tasked", k, "err", err)
 				}
 				cancel()
+				ctx, cancel = context.WithTimeout(context.Background(), 25*time.Second)
+				if k, err := st.TaskCoaching(ctx, podTasksFor(d)); k > 0 || err != nil {
+					slog.Info("client pods: coaching notes requested", "tasked", k, "err", err)
+				}
+				cancel()
 				if n++; n%4 == 0 {
 					ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 					if k, err := notifyHandoffs(ctx, d, st); k > 0 || err != nil {
@@ -128,6 +134,19 @@ func startPodLoops(d *Deps) {
 					}
 					if k, err := sendBriefs(ctx, d, st); k > 0 || err != nil {
 						slog.Info("client pods: call briefs sent", "sent", k, "err", err)
+					}
+					if k, err := sendCoaching(ctx, d, st); k > 0 || err != nil {
+						slog.Info("client pods: coaching notes sent", "sent", k, "err", err)
+					}
+					if k, err := sendReviews(ctx, d, st); k > 0 || err != nil {
+						slog.Info("client pods: weekly reviews sent", "sent", k, "err", err)
+					}
+					cancel()
+				}
+				if n%20 == 0 {
+					ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+					if k, err := st.TaskWeeklyReviews(ctx, podTasksFor(d), time.Now()); k > 0 || err != nil {
+						slog.Info("client pods: weekly reviews requested", "tasked", k, "err", err)
 					}
 					cancel()
 				}
@@ -142,6 +161,11 @@ func startPodLoops(d *Deps) {
 					ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 					if k, err := readPodCalendars(ctx, d, st); k > 0 || err != nil {
 						slog.Info("client pods: meetings booked", "new", k, "err", err)
+					}
+					cancel()
+					ctx, cancel = context.WithTimeout(context.Background(), 2*time.Minute)
+					if k, err := readPodRecordings(ctx, d, st); k > 0 || err != nil {
+						slog.Info("client pods: call recordings matched", "new", k, "err", err)
 					}
 					cancel()
 				}
@@ -250,6 +274,112 @@ func readPodCalendars(ctx context.Context, d *Deps, st *pods.Store) (int, error)
 			}
 		}
 		k, err := st.RecordMeetings(ctx, p.Slug, meetings)
+		added += k
+		if err != nil {
+			errs = append(errs, err)
+		}
+	}
+	return added, errors.Join(errs...)
+}
+
+// sendCoaching emails each finished set of coaching notes to the client's rep.
+func sendCoaching(ctx context.Context, d *Deps, st *pods.Store) (int, error) {
+	list, err := st.CoachingToSend(ctx)
+	if err != nil {
+		return 0, err
+	}
+	sent := 0
+	var errs []error
+	for _, b := range list {
+		if b.To == "" {
+			_ = st.MarkCoachingSent(ctx, b.ID, "no rep email set")
+			continue
+		}
+		err := commsSourcesFor(d).SendEmail(ctx, email.Reply{To: b.To, Subject: "Call coaching: " + b.Name,
+			Text: "Coaching notes on your call \"" + b.Title + "\" with " + b.Name + ".\n\n" + b.Text +
+				"\n\nAlso in your portal: https://thefoundersgroup.net/portal\n\nThe Founders Group", RecipientApproved: true})
+		if err != nil {
+			errs = append(errs, err)
+			continue
+		}
+		_ = st.MarkCoachingSent(ctx, b.ID, "")
+		sent++
+	}
+	return sent, errors.Join(errs...)
+}
+
+// sendReviews emails each finished weekly review to the client's team.
+func sendReviews(ctx context.Context, d *Deps, st *pods.Store) (int, error) {
+	list, err := st.ReviewsToSend(ctx)
+	if err != nil {
+		return 0, err
+	}
+	sent := 0
+	var errs []error
+	for _, r := range list {
+		if r.To == "" {
+			_ = st.MarkReviewSent(ctx, r.ID, "no rep email set")
+			continue
+		}
+		m, err := st.WeekMetrics(ctx, r.ID)
+		if err != nil {
+			errs = append(errs, err)
+			continue
+		}
+		err = commsSourcesFor(d).SendEmail(ctx, email.Reply{To: r.To, Subject: "Weekly AI SDR review: week of " + r.Week + " (" + r.Client + ")",
+			Text: pods.WeeklyText(r, m), RecipientApproved: true})
+		if err != nil {
+			errs = append(errs, err)
+			continue
+		}
+		_ = st.MarkReviewSent(ctx, r.ID, "")
+		sent++
+	}
+	return sent, errors.Join(errs...)
+}
+
+// podRecorderKey is the pod's own Fathom key.
+func podRecorderKey(d *Deps, slug string) string {
+	return d.Resolver.Resolve(fathomcalls.PodKeyName(email.PodKeyPrefix(slug)))
+}
+
+// readPodRecordings matches recordings in each pod's own Fathom to its calls.
+func readPodRecordings(ctx context.Context, d *Deps, st *pods.Store) (int, error) {
+	list, err := st.List(ctx)
+	if err != nil {
+		return 0, err
+	}
+	fc := fathomcalls.New(d.Resolver)
+	added := 0
+	var errs []error
+	for _, p := range list {
+		if p.Status != pods.StatusLive && p.Status != pods.StatusDryRun && p.Status != pods.StatusPaused {
+			continue
+		}
+		key := podRecorderKey(d, p.Slug)
+		if key == "" {
+			continue
+		}
+		ms, err := fc.RecentWithKey(ctx, key, time.Now().Add(-7*24*time.Hour))
+		if err != nil {
+			errs = append(errs, fmt.Errorf("%s: %w", p.Slug, err))
+			continue
+		}
+		recs := make([]pods.Recording, 0, len(ms))
+		for _, m := range ms {
+			at, err := time.Parse(time.RFC3339Nano, m.At())
+			if err != nil {
+				continue
+			}
+			r := pods.Recording{Ref: "fathom:" + m.ID(), Start: at, Transcript: strings.Join(fathomcalls.TranscriptLines(m), "\n")}
+			for _, inv := range m.CalendarInvitees {
+				if inv.Email != nil {
+					r.Invitees = append(r.Invitees, *inv.Email)
+				}
+			}
+			recs = append(recs, r)
+		}
+		k, err := st.AttachRecordings(ctx, p.Slug, recs)
 		added += k
 		if err != nil {
 			errs = append(errs, err)

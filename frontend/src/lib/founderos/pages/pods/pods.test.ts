@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { APPROVAL_BADGE, DOC_LABELS, STATUS_BADGE, actionsFor, parseDomains, setupChecklist, waitingReason } from './pods';
-import type { Pod } from './types';
+import { APPROVAL_BADGE, DOC_LABELS, STATUS_BADGE, actionsFor, meetingStage, parseDomains, resultsSummary, setupChecklist, waitingReason } from './pods';
+import type { Pod, PodMeeting, WeekMetrics, WeeklyBody } from './types';
 
 const pod = (over: Partial<Pod> = {}): Pod => ({
 	slug: 'client-brightvale', clientName: 'Brightvale', package: 'core', reps: 6, status: 'setup',
@@ -60,5 +60,30 @@ describe('client pods view', () => {
 
 	it('names every document', () => {
 		expect(Object.keys(DOC_LABELS)).toEqual(['icp', 'voice', 'product', 'objections', 'targets', 'exclusions', 'playbook', 'qualification', 'handoff']);
+	});
+});
+
+describe('meetings and results (M6)', () => {
+	const m = (over: Partial<PodMeeting> = {}): PodMeeting => ({
+		id: 1, uid: 'b-1', title: 'Discovery', name: 'Priya', email: 'p@x.example', startsAt: '2026-11-20T10:00:00Z', brief: '', briefSent: false,
+		status: 'booked', outcome: '', hasTranscript: false, coaching: '', coachingSent: false, ...over
+	});
+	const before = new Date('2026-11-19T00:00:00Z');
+	const after = new Date('2026-11-21T00:00:00Z');
+	it('follows a meeting from brief to coaching', () => {
+		expect(meetingStage(m(), before).label).toBe('Brief pending');
+		expect(meetingStage(m({ brief: 'x', briefSent: true }), before).label).toBe('Brief sent');
+		expect(meetingStage(m({ brief: 'x' }), after).label).toBe('How did it go?');
+		expect(meetingStage(m({ outcome: 'held' }), after).label).toBe('Needs a transcript');
+		expect(meetingStage(m({ outcome: 'held', hasTranscript: true }), after).label).toBe('Coaching pending');
+		expect(meetingStage(m({ outcome: 'held', hasTranscript: true, coaching: 'c', coachingSent: true }), after).label).toBe('Coaching sent');
+		expect(meetingStage(m({ outcome: 'no_show' }), after).label).toBe('No-show');
+		expect(meetingStage(m({ status: 'cancelled' }), after).label).toBe('Cancelled');
+	});
+	it('sums the last four weeks against the baseline', () => {
+		const w = (booked: number, reached: number, replies: number) => ({ week: '', review: '', metrics: { meetingsBooked: booked, prospectsReached: reached, replies } as WeekMetrics });
+		const body: WeeklyBody = { weeks: [w(2, 50, 5), w(1, 50, 0), w(1, 0, 0), w(0, 0, 0), w(9, 9, 9)], baseline: { meetingsPerMonth: 3, replyRatePct: 1.5, note: '', setAt: 'x' }, thisWeek: {} as WeekMetrics };
+		expect(resultsSummary(body)).toEqual({ meetings: 4, meetingsBefore: 3, replyRate: 5, replyRateBefore: 1.5 });
+		expect(resultsSummary({ ...body, baseline: { meetingsPerMonth: 0, replyRatePct: 0, note: '' } }).meetingsBefore).toBeNull();
 	});
 });

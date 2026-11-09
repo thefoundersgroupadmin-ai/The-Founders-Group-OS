@@ -79,8 +79,13 @@ svelte-check 0 errors), Codex review, fixes, deploy, build-log entry.
   booked → stop sequences → call brief to rep email + portal.
 - **M5 CRM sync:** adapter interface; HubSpot first (existing integration), then Pipedrive,
   Salesforce; contacts, companies, deals, activity logging.
-- **M6 Coaching + reporting:** call recordings (Fathom/Plaud) → coaching notes; weekly
-  pipeline review; weekly results vs baseline in the portal.
+- **M6 Coaching + reporting (built 9 Nov 2026):** the client's own Fathom
+  (`POD_<SLUG>_FATHOM_KEY`) or a pasted transcript from any recorder (Plaud) → the pod's
+  AI SDR writes coaching notes (doc key `coaching`) → emailed to the rep and in the
+  portal. Every Monday TFG OS counts last week from its own records
+  (`founderos_pod_weekly`) and the AI SDR writes the review with three things to work
+  on (doc key `review`) → emailed and in the portal "Results" section against the
+  month-one baseline (pod settings). Portal SQL: `20261109000000_sdr_results.sql`.
 - **M7 Channels needing owner purchases:** warmed separate domains per pod, LinkedIn via a
   provider, contact enrichment (Apollo plan), Outlook/Meet.
 - **M8 Hand-off + end-to-end test:** export bundle (playbook, sequences, reports, CRM
@@ -119,4 +124,4 @@ Guarantees added to M1 (full review in the build log):
 8. [x] Suppression, per-pod replies and opt-outs, bookings scoped per workspace
 9. [x] Dry run via approved sink with separate simulated receipts
 10. [x] Agent packets per pod (no HQ handover); routines provisioned per pod, idempotently
-11. [ ] /os/clients admin view; full gates; Codex review
+11. [x] /os/clients admin view; full gates; Codex review

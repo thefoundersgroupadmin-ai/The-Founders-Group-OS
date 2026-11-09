@@ -34,7 +34,7 @@ var wantFounderosTables = []string{
 // bridgeNativeTables are founderos_* tables the bridge creates for itself
 // (not ETL targets from FounderOS v1), e.g. migration 161's call archive.
 var bridgeNativeTables = []string{"founderos_call_archive", "founderos_calls", "founderos_device_pushes", "founderos_dial_state", "founderos_dnc", "founderos_outbox", "founderos_sales_automation", "founderos_sales_automation_runs", "founderos_commands", "founderos_tool_calls",
-	"founderos_client_pods", "founderos_client_pod_docs", "founderos_client_approvals", "founderos_client_activity", "founderos_email_suppression", "founderos_pod_agents", "founderos_send_steps", "founderos_pod_conversations", "founderos_portal_sync", "founderos_pod_inbound", "founderos_pod_handoffs", "founderos_pod_meetings", "founderos_pod_crm_ids"}
+	"founderos_client_pods", "founderos_client_pod_docs", "founderos_client_approvals", "founderos_client_activity", "founderos_email_suppression", "founderos_pod_agents", "founderos_send_steps", "founderos_pod_conversations", "founderos_portal_sync", "founderos_pod_inbound", "founderos_pod_handoffs", "founderos_pod_meetings", "founderos_pod_crm_ids", "founderos_pod_weekly"}
 
 // pendingETLTables are founderos_* tables a page reads whose ETL copy from
 // FounderOS v1 is not in spec.go yet (none now: the funnel archive landed).

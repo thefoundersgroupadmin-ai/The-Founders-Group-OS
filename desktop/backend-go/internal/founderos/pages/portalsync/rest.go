@@ -127,3 +127,7 @@ func (r *REST) CloseRequest(ctx context.Context, id, outcome string) error {
 func (r *REST) UpsertMeetings(ctx context.Context, rows []Meeting) error {
 	return r.write(ctx, http.MethodPost, "sdr_meetings?on_conflict=client_id,os_id", rows, "resolution=merge-duplicates,return=minimal")
 }
+
+func (r *REST) UpsertWeekly(ctx context.Context, rows []Weekly) error {
+	return r.write(ctx, http.MethodPost, "sdr_weekly?on_conflict=client_id,week_start", rows, "resolution=merge-duplicates,return=minimal")
+}

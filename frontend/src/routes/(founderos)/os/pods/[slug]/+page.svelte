@@ -7,8 +7,8 @@
 	import { page } from '$app/state';
 	import { founderosFetch } from '$lib/founderos/api';
 	import { Badge, PageHeader, Pressable, Rise, Slab } from '$lib/founderos/kit';
-	import { APPROVAL_BADGE, DOC_LABELS, STATUS_BADGE, actionsFor, parseDomains, setupChecklist, waitingReason } from '$lib/founderos/pages/pods/pods';
-	import type { Activity, AgentBinding, ClientApproval, Mailbox, Pod, PodDoc } from '$lib/founderos/pages/pods/types';
+	import { APPROVAL_BADGE, DOC_LABELS, STATUS_BADGE, actionsFor, meetingStage, parseDomains, resultsSummary, setupChecklist, waitingReason } from '$lib/founderos/pages/pods/pods';
+	import type { Activity, AgentBinding, ClientApproval, Mailbox, Pod, PodDoc, PodMeeting, WeeklyBody } from '$lib/founderos/pages/pods/types';
 	import { STATUS_BADGE as OUTBOX_BADGE, recipientLine } from '$lib/founderos/pages/outbox/outbox';
 	import type { OutboxBody, OutboxItem } from '$lib/founderos/pages/outbox/types';
 
@@ -33,7 +33,12 @@
 	let list = $state({ title: '', domains: '' });
 	let rules = $state<{ approvalPolicy: string; firstEmailDailyCap: number; followUpDailyCap: number; timezone: string; sendWindow: [number, number]; sendWeekends: boolean; dryRunInbox: string; bookingUrl: string; crmProvider: string; calendarProvider: string; handoffEmail: string; inboundAutoReply: boolean } | null>(null);
 	let formLink = $state<{ endpoint: string; snippet: string } | null>(null);
-	let meetings = $state<{ uid: string; title: string; name: string; email: string; startsAt: string | null; brief: string; briefSent: boolean }[]>([]);
+	let meetings = $state<PodMeeting[]>([]);
+	let recorderConnected = $state(false);
+	let fathomKey = $state('');
+	let transcripts = $state<Record<number, string>>({});
+	let weekly = $state<WeeklyBody | null>(null);
+	let base0 = $state<{ meetingsPerMonth: number; replyRatePct: number; note: string } | null>(null);
 	let calendarConnected = $state(false);
 	let calcomKey = $state('');
 	let crm = $state<{ provider: string; connected: boolean; synced: number } | null>(null);
@@ -60,10 +65,17 @@
 		founderosFetch<{ agent: AgentBinding | null }>(`${base}/agent`).then((b) => (agent = b.agent)).catch(() => {});
 		founderosFetch<{ approvals: ClientApproval[] }>(`${base}/approvals`).then((b) => (approvals = b.approvals)).catch(() => {});
 		founderosFetch<{ provider: string; connected: boolean; synced: number }>(`${base}/crm`).then((b) => (crm = b)).catch(() => {});
-		founderosFetch<{ meetings: typeof meetings; calendarConnected: boolean }>(`${base}/meetings`)
+		founderosFetch<{ meetings: PodMeeting[]; calendarConnected: boolean; recorderConnected: boolean }>(`${base}/meetings`)
 			.then((b) => {
 				meetings = b.meetings;
 				calendarConnected = b.calendarConnected;
+				recorderConnected = b.recorderConnected;
+			})
+			.catch(() => {});
+		founderosFetch<WeeklyBody>(`${base}/weekly`)
+			.then((b) => {
+				weekly = b;
+				base0 ??= { meetingsPerMonth: b.baseline?.meetingsPerMonth ?? 0, replyRatePct: b.baseline?.replyRatePct ?? 0, note: b.baseline?.note ?? '' };
 			})
 			.catch(() => {});
 		portalId ||= pod?.portalClientId ?? '';
@@ -117,6 +129,17 @@
 			await founderosFetch(`${base}/calendar`, { method: 'PUT', json: { calcomKey } });
 			calcomKey = '';
 		});
+	const connectRecorder = () =>
+		act(async () => {
+			await founderosFetch(`${base}/recorder`, { method: 'PUT', json: { fathomKey } });
+			fathomKey = '';
+		});
+	const setOutcome = (m: PodMeeting, outcome: 'held' | 'no_show') =>
+		act(async () => {
+			await founderosFetch(`${base}/meetings/${m.id}/outcome`, { method: 'PUT', json: { outcome, transcript: outcome === 'held' ? (transcripts[m.id] ?? '') : '' } });
+			transcripts[m.id] = '';
+		});
+	const saveBaseline = () => act(() => founderosFetch(`${base}/baseline`, { method: 'PUT', json: base0 }));
 	const makeFormLink = () =>
 		act(async () => {
 			formLink = await founderosFetch<{ endpoint: string; snippet: string }>(`${base}/inbound-link`, { method: 'POST' });
@@ -330,16 +353,60 @@
 					<input type="password" bind:value={calcomKey} placeholder="Client's Cal.com API key" aria-label="Cal.com API key" class="pc-input min-w-[260px] flex-1 rounded-[6px] px-2.5 py-1.5 text-[12px]" />
 					<Pressable tone="secondary" disabled={busy || !calcomKey.trim()} onclick={connectCalendar}>{calendarConnected ? 'Replace key' : 'Connect Cal.com'}</Pressable>
 				</div>
+				<p class="mb-2 mt-3 text-[12px]">{recorderConnected ? "The client's Fathom is connected: recordings of these calls are matched to them and get coaching notes for the rep." : "Connect the client's Fathom for automatic coaching notes, or paste any recorder's transcript (e.g. Plaud) under a call."}</p>
+				<div class="flex flex-wrap items-center gap-2">
+					<input type="password" bind:value={fathomKey} placeholder="Client's Fathom API key" aria-label="Fathom API key" class="pc-input min-w-[260px] flex-1 rounded-[6px] px-2.5 py-1.5 text-[12px]" />
+					<Pressable tone="secondary" disabled={busy || !fathomKey.trim()} onclick={connectRecorder}>{recorderConnected ? 'Replace key' : 'Connect Fathom'}</Pressable>
+				</div>
 				{#each meetings as m (m.uid)}
+					{@const stage = meetingStage(m)}
 					<div class="border-b py-2" style="border-color: var(--bn-hairline)">
 						<div class="flex flex-wrap items-center justify-between gap-2">
 							<span class="text-[12px]">{m.startsAt ? m.startsAt.slice(0, 16).replace('T', ' ') : ''} · {m.title} · {m.name || m.email}</span>
-							<Badge tone={m.brief ? (m.briefSent ? 'ok' : 'accent') : 'default'}>{m.brief ? (m.briefSent ? 'Brief sent' : 'Brief ready') : 'Brief pending'}</Badge>
+							<Badge tone={stage.tone}>{stage.label}</Badge>
 						</div>
-						{#if m.brief}<p class="bn-dim mt-1 whitespace-pre-wrap text-[12px]">{m.brief}</p>{/if}
+						{#if m.brief}<details class="mt-1"><summary class="bn-dim cursor-pointer font-mono text-[11px]">Call brief</summary><p class="bn-dim mt-1 whitespace-pre-wrap text-[12px]">{m.brief}</p></details>{/if}
+						{#if m.coaching}<details class="mt-1" open><summary class="bn-dim cursor-pointer font-mono text-[11px]">Coaching notes</summary><p class="mt-1 whitespace-pre-wrap text-[12px]">{m.coaching}</p></details>{/if}
+						{#if m.status === 'booked' && m.startsAt && new Date(m.startsAt) < new Date() && !m.hasTranscript && m.outcome !== 'no_show'}
+							<textarea bind:value={transcripts[m.id]} rows="2" placeholder="Paste the call transcript (optional)" aria-label="Call transcript" class="pc-input mt-2 w-full rounded-[6px] px-2.5 py-1.5 text-[12px]"></textarea>
+							<div class="mt-1 flex gap-2">
+								<Pressable tone="secondary" disabled={busy} onclick={() => setOutcome(m, 'held')}>{transcripts[m.id]?.trim() ? 'Held: coach this call' : 'Mark held'}</Pressable>
+								<Pressable tone="ghost" disabled={busy} onclick={() => setOutcome(m, 'no_show')}>No-show</Pressable>
+							</div>
+						{/if}
 					</div>
 				{:else}
 					<p class="bn-dim mt-2 font-mono text-[12px]">No meetings yet.</p>
+				{/each}
+			</Slab>
+
+			<Slab>
+				<p class="bn-dim mb-2 font-mono text-[10px] uppercase tracking-[0.15em]">Results and weekly reviews</p>
+				{#if weekly}
+					{@const r = resultsSummary(weekly)}
+					<div class="mb-3 grid grid-cols-2 gap-3 md:grid-cols-4">
+						<div><p class="bn-dim font-mono text-[10px] uppercase">Meetings, last 4 weeks</p><p class="text-[18px]">{r.meetings}</p><p class="bn-dim text-[11px]">{r.meetingsBefore === null ? 'No baseline yet' : `Before: ${r.meetingsBefore} a month`}</p></div>
+						<div><p class="bn-dim font-mono text-[10px] uppercase">Reply rate</p><p class="text-[18px]">{r.replyRate === null ? '–' : `${r.replyRate}%`}</p><p class="bn-dim text-[11px]">{r.replyRateBefore === null ? '' : `Before: ${r.replyRateBefore}%`}</p></div>
+						<div><p class="bn-dim font-mono text-[10px] uppercase">This week so far</p><p class="text-[18px]">{weekly.thisWeek.prospectsReached} reached</p><p class="bn-dim text-[11px]">{weekly.thisWeek.replies} replies · {weekly.thisWeek.meetingsBooked} booked</p></div>
+						<div><p class="bn-dim font-mono text-[10px] uppercase">Hand-offs this week</p><p class="text-[18px]">{weekly.thisWeek.handoffs}</p><p class="bn-dim text-[11px]">{weekly.thisWeek.optOuts} opt-outs</p></div>
+					</div>
+				{/if}
+				{#if base0}
+					<p class="mb-1 text-[12px]">Where the client started (month one), to measure against:</p>
+					<div class="flex flex-wrap items-center gap-2">
+						<label class="text-[11px]">Meetings a month <input type="number" min="0" bind:value={base0.meetingsPerMonth} class="pc-input w-20 rounded-[6px] px-2 py-1 text-[12px]" /></label>
+						<label class="text-[11px]">Reply rate % <input type="number" min="0" max="100" step="0.1" bind:value={base0.replyRatePct} class="pc-input w-20 rounded-[6px] px-2 py-1 text-[12px]" /></label>
+						<input bind:value={base0.note} placeholder="How measured (e.g. founder-led outbound, Sept)" aria-label="Baseline note" class="pc-input min-w-[220px] flex-1 rounded-[6px] px-2 py-1 text-[12px]" />
+						<Pressable tone="secondary" disabled={busy} onclick={saveBaseline}>Save baseline</Pressable>
+					</div>
+				{/if}
+				{#each weekly?.weeks ?? [] as w (w.week)}
+					<details class="mt-2 border-b py-1" style="border-color: var(--bn-hairline)">
+						<summary class="cursor-pointer text-[12px]">Week of {w.week}{w.metrics.dryRun ? ' (test run)' : ''} · reached {w.metrics.prospectsReached} · replies {w.metrics.replies} ({w.metrics.replyRatePct}%) · booked {w.metrics.meetingsBooked} · held {w.metrics.meetingsHeld}</summary>
+						<p class="mt-1 whitespace-pre-wrap text-[12px]">{w.review || 'Review on its way from the AI SDR.'}</p>
+					</details>
+				{:else}
+					<p class="bn-dim mt-2 font-mono text-[12px]">The first weekly review arrives the Monday after the pod starts running.</p>
 				{/each}
 			</Slab>
 

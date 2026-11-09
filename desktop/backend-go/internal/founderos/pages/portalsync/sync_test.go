@@ -11,6 +11,7 @@ import (
 
 type fakePortal struct {
 	meetings  map[int64]Meeting
+	weekly    map[string]Weekly
 	pods      map[string]Pod
 	approvals map[string]*Approval // id → row
 	activity  []Activity
@@ -204,4 +205,52 @@ func (f *fakePortal) UpsertMeetings(_ context.Context, rows []Meeting) error {
 		f.meetings[m.OSID] = m
 	}
 	return nil
+}
+
+func (f *fakePortal) UpsertWeekly(_ context.Context, rows []Weekly) error {
+	if f.weekly == nil {
+		f.weekly = map[string]Weekly{}
+	}
+	for _, w := range rows {
+		f.weekly[w.WeekStart] = w
+	}
+	return nil
+}
+
+// M6: coaching notes, weekly results and the baseline reach the portal.
+func TestCoachingWeeklyResultsAndBaselineReachThePortal(t *testing.T) {
+	s, p := setup(t)
+	ctx := context.Background()
+	if _, err := s.RecordMeetings(ctx, p.Slug, []pods.Meeting{{UID: "b-1", Title: "Discovery call", Start: "2026-01-07T10:00:00Z",
+		AttendeeEmail: "priya@bv.example", AttendeeName: "Priya Shah"}}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.Pool.Exec(ctx, `UPDATE founderos_pod_meetings SET outcome = 'held', coaching = 'Ask about budget earlier'`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.Pool.Exec(ctx, `INSERT INTO founderos_pod_weekly (pod_id, week_start, metrics, review)
+		VALUES ($1, '2026-11-02', '{"week":"2026-11-02","meetingsBooked":3}', 'Good week')`, p.ID); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.SetBaseline(ctx, p.Slug, pods.Baseline{MeetingsPerMonth: 4, ReplyRatePct: 1.5}); err != nil {
+		t.Fatal(err)
+	}
+	f := newFake()
+	if err := Sync(ctx, s, f); err != nil {
+		t.Fatal(err)
+	}
+	for _, m := range f.meetings {
+		if m.Outcome != "held" || m.Coaching != "Ask about budget earlier" {
+			t.Fatalf("meeting %+v", m)
+		}
+	}
+	w, ok := f.weekly["2026-11-02"]
+	if !ok || w.Review != "Good week" || w.Metrics.MeetingsBooked != 3 {
+		t.Fatalf("weekly %+v", f.weekly)
+	}
+	for _, pp := range f.pods {
+		if b, ok := pp.Baseline.(pods.Baseline); !ok || b.MeetingsPerMonth != 4 {
+			t.Fatalf("baseline %+v", pp.Baseline)
+		}
+	}
 }

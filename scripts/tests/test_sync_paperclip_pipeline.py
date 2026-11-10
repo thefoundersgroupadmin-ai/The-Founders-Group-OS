@@ -127,5 +127,14 @@ class TaskOwnershipTest(unittest.TestCase):
         self.assertFalse(sync.moved("i2", "client-b", owners))
         self.assertFalse(sync.moved("new", "client-b", owners))
 
+class LushaLookupTest(unittest.TestCase):
+    def test_lookup_details_kept_with_evidence(self):
+        rows, bad = sync.json_prospects('[{"company":"Acme","evidence":"Seed 2026","domain":"acme.com",'
+                                        '"buyerLinkedin":"https://linkedin.com/in/x","buyer2":"Jo Bloggs"}]')
+        self.assertEqual(bad, 0)
+        self.assertEqual(rows[0]["evidence"], "Seed 2026\nDomain: acme.com; Buyer LinkedIn: https://linkedin.com/in/x; Second buyer: Jo Bloggs")
+
+
 if __name__ == "__main__":
     unittest.main()
+

@@ -166,8 +166,18 @@ def json_prospects(body):
         score = e.get("score")
         if not (isinstance(score, int) and not isinstance(score, bool) and 0 <= score <= 100):
             score = None
+        # Lookup details for an email finder (Lusha): kept with the evidence, as the pipeline has no columns for them.
+        lookup = []
+        for label, key in (("Domain", "domain"), ("Buyer LinkedIn", "buyerLinkedin"), ("Second buyer", "buyer2"),
+                           ("Second buyer role", "buyer2Role"), ("Second buyer LinkedIn", "buyer2Linkedin")):
+            v = str(e.get(key) or "").strip()
+            if v:
+                lookup.append(f"{label}: {v}")
+        evidence = str(e.get("evidence") or "")
+        if lookup:
+            evidence = (evidence + "\n" if evidence else "") + "; ".join(lookup)
         out.append({"name": name, "url": str(e.get("website") or "").strip() or None,
-                    "location": str(e.get("location") or ""), "evidence": str(e.get("evidence") or ""),
+                    "location": str(e.get("location") or ""), "evidence": evidence,
                     "buyer": buyer, "buyerRole": str(e.get("buyerRole") or "").strip() or None, "score": score, "next": str(e.get("nextAction") or ""), "email": email})
     return out, bad
 

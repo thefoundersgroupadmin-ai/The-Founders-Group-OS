@@ -88,6 +88,7 @@ func doctorPage(d *Deps) gin.HandlerFunc {
 			"axes":        rel.axes,
 			"relational":  relational,
 			"brain":       gin.H{"agents": doctorMemoryAgents, "last": rel.last},
+			"repair":      doctorRepairState(),
 		})
 	}
 }

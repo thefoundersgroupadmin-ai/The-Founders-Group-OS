@@ -1,5 +1,6 @@
 /** GET /api/founderos/pages/doctor: Optimal Engine health (internal/founderos/pages/doctor). */
 import type { Meter, SeriesPoint, StatChip } from '$lib/founderos/kit';
+import type { RepairState } from './repair';
 
 export type DoctorCheck = { engine: string; name: string; status: 'ok' | 'warn' | 'error' | (string & {}); message: string };
 export type EngineStore = { id: string; status: string; technology: string; rowCount: number; tables: Record<string, number> };
@@ -55,4 +56,6 @@ export type DoctorBody = {
 	axes: PillarAxis[] | null;
 	relational: { ok: boolean; error?: string };
 	brain: { agents: string[]; last: { agentId: string; finishedAt: string; ok: boolean } | null };
+	/** the auto-repair doctor's state; null before its first pass or on older backends */
+	repair?: RepairState | null;
 };

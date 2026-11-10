@@ -10,6 +10,7 @@
 	import { founderosFetch } from '$lib/founderos/api';
 	import { BigStat, Chip, Dot, InsightCard, MeterStack, PILL, Pressable, Slab, SlabCard, SlabTitle, StepLine, DotMatrix } from '$lib/founderos/kit';
 	import DoctorChecks from '$lib/founderos/pages/doctor/DoctorChecks.svelte';
+	import AutoRepair from '$lib/founderos/pages/doctor/AutoRepair.svelte';
 	import Arrow from '$lib/founderos/pages/doctor/Arrow.svelte';
 	import DoctorCore from '$lib/founderos/pages/doctor/DoctorCore.svelte';
 	import PillarRadar from '$lib/founderos/pages/doctor/PillarRadar.svelte';
@@ -135,6 +136,9 @@
 		{#if failure}
 			<div class="mb-4 font-mono text-[11px]" style="color: var(--bn-err)">rerun failed: {failure} · showing the previous read</div>
 		{/if}
+
+		<!-- The auto-repair doctor first: what it is fixing and what only the owner can do -->
+		<div class="mb-6"><AutoRepair state={data.repair} /></div>
 
 		<!-- Hero row: the pillar radar beside the Health Volume card -->
 		<div class="grid grid-cols-[2fr_1fr] gap-6 max-[1200px]:grid-cols-1">

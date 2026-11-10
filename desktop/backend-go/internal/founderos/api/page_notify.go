@@ -869,6 +869,7 @@ func startNotifyWatch(d *Deps) {
 					notify.Publish(ctx, e)
 				}
 				notifyBriefs(ctx, d, now)
+				publishDoctorNotices(ctx, notify.Publish)
 				cancel()
 				<-t.C
 			}

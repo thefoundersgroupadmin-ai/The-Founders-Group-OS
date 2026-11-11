@@ -28,6 +28,8 @@ export type Pod = {
 	inboundLinkSet: boolean;
 	wentLiveAt: string | null;
 	missingToGoLive?: string[];
+	/** go-live requirements waived for this client: item → reason, who, when */
+	readinessWaivers?: Record<string, { reason: string; by: string; at: string }>;
 };
 
 export type PodDoc = { key: string; body: string; version: number; approvedAt: string | null; updatedAt: string };

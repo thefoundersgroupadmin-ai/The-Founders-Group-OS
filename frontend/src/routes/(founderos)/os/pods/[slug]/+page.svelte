@@ -166,6 +166,18 @@
 			})
 		);
 
+	// Waive a go-live requirement this client genuinely doesn't need (with a reason), or require it again.
+	async function waive(item: string, on: boolean) {
+		const reason = on ? (window.prompt('Why doesn’t this client need it? (kept on the pod’s record)') ?? '').trim() : '';
+		if (on && !reason) return;
+		try {
+			const r = await founderosFetch<{ pod: Pod }>(`${base}/readiness-waivers`, { method: 'POST', json: { item, reason, waive: on } });
+			pod = r.pod;
+		} catch (e: unknown) {
+			window.alert(e instanceof Error ? e.message : 'Couldn’t save that.');
+		}
+	}
+
 	const checklist = $derived(
 		pod
 			? setupChecklist(
@@ -239,7 +251,14 @@
 				{#each checklist as item (item.key)}
 					<div class="flex items-center justify-between gap-2 py-1">
 						<span class="text-[12px]">{item.done ? '✓' : '○'} {item.label}{item.optional ? '' : ' *'}</span>
-						<span class="bn-dim font-mono text-[11px]">{item.detail}</span>
+						<span class="flex items-center gap-2">
+							<span class="bn-dim font-mono text-[11px]">{item.detail}</span>
+							{#if item.waivable && !item.done}
+								<button type="button" class="bn-dim text-[11px] underline" onclick={() => waive(item.key, true)}>Not needed</button>
+							{:else if item.waived}
+								<button type="button" class="bn-dim text-[11px] underline" onclick={() => waive(item.key, false)}>Require again</button>
+							{/if}
+						</span>
 					</div>
 				{/each}
 			</Slab>

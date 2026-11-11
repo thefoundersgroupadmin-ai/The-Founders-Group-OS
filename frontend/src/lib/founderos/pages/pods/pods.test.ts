@@ -30,18 +30,24 @@ describe('client pods view', () => {
 	it('the setup checklist follows the pod, its mailbox, documents and agent', () => {
 		const empty = setupChecklist(pod(), { configured: false }, {}, null);
 		expect(empty.every((i) => !i.done)).toBe(true);
-		expect(empty.filter((i) => !i.optional).map((i) => i.key)).toEqual(['mailbox', 'icp', 'voice', 'product', 'targets', 'agent', 'dryrun', 'live']);
-		expect(empty.filter((i) => i.optional).map((i) => i.key)).toEqual(['portal', 'handoff', 'calendar', 'crm', 'form', 'recorder', 'baseline']);
+		expect(empty.filter((i) => !i.optional).map((i) => i.key)).toEqual(['mailbox', 'icp', 'voice', 'product', 'targets', 'agent', 'portal', 'handoff', 'calendar', 'baseline', 'dryrun', 'live']);
+		expect(empty.filter((i) => i.optional).map((i) => i.key)).toEqual(['crm', 'form', 'recorder']);
+		expect(empty.filter((i) => i.waivable).map((i) => i.key)).toEqual(['product', 'agent', 'portal', 'handoff', 'calendar', 'baseline']);
 		const ready = setupChecklist(
 			pod({ status: 'live', senderEmail: 'sam@bv.example', wentLiveAt: '2026-11-09T10:00:00Z' }),
 			{ configured: true },
 			{ icp: { approved: true }, voice: { approved: true }, product: { approved: false }, targets: { approved: true } },
 			{ agentId: 'a1' }
 		);
-		expect(ready.filter((i) => !i.done && !i.optional).map((i) => i.key)).toEqual(['product']);
+		expect(ready.filter((i) => !i.done && !i.optional).map((i) => i.key)).toEqual(['product', 'portal', 'handoff', 'calendar', 'baseline']);
+		// A requirement waived for this client counts as done, with the reason shown.
+		const waived = setupChecklist(pod({ readinessWaivers: { calendar: { reason: 'rep books from their own calendar', by: 'Nader', at: '2026-11-11' } } }),
+			{ configured: true }, {}, null);
+		const cal = waived.find((i) => i.key === 'calendar');
+		expect(cal?.done && cal.waived && cal.detail).toMatch(/not needed: rep books/);
 		const full = setupChecklist(pod({ portalClientId: 'c1', handoffEmail: 'rep@bv.example', inboundLinkSet: true }), { configured: true }, {}, null,
 			{ calendar: true, recorder: true, crm: true, baseline: true });
-		expect(full.filter((i) => i.optional && !i.done)).toEqual([]);
+		expect(full.filter((i) => (i.optional || ['portal', 'handoff', 'calendar', 'baseline'].includes(i.key)) && !i.done)).toEqual([]);
 		expect(ready.find((i) => i.key === 'product')?.detail).toMatch(/approval/i);
 	});
 

@@ -48,7 +48,10 @@ export function actionsFor(p: Pick<Pod, 'status'>): StatusAction[] {
 	return MOVES[p.status];
 }
 
-export type ChecklistItem = { key: string; label: string; done: boolean; detail: string; optional?: boolean };
+export type ChecklistItem = { key: string; label: string; done: boolean; detail: string; optional?: boolean; waivable?: boolean; waived?: boolean };
+
+/** Parts of the service required to go live unless waived for a client that doesn't need them (backend pods.ServiceItems). */
+export const WAIVABLE = ['product', 'agent', 'portal', 'handoff', 'calendar', 'baseline'];
 
 /** Connections beyond the go-live minimum that a full onboarding sets up. */
 export type Onboarding = { calendar: boolean; recorder: boolean; crm: boolean; baseline: boolean };
@@ -71,6 +74,13 @@ export function setupChecklist(
 			detail: !d ? 'not written yet' : d.approved ? 'approved by the client' : 'written; waiting for client approval'
 		};
 	};
+	const waivers = p.readinessWaivers ?? {};
+	const needed = (item: ChecklistItem): ChecklistItem => {
+		if (!WAIVABLE.includes(item.key)) return item;
+		const w = waivers[item.key];
+		if (w && !item.done) return { ...item, optional: false, waivable: true, waived: true, done: true, detail: `not needed: ${w.reason}` };
+		return { ...item, optional: false, waivable: true, waived: !!w };
+	};
 	return [
 		{ key: 'mailbox', label: 'Sending mailbox', done: mailbox.configured && !!p.senderEmail, detail: mailbox.configured ? p.senderEmail : 'not connected' },
 		doc('icp'),
@@ -87,7 +97,7 @@ export function setupChecklist(
 		opt('baseline', 'Month-one baseline', extra.baseline, 'results measured against it', 'not recorded'),
 		{ key: 'dryrun', label: 'Test run', done: p.status !== 'setup', detail: p.status === 'setup' ? 'not started' : 'done or running' },
 		{ key: 'live', label: 'Live', done: !!p.wentLiveAt, detail: p.wentLiveAt ? `since ${p.wentLiveAt.slice(0, 10)}` : 'not yet' }
-	];
+	].map(needed);
 }
 
 const REASONS: Array<[RegExp, string]> = [

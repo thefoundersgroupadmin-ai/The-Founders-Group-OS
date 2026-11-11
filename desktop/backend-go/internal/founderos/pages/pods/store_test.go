@@ -87,6 +87,14 @@ func TestGoingLiveNeedsADryRunASenderAndApprovedTargetingAndVoice(t *testing.T) 
 		FROM founderos_client_pods WHERE slug = $1`, p.Slug); err != nil {
 		t.Fatal(err)
 	}
+	// The rest of the service is still missing: going live is refused until each is set up or waived.
+	if _, err := s.SetStatus(ctx, p.Slug, StatusLive, ""); !errors.Is(err, ErrNotReady) || !strings.Contains(err.Error(), "hand-off email") {
+		t.Fatalf("went live without the rest of the service: %v", err)
+	}
+	if err := s.WaiveReadiness(ctx, p.Slug, "portal", "", "Nader", true); !errors.Is(err, ErrInvalid) {
+		t.Fatalf("waived without a reason: %v", err)
+	}
+	waiveService(t, s, p.Slug)
 	live, err := s.SetStatus(ctx, p.Slug, StatusLive, "")
 	if err != nil || live.Status != StatusLive || live.WentLiveAt == nil {
 		t.Fatalf("go live: %+v %v", live, err)
@@ -209,6 +217,7 @@ func TestAChangeAfterTheTestRunNeedsANewTestRun(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
+	waiveService(t, s, p.Slug)
 	sim("sim-old")
 	if err := s.UpdateSettings(ctx, p.Slug, Settings{ApprovalPolicy: "auto", Timezone: "UTC", SendWindowStart: 9, SendWindowEnd: 17,
 		FirstEmailDailyCap: 10, FollowUpDailyCap: 10}); err != nil {
@@ -220,5 +229,17 @@ func TestAChangeAfterTheTestRunNeedsANewTestRun(t *testing.T) {
 	sim("sim-new")
 	if _, err := s.SetStatus(ctx, p.Slug, StatusLive, ""); err != nil {
 		t.Fatal(err)
+	}
+}
+
+
+// waiveService waives the service items a unit test doesn't set up, the way an owner would for a
+// client that genuinely doesn't need them.
+func waiveService(t *testing.T, s *Store, slug string) {
+	t.Helper()
+	for item := range ServiceItems {
+		if err := s.WaiveReadiness(context.Background(), slug, item, "not part of this test", "test", true); err != nil {
+			t.Fatal(err)
+		}
 	}
 }

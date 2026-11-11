@@ -51,6 +51,8 @@ type podJSON struct {
 	InboundLinkSet     bool       `json:"inboundLinkSet"`
 	WentLiveAt         *time.Time `json:"wentLiveAt"`
 	Missing            []string   `json:"missingToGoLive,omitempty"`
+	// Go-live requirements waived for this client, with the reason, who and when.
+	Waivers map[string]map[string]string `json:"readinessWaivers,omitempty"`
 }
 
 func podOut(p pods.Pod) podJSON {
@@ -100,6 +102,9 @@ func registerPods(s *gin.RouterGroup, d *Deps) {
 		out := podOut(p)
 		if missing, err := st.Readiness(c.Request.Context(), p); err == nil {
 			out.Missing = missing
+		}
+		if w, err := st.Waivers(c.Request.Context(), p.ID); err == nil && len(w) > 0 {
+			out.Waivers = w
 		}
 		c.JSON(http.StatusOK, gin.H{"pod": out})
 	}
@@ -479,6 +484,36 @@ func registerPods(s *gin.RouterGroup, d *Deps) {
 				return
 			}
 		} else if err := st.LinkPortal(c.Request.Context(), p.Slug, in.PortalClientID); err != nil {
+			podError(c, err)
+			return
+		}
+		reply(c, st, p.Slug)
+	})
+	// A service item this client genuinely doesn't need (e.g. no portal, no calendar), waived with a reason.
+	s.POST("/pods/:slug/readiness-waivers", func(c *gin.Context) {
+		st, p, ok := pod(c)
+		if !ok {
+			return
+		}
+		who, _ := personOf(c)
+		if !who.Owner {
+			c.JSON(http.StatusForbidden, gin.H{"error": "only the TFG owner waives a go-live requirement"})
+			return
+		}
+		var in struct {
+			Item   string `json:"item"`
+			Reason string `json:"reason"`
+			Waive  bool   `json:"waive"`
+		}
+		if err := c.ShouldBindJSON(&in); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "item, reason and waive expected"})
+			return
+		}
+		by := who.Name
+		if by == "" {
+			by = "the owner"
+		}
+		if err := st.WaiveReadiness(c.Request.Context(), p.Slug, in.Item, in.Reason, by, in.Waive); err != nil {
 			podError(c, err)
 			return
 		}

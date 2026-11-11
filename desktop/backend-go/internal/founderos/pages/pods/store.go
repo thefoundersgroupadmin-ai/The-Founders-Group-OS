@@ -7,6 +7,7 @@ package pods
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"regexp"
@@ -345,6 +346,12 @@ func (s *Store) readiness(ctx context.Context, q querier, p Pod) ([]string, erro
 	if !simulated {
 		missing = append(missing, "a successful test run since the last change to the sender or sending rules")
 	}
+	// The rest of the purchased service, each waivable with a reason when a client doesn't need it.
+	extra, err := s.serviceReadiness(ctx, q, p)
+	if err != nil {
+		return nil, err
+	}
+	missing = append(missing, extra...)
 	for _, k := range requiredToGoLive {
 		d, err := docVia(ctx, q, p.ID, k)
 		switch {
@@ -357,6 +364,87 @@ func (s *Store) readiness(ctx context.Context, q querier, p Pod) ([]string, erro
 		}
 	}
 	return missing, nil
+}
+
+// ServiceItems are the parts of the service a pod needs before going live besides its mailbox,
+// test run and ICP/voice; each can be waived for a client that doesn't need it.
+var ServiceItems = map[string]string{
+	"product":  "client approval of the product document",
+	"agent":    "the AI SDR provisioned on the task board",
+	"portal":   "the client portal linked",
+	"handoff":  "a hand-off email for the client's rep",
+	"calendar": "a booking calendar",
+	"baseline": "the month-one baseline",
+}
+
+func (s *Store) serviceReadiness(ctx context.Context, q querier, p Pod) ([]string, error) {
+	var waivedRaw []byte
+	var agent, baseline, product bool
+	err := q.QueryRow(ctx, `SELECT coalesce(readiness_waivers, '{}'::jsonb),
+		  EXISTS (SELECT 1 FROM founderos_pod_agents a WHERE a.pod_id = $1 AND a.agent_id <> ''),
+		  coalesce(baseline, '{}'::jsonb) ? 'setAt',
+		  EXISTS (SELECT 1 FROM founderos_client_pod_docs d WHERE d.pod_id = $1 AND d.key = 'product' AND d.approved_at IS NOT NULL AND btrim(d.body) <> '')
+		FROM founderos_client_pods WHERE id = $1`, p.ID).Scan(&waivedRaw, &agent, &baseline, &product)
+	if err != nil {
+		return nil, err
+	}
+	var waived map[string]any
+	_ = json.Unmarshal(waivedRaw, &waived)
+	have := map[string]bool{
+		"product": product, "agent": agent, "baseline": baseline,
+		"portal":   p.PortalClientID != nil && *p.PortalClientID != "",
+		"handoff":  strings.TrimSpace(p.HandoffEmail) != "",
+		"calendar": p.CalendarProvider != "",
+	}
+	var out []string
+	for _, k := range []string{"product", "agent", "portal", "handoff", "calendar", "baseline"} {
+		if _, ok := waived[k]; !ok && !have[k] {
+			out = append(out, ServiceItems[k])
+		}
+	}
+	return out, nil
+}
+
+// WaiveReadiness marks a service item as not needed for this client (or needed again), with a reason.
+func (s *Store) WaiveReadiness(ctx context.Context, slug, item, reason, by string, waive bool) error {
+	if _, ok := ServiceItems[item]; !ok {
+		return fmt.Errorf("%w: unknown readiness item %q", ErrInvalid, item)
+	}
+	if waive && strings.TrimSpace(reason) == "" {
+		return fmt.Errorf("%w: say why this client doesn't need it", ErrInvalid)
+	}
+	var podID string
+	var err error
+	if waive {
+		entry, _ := json.Marshal(map[string]string{"reason": strings.TrimSpace(reason), "by": by, "at": time.Now().UTC().Format(time.RFC3339)})
+		err = s.Pool.QueryRow(ctx, `UPDATE founderos_client_pods SET readiness_waivers = readiness_waivers || jsonb_build_object($2::text, $3::jsonb), updated_at = now()
+			WHERE slug = $1 RETURNING id::text`, slug, item, string(entry)).Scan(&podID)
+	} else {
+		err = s.Pool.QueryRow(ctx, `UPDATE founderos_client_pods SET readiness_waivers = readiness_waivers - $2, updated_at = now()
+			WHERE slug = $1 RETURNING id::text`, slug, item).Scan(&podID)
+	}
+	if errors.Is(err, pgx.ErrNoRows) {
+		return ErrNotFound
+	}
+	if err != nil {
+		return err
+	}
+	what := "required again"
+	if waive {
+		what = "waived: " + strings.TrimSpace(reason)
+	}
+	return s.Log(ctx, podID, "readiness_waiver", ServiceItems[item]+" "+what+" (by "+by+")", item)
+}
+
+// Waivers lists the service items waived for a pod, with their reasons.
+func (s *Store) Waivers(ctx context.Context, podID string) (map[string]map[string]string, error) {
+	var raw []byte
+	if err := s.Pool.QueryRow(ctx, `SELECT coalesce(readiness_waivers, '{}'::jsonb) FROM founderos_client_pods WHERE id = $1`, podID).Scan(&raw); err != nil {
+		return nil, err
+	}
+	out := map[string]map[string]string{}
+	_ = json.Unmarshal(raw, &out)
+	return out, nil
 }
 
 // SetStatus moves the pod through its lifecycle. Pausing needs a reason. The

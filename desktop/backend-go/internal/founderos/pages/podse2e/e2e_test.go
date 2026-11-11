@@ -223,7 +223,9 @@ func TestAFictionalClientFromSignatureToHandoff(t *testing.T) {
 	_, err = s.SetStatus(ctx, p.Slug, pods.StatusDryRun, "")
 	must(err)
 
-	// 6. Live: real email from the client's own mailbox.
+	// 6. Live: real email from the client's own mailbox. This client books through the rep's own
+	// calendar, so the booking-calendar requirement is waived with that reason.
+	must(s.WaiveReadiness(ctx, p.Slug, "calendar", "the client's rep books meetings from their own calendar", "Nader", true))
 	_, err = s.SetStatus(ctx, p.Slug, pods.StatusLive, "")
 	must(err)
 	draft("l-1", "ben@acme.example")

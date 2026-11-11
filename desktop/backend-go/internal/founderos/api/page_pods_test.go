@@ -123,6 +123,11 @@ func TestPodAPIWalksAPodFromSetupToLive(t *testing.T) {
 		SELECT 'sim-1', workspace_id, 'paperclip', 'a@b.example', 's', 'b', 'simulated', now() FROM founderos_client_pods WHERE slug = 'client-oakfield'`); err != nil {
 		t.Fatal(err)
 	}
+	for _, item := range []string{"product", "agent", "portal", "handoff", "calendar", "baseline"} {
+		if code, body := podsDo(t, h, http.MethodPost, base+"/readiness-waivers", `{"item":"`+item+`","reason":"not part of this test","waive":true}`); code != http.StatusOK {
+			t.Fatalf("waive %s: %d %v", item, code, body)
+		}
+	}
 	code, body := podsDo(t, h, http.MethodPost, base+"/status", `{"status":"live"}`)
 	if code != http.StatusOK || body["pod"].(map[string]any)["status"] != "live" {
 		t.Fatalf("go live: %d %v", code, body)

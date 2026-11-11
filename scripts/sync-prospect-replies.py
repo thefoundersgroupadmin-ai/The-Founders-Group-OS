@@ -195,6 +195,124 @@ def received_iso(when):
         return ""
 
 
+# Sender identity, auto-replies, bounces and complaints ---------------------------------------
+# A reply only counts as coming from who it says when the receiving mail server's own checks
+# (Authentication-Results, added by Gmail and others) show DMARC passed, or DKIM/SPF passed for
+# the sender's own domain. Unverified mail is never answered automatically: a person reads it.
+VERIFIED = {}      # message id -> True / False / None (no checks recorded)
+AUTO = {}          # message id -> why it is an automatic message (out of office, auto-reply)
+
+
+def sender_verified(msg, sender):
+    results = " ".join(str(h) for h in (msg.get_all("Authentication-Results") or [])).lower()
+    if not results:
+        return None
+    dom = sender.rsplit("@", 1)[-1].lower()
+    if re.search(r"\bdmarc=pass\b", results):
+        return True
+    if re.search(r"\bdmarc=fail\b", results):
+        return False
+    for m in re.finditer(r"\bdkim=pass\b[^;]*?header\.(?:d|i)=@?([\w.-]+)", results):
+        if m.group(1).endswith(dom) or dom.endswith(m.group(1)):
+            return True
+    for m in re.finditer(r"\bspf=pass\b[^;]*?smtp\.mailfrom=(?:[^@;\s]*@)?([\w.-]+)", results):
+        if m.group(1).endswith(dom) or dom.endswith(m.group(1)):
+            return True
+    return False
+
+
+AUTO_SUBJECT = re.compile(r"^(auto(matic)?[ -]?(reply|response)|out of (the )?office|ooo\b|away from|on (annual )?leave|abwesenheit|absence)", re.I)
+
+
+def auto_reply(msg, subject):
+    """Why a message is automatic (out of office and similar), or ''."""
+    a = (msg.get("Auto-Submitted") or "").lower()
+    if a and a != "no":
+        return "auto-submitted"
+    if msg.get("X-Autoreply") or msg.get("X-Autorespond") or (msg.get("Precedence") or "").lower() in ("auto_reply", "bulk", "junk"):
+        return "auto-reply header"
+    if AUTO_SUBJECT.search(subject.strip()):
+        return "out-of-office subject"
+    return ""
+
+
+def delivery_report(msg):
+    """(kind, recipient, permanent) for a bounce or a spam complaint, else None.
+    kind is 'bounce' (delivery status report) or 'complaint' (abuse feedback report)."""
+    ctype = (msg.get_content_type() or "").lower()
+    report = (msg.get_param("report-type") or "").lower() if ctype == "multipart/report" else ""
+    if report == "feedback-report":
+        rcpt = ""
+        for part in msg.walk():
+            if part.get_content_type() == "message/feedback-report":
+                payload = part.get_payload()
+                text = "".join(str(x) for x in payload) if isinstance(payload, list) else str(payload)
+                m = re.search(r"Original-Rcpt-To:\s*<?([^>\s]+@[^>\s]+)", text, re.I)
+                rcpt = m.group(1).lower() if m else ""
+        return ("complaint", rcpt, True) if rcpt else None
+    sender = parseaddr(msg.get("From", ""))[1].lower()
+    if report != "delivery-status" and not re.match(r"(mailer-daemon|postmaster)@", sender):
+        return None
+    text = ""
+    for part in msg.walk():
+        if part.get_content_type() == "message/delivery-status":
+            payload = part.get_payload()
+            text += "".join(str(x) for x in payload) if isinstance(payload, list) else str(payload)
+    if not text:
+        text = text_body(msg)
+    m = re.search(r"Final-Recipient:\s*rfc822;\s*<?([^>\s]+@[^>\s]+)", text, re.I) or \
+        re.search(r"Original-Recipient:\s*rfc822;\s*<?([^>\s]+@[^>\s]+)", text, re.I)
+    if not m:
+        return None
+    status = re.search(r"Status:\s*([245])\.\d+\.\d+", text)
+    action = re.search(r"Action:\s*(\w+)", text, re.I)
+    if action and action.group(1).lower() in ("delayed", "delivered", "relayed", "expanded"):
+        return None
+    permanent = not status or status.group(1) == "5"
+    return ("bounce", m.group(1).lower(), permanent)
+
+
+def scan_reports(mailbox, since, seen):
+    """Bounces and complaints in one mailbox since a date: [(message id, kind, recipient)], hard failures only."""
+    m = imaplib.IMAP4_SSL(mailbox["host"], mailbox["port"], timeout=30)
+    m.login(mailbox["user"], mailbox["pass"])
+    m.select("INBOX", readonly=True)
+    out, got = [], set()
+    for crit in ('FROM "mailer-daemon"', 'FROM "postmaster"', 'HEADER Content-Type "report"'):
+        _, data = m.search(None, f"(SINCE {since} {crit})")
+        for num in data[0].split():
+            _, parts = m.fetch(num, "(BODY.PEEK[])")
+            msg = email.message_from_bytes(parts[0][1])
+            mid = (msg.get("Message-ID") or "").strip() or f"report:{num.decode()}"
+            if mid in seen or mid in got:
+                continue
+            got.add(mid)
+            r = delivery_report(msg)
+            if r and r[2]:
+                out.append((mid, r[0], r[1]))
+    m.logout()
+    return out
+
+
+def apply_reports(db, reports, workspace_id, dry=False):
+    """Suppresses hard-bounced and complaining addresses (for this sender's workspace, or everywhere
+    when workspace_id is None) and stops anything still waiting to go to them."""
+    done = []
+    for mid, kind, rcpt in reports:
+        reason = "hard bounce" if kind == "bounce" else "marked our email as spam"
+        if not dry:
+            psql(db, "insert into founderos_email_suppression (workspace_id, address, reason) "
+                     f"values ({sql(workspace_id)}, {sql(rcpt)}, {sql(reason)}) on conflict do nothing")
+            psql(db, f"update founderos_outbox set status='rejected', decided_at=now(), error={sql(reason)} "
+                     f"where lower(to_address)={sql(rcpt)} and status in ('pending','failed')"
+                     + (f" and workspace_id={sql(workspace_id)}" if workspace_id else ""))
+            psql(db, f"update founderos_funnel_contacts set next_action={sql('Do not contact: ' + reason)} "
+                     f"where lower(email)={sql(rcpt)}" + (f" and workspace_id={sql(workspace_id)}" if workspace_id else ""))
+        done.append(mid)
+        print(f"  {rcpt}: {reason}; suppressed")
+    return done
+
+
 def reply_task_key(slug, mid):
     """The board key for one reply's AI task: a retry replays the same task."""
     import hashlib
@@ -334,11 +452,24 @@ def hq_pass():
             msg = email.message_from_bytes(parts[0][1])
             mid = (msg.get("Message-ID") or "").strip() or f"{domain}:{num.decode()}"
             sender = parseaddr(msg.get("From", ""))[1].lower()
-            if mid in seen or not (sender == domain if whole else sender.endswith("@" + domain)):
+            if mid in seen or not (sender == domain if whole else sender.endswith("@" + domain)) or delivery_report(msg):
                 continue
-            found.append((mid, contact, sender, str(make_header(decode_header(msg.get("Subject", "")))),
-                          msg.get("Date", ""), text_body(msg)))
+            subj = str(make_header(decode_header(msg.get("Subject", ""))))
+            VERIFIED[mid] = sender_verified(msg, sender)
+            AUTO[mid] = auto_reply(msg, subj)
+            found.append((mid, contact, sender, subj, msg.get("Date", ""), text_body(msg)))
     m.logout()
+
+    try:
+        hq_box = {"host": keys["INBOX_1_HOST"], "port": int(keys.get("INBOX_1_PORT", 993)), "user": keys["INBOX_1_USER"], "pass": keys["INBOX_1_PASS"]}
+        reports = scan_reports(hq_box, since, seen)
+        for done in apply_reports(db, reports, None, dry):
+            seen.add(done)
+        if reports and not dry:
+            STATE.parent.mkdir(parents=True, exist_ok=True)
+            STATE.write_text(json.dumps(sorted(seen)))
+    except (imaplib.IMAP4.error, OSError) as e:
+        print(f"bounce check failed ({e}); will retry")
 
     print(f"{len(found)} new prospect repl{'y' if len(found) == 1 else 'ies'}")
     if dry or not found:
@@ -351,6 +482,34 @@ def hq_pass():
     assignee = next(a["id"] for a in agents if a["name"] == ASSIGNEE)
 
     for mid, (cid, ws, company), sender, subject, when, body in found:
+        if AUTO.get(mid):
+            seq = int(psql(db, f"select coalesce(max(seq),0)+1 from founderos_funnel_touches where contact_id={sql(cid)}")[0][0])
+            psql(db, "insert into founderos_funnel_touches (id, workspace_id, contact_id, seq, stage, channel, label, source, at) "
+                     f"values ({sql(cid + '-auto-' + str(seq))}, {sql(ws)}, {sql(cid)}, {seq}, 'first_touch', 'email', "
+                     f"{sql('Automatic reply: ' + subject[:160])}, 'manual', {sql(datetime.now().date().isoformat())}) on conflict (id) do nothing")
+            seen.add(mid)
+            STATE.parent.mkdir(parents=True, exist_ok=True)
+            STATE.write_text(json.dumps(sorted(seen)))
+            print(f"  {company}: automatic reply ({AUTO[mid]}); no task")
+            continue
+        # An opt-out is applied straight away, by code, before any AI task: the address is suppressed,
+        # anything still waiting to go to it is withdrawn, and no reply is drafted.
+        if is_opt_out(body):
+            psql(db, f"select pg_advisory_xact_lock(hashtext('founderos-hq-send')); "
+                     "insert into founderos_email_suppression (workspace_id, address, reason) "
+                     f"values ({sql(ws)}, {sql(sender)}, {sql('opted out by reply: ' + subject[:120])}) on conflict do nothing")
+            psql(db, f"update founderos_outbox set status='rejected', decided_at=now(), error='opted out by reply' "
+                     f"where lower(to_address)={sql(sender)} and status='pending'")
+            psql(db, f"update founderos_funnel_contacts set next_action='Opted out: do not contact' where id={sql(cid)}")
+            seq = int(psql(db, f"select coalesce(max(seq),0)+1 from founderos_funnel_touches where contact_id={sql(cid)}")[0][0])
+            psql(db, "insert into founderos_funnel_touches (id, workspace_id, contact_id, seq, stage, channel, label, source, at) "
+                     f"values ({sql(cid + '-optout-' + str(seq))}, {sql(ws)}, {sql(cid)}, {seq}, 'engaged', 'email', "
+                     f"{sql('Opted out: ' + subject[:170])}, 'manual', {sql(datetime.now().date().isoformat())}) on conflict (id) do nothing")
+            seen.add(mid)
+            STATE.parent.mkdir(parents=True, exist_ok=True)
+            STATE.write_text(json.dumps(sorted(seen)))
+            print(f"  {company}: opted out; suppressed and pending emails withdrawn")
+            continue
         # These workers cannot read arbitrary Mac paths. Attach the same
         # authorised OS context used by Conductor tasks before waking one.
         packet = subprocess.run([sys.executable, str(REPO / "scripts/tfg-agent-context.py"), "--workspace", "founderos"], capture_output=True, text=True)
@@ -360,7 +519,8 @@ def hq_pass():
         snippet = re.sub(r"\n{3,}", "\n\n", body.strip())[:3000]
         issue = paperclip(pc, "POST", f"/api/companies/{pc['PAPERCLIP_COMPANY_ID']}/issues", {
             "title": f"Prospect reply from {company}: {subject}"[:200],
-            "description": (f"A prospect replied to outreach.\n\n- **From:** {sender}\n- **Company:** {company}\n"
+            "description": (("**Warning:** the receiving mail server could not verify this sender. Check it really is them before replying.\n\n" if VERIFIED.get(mid) is False else "") +
+                            f"A prospect replied to outreach.\n\n- **From:** {sender}\n- **Company:** {company}\n"
                             f"- **Received:** {when}\n- **Subject:** {subject}\n\n**Their message:**\n\n> "
                             + snippet.replace("\n", "\n> ") +
                             "\n\nDraft a reply from Nader (CEO, The Founders Group) and hand it over as a document with "
@@ -371,7 +531,9 @@ def hq_pass():
                             "\n\n# Verified OS execution context and attached owner handover\n"
                             "Use this supplied profile, handover and workflow catalogue; no local filesystem reads are required. "
                             "Save an internal report document. Unknown optional facts are report gaps, not permission to invent them.\n" + packet.stdout),
-            "status": "todo", "priority": "high", "workMode": "standard", "assigneeAgentId": assignee})
+            "status": "todo", "priority": "high", "workMode": "standard", "assigneeAgentId": assignee,
+            # The same reply always maps to the same task, so a crash before "seen" is saved can't duplicate it.
+            "idempotencyKey": reply_task_key("hq", mid)})
         psql(db, f"update founderos_funnel_contacts set status='engaged', relationship='warm' "
                  f"where id={sql(cid)} and status in ('first_touch','nurtured')")
         seq = int(psql(db, f"select coalesce(max(seq),0)+1 from founderos_funnel_touches where contact_id={sql(cid)}")[0][0])
@@ -406,9 +568,13 @@ def search_replies(mailbox, domains, since, seen, own=()):
         if mid in seen or mid in got or sender in own or not accept(sender):
             return
         got.add(mid)
+        if delivery_report(msg):
+            return  # bounces and complaints are handled by scan_reports, never as replies
         refs = thread_outbox_ids(msg.get("In-Reply-To", ""), msg.get("References", ""))
-        found.append((mid, contact, sender, str(make_header(decode_header(msg.get("Subject", "")))),
-                      msg.get("Date", ""), text_body(msg), refs))
+        subj = str(make_header(decode_header(msg.get("Subject", ""))))
+        VERIFIED[mid] = sender_verified(msg, sender)
+        AUTO[mid] = auto_reply(msg, subj)
+        found.append((mid, contact, sender, subj, msg.get("Date", ""), text_body(msg), refs))
 
     for domain, contact in domains.items():
         whole = "@" in domain
@@ -467,6 +633,11 @@ def pod_pass():
             inbox_health(db, slug, False, f"The reply mailbox couldn't be read: {e}", dry)
             continue
         inbox_health(db, slug, True, f"Read {len(found)} new repl{'y' if len(found) == 1 else 'ies'}.", dry)
+        try:
+            for done in apply_reports(db, scan_reports(box, since, seen_for(seen, slug)), ws, dry):
+                seen.add(f"pod/{slug}/{done}")
+        except (imaplib.IMAP4.error, OSError) as e:
+            print(f"{slug}: bounce check failed ({e}); will retry")
         print(f"{slug}: {len(found)} new repl{'y' if len(found) == 1 else 'ies'}")
         for mid, contact, sender, subject, when, body, refs in found:
             # The email it answers, by its thread first (Codex: attribution by thread).
@@ -514,7 +685,17 @@ def pod_pass():
                 company_ids += [i for i in thread_company(pod_contacts, thread[1]) if i not in company_ids]
             route = "ai" if resume else "opt_out" if is_opt_out(body) else \
                 "person" if int(psql(db, taken_over_query(ws, company_ids))[0][0]) > 0 else "ai"
-            if route == "opt_out":
+            if not resume and route != "opt_out" and AUTO.get(mid):
+                route = "auto"
+            elif route == "ai" and not resume and VERIFIED.get(mid) is False:
+                route = "person"  # the sender couldn't be verified: a person reads it, nothing is sent automatically
+                body = ("[Sender not verified by the receiving mail server; check it really is them before replying.]\n\n" + body)
+            if route == "auto":
+                psql(db, message_done_query(slug, mid, "auto", None, cid))
+                psql(db, "insert into founderos_client_activity (pod_id, kind, summary, ref) "
+                         f"select id, 'auto_reply', {sql(company + ': automatic reply (' + AUTO[mid] + '): ' + subject[:100])}, {sql(cid)} "
+                         f"from founderos_client_pods where slug={sql(slug)}")
+            elif route == "opt_out":
                 # Under the pod send gate's lock, so a send in flight finishes first and none follows.
                 psql(db, f"select pg_advisory_xact_lock(hashtext('founderos-pod-send:' || {sql(ws)})); "
                          "insert into founderos_email_suppression (workspace_id, address, reason) "

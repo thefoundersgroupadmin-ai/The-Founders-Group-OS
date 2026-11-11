@@ -75,7 +75,7 @@ func AutoSendToOwner(ctx context.Context, pool *pgxpool.Pool, workspaceSlug stri
 		if it != nil && it.Status == "sent" {
 			sent++
 		}
-		if err != nil && !errors.Is(err, ErrNotPending) {
+		if err != nil && !errors.Is(err, ErrNotPending) && !errors.Is(err, ErrSuppressed) {
 			errs = append(errs, err)
 		}
 	}

@@ -142,7 +142,7 @@ func AutoSendCampaign(ctx context.Context, pool *pgxpool.Pool, workspaceSlug str
 		if got != nil && got.Status == "sent" {
 			res.Sent++
 		}
-		if err != nil && !errors.Is(err, ErrNotPending) {
+		if err != nil && !errors.Is(err, ErrNotPending) && !errors.Is(err, ErrSuppressed) {
 			res.Failures++
 			return res, err
 		}

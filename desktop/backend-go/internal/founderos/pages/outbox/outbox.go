@@ -183,6 +183,20 @@ func Approve(ctx context.Context, pool *pgxpool.Pool, workspaceSlug, id string, 
 	} else if rules != nil {
 		return approvePod(ctx, pool, ws, id, content, send)
 	}
+	// TFG's own emails honour the do-not-contact list: installation-wide entries and any that
+	// aren't a client pod's own, by address or by whole domain. The email is withdrawn, not sent.
+	tag, err := pool.Exec(ctx, `UPDATE founderos_outbox o SET status = 'rejected', decided_at = now(), error = 'on the do-not-contact list'
+		WHERE o.workspace_id = $1 AND o.id = $2 AND o.status IN ('pending', 'failed', 'uncertain')
+		  AND EXISTS (SELECT 1 FROM founderos_email_suppression x
+		       WHERE (lower(x.address) = lower(o.to_address) OR lower(x.domain) = split_part(lower(o.to_address), '@', 2))
+		         AND (x.workspace_id IS NULL OR x.workspace_id = $1
+		              OR NOT EXISTS (SELECT 1 FROM founderos_client_pods p WHERE p.workspace_id = x.workspace_id)))`, ws, id)
+	if err != nil {
+		return nil, err
+	}
+	if tag.RowsAffected() > 0 {
+		return nil, ErrSuppressed
+	}
 	it, err := scan(pool.QueryRow(ctx, `UPDATE founderos_outbox
 		SET status = 'sending', decided_at = now(), error = NULL, attempt = attempt + 1, subject = $3, body = $4
 		WHERE workspace_id = $1 AND id = $2

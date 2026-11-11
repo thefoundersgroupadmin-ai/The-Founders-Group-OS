@@ -155,3 +155,41 @@ class SingleInstanceTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class ReportsAndIdentityTest(unittest.TestCase):
+    """Bounces, complaints, auto-replies and sender verification (gap list, 11 Nov 2026)."""
+
+    def msg(self, raw):
+        import email as _email
+        return _email.message_from_string(raw)
+
+    def test_hard_bounce(self):
+        m = self.msg('From: Mail Delivery Subsystem <mailer-daemon@googlemail.com>\nSubject: Delivery Status Notification (Failure)\n'
+                     'Content-Type: multipart/report; report-type=delivery-status; boundary="b"\n\n--b\nContent-Type: text/plain\n\nAddress not found\n'
+                     '--b\nContent-Type: message/delivery-status\n\nReporting-MTA: dns; googlemail.com\n\nFinal-Recipient: rfc822; gone@acme.example\nAction: failed\nStatus: 5.1.1\n--b--\n')
+        self.assertEqual(sync.delivery_report(m), ("bounce", "gone@acme.example", True))
+
+    def test_delay_is_not_a_bounce(self):
+        m = self.msg('From: mailer-daemon@x.example\nContent-Type: multipart/report; report-type=delivery-status; boundary="b"\n\n'
+                     '--b\nContent-Type: message/delivery-status\n\nFinal-Recipient: rfc822; slow@acme.example\nAction: delayed\nStatus: 4.4.1\n--b--\n')
+        self.assertIsNone(sync.delivery_report(m))
+
+    def test_complaint(self):
+        m = self.msg('From: feedback@yahoo.example\nContent-Type: multipart/report; report-type=feedback-report; boundary="b"\n\n'
+                     '--b\nContent-Type: message/feedback-report\n\nFeedback-Type: abuse\nOriginal-Rcpt-To: <angry@acme.example>\n--b--\n')
+        self.assertEqual(sync.delivery_report(m), ("complaint", "angry@acme.example", True))
+
+    def test_out_of_office(self):
+        m = self.msg("From: a@acme.example\nAuto-Submitted: auto-replied\nSubject: Re: hello\n\nAway")
+        self.assertTrue(sync.auto_reply(m, "Re: hello"))
+        self.assertTrue(sync.auto_reply(self.msg("From: a@acme.example\n\nx"), "Out of Office: back Monday"))
+        self.assertEqual(sync.auto_reply(self.msg("From: a@acme.example\n\nx"), "Re: your email"), "")
+
+    def test_sender_verification(self):
+        ok = self.msg("From: a@acme.example\nAuthentication-Results: mx.google.com; dkim=pass header.i=@acme.example; spf=pass; dmarc=pass (p=NONE) header.from=acme.example\n\nx")
+        bad = self.msg("From: a@acme.example\nAuthentication-Results: mx.google.com; spf=fail smtp.mailfrom=evil.example; dmarc=fail header.from=acme.example\n\nx")
+        none = self.msg("From: a@acme.example\n\nx")
+        self.assertTrue(sync.sender_verified(ok, "a@acme.example"))
+        self.assertFalse(sync.sender_verified(bad, "a@acme.example"))
+        self.assertIsNone(sync.sender_verified(none, "a@acme.example"))

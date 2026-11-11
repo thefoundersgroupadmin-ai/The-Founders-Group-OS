@@ -85,6 +85,8 @@ const (
 	ModeLive   Mode = "live"
 	ModeSeeded Mode = "seeded"
 	ModeError  Mode = "error"
+	// ModeNotConfigured: no key on a live OS, so nothing is shown (never examples).
+	ModeNotConfigured Mode = "not_configured"
 )
 
 // Result is what /brand-deals renders. SyncedAt is epoch milliseconds of the
@@ -169,6 +171,10 @@ func (c *Connector) Status(ctx context.Context) connectors.Status {
 // said to be stale.
 func (c *Connector) FetchDeals(ctx context.Context) Result {
 	key := c.key()
+	if key == "" && guard.Operational() {
+		return Result{Deals: []Deal{}, Mode: ModeNotConfigured,
+			Detail: "Not connected: plant NOTION_API_KEY (shared with Brand Deals Hub) to see your deals. No examples are shown on a live OS."}
+	}
 	if key == "" {
 		return Result{
 			Deals:  SeededDeals(),

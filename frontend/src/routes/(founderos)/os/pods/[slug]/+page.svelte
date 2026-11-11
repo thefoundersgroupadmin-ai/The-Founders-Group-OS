@@ -288,7 +288,7 @@
 						</label>
 						<label class="text-[11px]">Calendar
 							<select bind:value={rules.calendarProvider} class="pc-input mt-1 w-full rounded-[6px] px-2 py-1.5 text-[12px]">
-								<option value="">None yet</option><option value="calcom">Cal.com</option><option value="google">Google Calendar</option><option value="microsoft">Outlook</option>
+								<option value="">None yet</option><option value="calcom">Cal.com</option><option value="google" disabled>Google Calendar (not supported yet)</option><option value="microsoft" disabled>Outlook (not supported yet)</option>
 							</select>
 						</label>
 						<label class="text-[11px]">Hand-off email (client's rep)<input bind:value={rules.handoffEmail} placeholder="rep@client.com" class="pc-input mt-1 w-full rounded-[6px] px-2 py-1.5 text-[12px]" /></label>

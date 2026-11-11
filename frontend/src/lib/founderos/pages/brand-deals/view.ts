@@ -59,7 +59,7 @@ export type DealView = {
 	hubUrl: string | null;
 };
 
-export type BrandDealsMode = 'live' | 'seeded' | 'error';
+export type BrandDealsMode = 'live' | 'seeded' | 'error' | 'not_configured';
 
 /** The route's body: FounderOS v1's BrandDealsResult plus the slab's view.
  *  `view` is null when Notion could not be read (unknown, never zeroes). */

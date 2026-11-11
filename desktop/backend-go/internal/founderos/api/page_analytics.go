@@ -9,6 +9,7 @@ package api
 import (
 	"context"
 	"fmt"
+	"github.com/rhl/businessos-backend/internal/founderos/guard"
 	"math"
 	"net/http"
 	"sync"
@@ -211,13 +212,20 @@ func analyticsPage(d *Deps) gin.HandlerFunc {
 		bcancel()
 		inputs := operatingInputs(total, audience7d, allRuns, runs7d, reads, brainVal, brainSource)
 		live, pending := analytics.SplitMetrics(inputs)
+		if guard.Operational() {
+			live, pending = analytics.SplitMeasured(inputs)
+		}
 		tiles := make([]analyticsTile, 0, len(live))
 		for _, t := range live {
 			hist, err := store.MetricHistory(ctx, t.ID, 7, today)
 			if err != nil {
 				hist = nil
 			}
-			tiles = append(tiles, analyticsTile{MetricTile: t, Spark: analytics.SparkSeries(hist, t.ID, t.Value), SparkReal: len(hist) >= 2})
+			spark := analytics.SparkSeries(hist, t.ID, t.Value)
+			if guard.Operational() && len(hist) < 2 {
+				spark = hist // too little history: show what there is, never an invented shape
+			}
+			tiles = append(tiles, analyticsTile{MetricTile: t, Spark: spark, SparkReal: len(hist) >= 2})
 		}
 		pendingRows := make([]analytics.Pending, 0, len(pending))
 		for _, p := range pending {

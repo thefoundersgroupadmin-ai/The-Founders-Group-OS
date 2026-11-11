@@ -363,6 +363,22 @@ func SplitMetrics(inputs []MetricInput) (live, pending []MetricTile) {
 	return live, pending
 }
 
+// SplitMeasured is SplitMetrics for a real business: a connector's measured zero is a real,
+// live value, not a missing one.
+func SplitMeasured(inputs []MetricInput) (live, pending []MetricTile) {
+	live, pending = []MetricTile{}, []MetricTile{}
+	for _, m := range inputs {
+		t := MetricTile{ID: m.ID, Label: m.Label, Unit: m.Unit, Source: m.Source, Delta: m.Delta, DeltaPct: m.DeltaPct, Live: m.Value != nil}
+		if m.Value != nil {
+			t.Value = *m.Value
+			live = append(live, t)
+		} else {
+			pending = append(pending, t)
+		}
+	}
+	return live, pending
+}
+
 // SparkSeries: real per-day history once two points exist; until then a
 // deterministic placeholder shape (stable per id and value, never random).
 func SparkSeries(history []float64, id string, value float64) []float64 {

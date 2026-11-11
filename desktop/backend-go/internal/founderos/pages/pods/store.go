@@ -624,9 +624,11 @@ func (s *Store) UpdateSettings(ctx context.Context, slug string, in Settings) er
 		return bad("CRM must be hubspot, pipedrive or salesforce")
 	}
 	switch in.CalendarProvider {
-	case "", "calcom", "google", "microsoft":
+	// Only Cal.com bookings are read (and hold sending when unreadable); Google and Microsoft
+	// calendars are refused until a reader for them exists, so no pod runs without booking checks.
+	case "", "calcom":
 	default:
-		return bad("calendar must be calcom, google or microsoft")
+		return bad("the calendar must be Cal.com for now: bookings in Google or Outlook calendars can't be read yet, so meetings would be missed")
 	}
 	n, err := s.lockedExec(ctx, slug, `UPDATE founderos_client_pods SET approval_policy = $2, first_email_daily_cap = $3,
 		follow_up_daily_cap = $4, timezone = $5, send_window_start = $6, send_window_end = $7, send_weekends = $8,

@@ -8,9 +8,12 @@ package api
 //	POST /api/founderos/pages/clients/work  save a brief, or launch a saved one
 
 import (
+	"context"
 	"crypto/subtle"
 	"encoding/json"
 	"errors"
+	"fmt"
+	"github.com/rhl/businessos-backend/internal/founderos/pages/pods"
 	"io"
 	"net/http"
 	"regexp"
@@ -56,16 +59,76 @@ func registerClientsPage(s *gin.RouterGroup, d *Deps) {
 	s.POST("/pages/clients/work", func(c *gin.Context) { clientsWork(c, d) })
 }
 
+// clientsRoster is every client: the confirmed historical projects plus each AI SDR client from
+// the client pods (one entry per client, however many pods it has), so a newly onboarded client
+// appears here and can have work saved against it without a code change.
+func clientsRoster(ctx context.Context, d *Deps) []clientspage.Project {
+	out := append([]clientspage.Project{}, clientspage.Projects...)
+	if d == nil || d.Pool == nil {
+		return out
+	}
+	list, err := (&pods.Store{Pool: d.Pool}).List(ctx)
+	if err != nil {
+		return out
+	}
+	byName := map[string]*clientspage.Project{}
+	var order []string
+	for _, p := range list {
+		if p.Status == pods.StatusHandedOver {
+			continue
+		}
+		key := strings.ToLower(p.ClientName)
+		cp, ok := byName[key]
+		if !ok {
+			cp = &clientspage.Project{ID: "pod-client-" + strings.TrimPrefix(pods.SlugFor(p.ClientName), "client-"), Name: p.ClientName,
+				Service: "AI SDR", Retainer: packageName(p.Package) + " package"}
+			byName[key] = cp
+			order = append(order, key)
+		}
+		cp.Sources = append(cp.Sources, "/os/pods/"+p.Slug)
+		cp.Context = fmt.Sprintf("%d AI SDR pod(s); latest status %s.", len(cp.Sources), strings.ReplaceAll(p.Status, "_", " "))
+		if cp.ProjectName == "" {
+			cp.ProjectName = p.Slug
+		}
+	}
+	for _, k := range order {
+		out = append(out, *byName[k])
+	}
+	return out
+}
+
+// packageName is the package as sold today (USD names; "custom" became Starter).
+func packageName(p string) string {
+	switch strings.ToLower(p) {
+	case "custom", "starter":
+		return "Starter"
+	case "core":
+		return "Core"
+	case "full":
+		return "The Full"
+	}
+	return p
+}
+
+func clientRefs(list []clientspage.Project) []clientspage.ClientRef {
+	out := make([]clientspage.ClientRef, 0, len(list))
+	for _, p := range list {
+		out = append(out, clientspage.ClientRef{ID: p.ID, Name: p.Name})
+	}
+	return out
+}
+
 func clientsPage(c *gin.Context, d *Deps) {
 	work, err := clientsStoreFor(d).All(c.Request.Context())
 	if err != nil {
 		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "client work is unreadable: " + err.Error()})
 		return
 	}
+	roster := clientsRoster(c.Request.Context(), d)
 	c.JSON(http.StatusOK, gin.H{
-		"clients":       clientspage.Projects,
+		"clients":       roster,
 		"work":          work,
-		"volume":        clientspage.ComputeVolume(clientspage.Refs(), work, clientsNow(), clientsWindowDays),
+		"volume":        clientspage.ComputeVolume(clientRefs(roster), work, clientsNow(), clientsWindowDays),
 		"windowDays":    clientsWindowDays,
 		"statusOrder":   clientspage.StatusOrder,
 		"slackBridge":   "not activated",
@@ -109,7 +172,11 @@ func clientsWork(c *gin.Context, d *Deps) {
 			c.JSON(http.StatusBadRequest, gin.H{"error": clientsBadInput})
 			return
 		}
-		if clientspage.ProjectByID(in.ClientID) == nil {
+		known := false
+		for _, p := range clientsRoster(ctx, d) {
+			known = known || p.ID == in.ClientID
+		}
+		if !known {
 			c.JSON(http.StatusNotFound, gin.H{"error": "Unknown client."})
 			return
 		}

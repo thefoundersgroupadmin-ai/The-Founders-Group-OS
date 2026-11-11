@@ -101,6 +101,8 @@
 				<Badge tone="ok">live · Notion</Badge>
 			{:else if body.mode === 'seeded'}
 				<Badge tone="warn">seeded · connect Notion</Badge>
+			{:else if body.mode === 'not_configured'}
+				<Badge tone="warn">not connected · plant NOTION_API_KEY</Badge>
 			{:else}
 				<Badge tone="err">Notion error</Badge>
 			{/if}
@@ -262,7 +264,7 @@
 			{/each}
 			{#if filtered.length === 0}
 				<div data-part="list-empty" class="bn-dim px-6 py-8 text-center text-[12.5px]">
-					{#if body.mode === 'error'}Notion could not be read, so no deals are shown.{:else if deals.length === 0}The Brand Deals Hub has no deals yet.{:else}Nothing matches that filter.{/if}
+					{#if body.mode === 'error'}Notion could not be read, so no deals are shown.{:else if body.mode === 'not_configured'}Not connected yet. {body.detail}{:else if deals.length === 0}The Brand Deals Hub has no deals yet.{:else}Nothing matches that filter.{/if}
 				</div>
 			{/if}
 		</div>

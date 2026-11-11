@@ -23,6 +23,10 @@ var ErrWritesDisabled = errors.New("bridge: outbound writes are disabled (FOUNDE
 // WritesEnabled reports whether outbound side effects may leave the bridge.
 func WritesEnabled() bool { return os.Getenv("FOUNDEROS_WRITES") == "1" }
 
+// Operational reports whether this OS runs a real business (writes on) rather than the demo:
+// views then never fill gaps with example data, and an empty or failed feed says so.
+func Operational() bool { return WritesEnabled() && os.Getenv("FOUNDEROS_DEMO") != "1" }
+
 // CronsEnabled reports whether scheduled agents may run.
 func CronsEnabled() bool { return os.Getenv("FOUNDEROS_CRONS") == "1" }
 

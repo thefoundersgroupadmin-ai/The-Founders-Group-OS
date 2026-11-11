@@ -440,7 +440,7 @@ func socialRoutes(s *gin.RouterGroup, d *Deps) {
 		ctx := c.Request.Context()
 		reading := src.beehiiv.Reading(ctx)
 		posts := src.beehiiv.Posts(ctx)
-		seeded := len(posts) == 0
+		seeded := len(posts) == 0 && !guard.Operational()
 		if seeded {
 			posts = social.SeedNewsletters
 		}

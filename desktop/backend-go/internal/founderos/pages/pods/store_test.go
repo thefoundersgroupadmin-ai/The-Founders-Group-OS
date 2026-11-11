@@ -175,7 +175,7 @@ func TestSettingsAreValidated(t *testing.T) {
 	p := newPod(t, s, "Brightvale")
 	good := Settings{ApprovalPolicy: "client_approves_sequences", FirstEmailDailyCap: 30, FollowUpDailyCap: 60,
 		Timezone: "America/New_York", SendWindowStart: 8, SendWindowEnd: 18, DryRunInbox: "ops@tfg.example",
-		BookingURL: "https://cal.com/brightvale/demo", CRMProvider: "hubspot", CalendarProvider: "google"}
+		BookingURL: "https://cal.com/brightvale/demo", CRMProvider: "hubspot", CalendarProvider: "calcom"}
 	if err := s.UpdateSettings(ctx, p.Slug, good); err != nil {
 		t.Fatal(err)
 	}

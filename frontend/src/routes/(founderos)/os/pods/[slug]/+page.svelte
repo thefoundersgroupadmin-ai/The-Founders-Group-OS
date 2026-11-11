@@ -118,6 +118,18 @@
 	const recheckAlerts = () => act(() => founderosFetch(`${base}/alerts/refresh`, { method: 'POST' }));
 	const resolveTask = (issue: string) => act(() => founderosFetch(`${base}/tasks/${encodeURIComponent(issue)}/resolved`, { method: 'POST' }));
 	const linkPortal = () => act(() => founderosFetch(`${base}/portal`, { method: 'PUT', json: { portalClientId: portalId } }));
+	// Create the client in the portal and link it; then show who can actually sign in.
+	const setupPortal = () => act(() => founderosFetch(`${base}/portal/setup`, { method: 'POST', json: {} }));
+	let access = $state<{ linked: boolean; known?: boolean; people: string[]; error?: string; crmUrl?: string } | null>(null);
+	$effect(() => {
+		if (!pod?.portalClientId) {
+			access = null;
+			return;
+		}
+		founderosFetch<{ linked: boolean; known?: boolean; people: string[]; error?: string; crmUrl?: string }>(`${base}/portal/access`)
+			.then((r) => (access = r))
+			.catch(() => (access = null));
+	});
 	const proposeList = () =>
 		act(async () => {
 			await founderosFetch(`${base}/target-lists`, { method: 'POST', json: { title: list.title, domains: parseDomains(list.domains) } });
@@ -340,7 +352,16 @@
 					<input bind:value={portalId} placeholder="Portal client id (from the CRM)" aria-label="Portal client id" class="pc-input min-w-[320px] flex-1 rounded-[6px] px-2.5 py-1.5 font-mono text-[12px]" />
 					<Pressable tone="secondary" disabled={busy} onclick={linkPortal}>{pod.portalClientId ? 'Update link' : 'Link portal'}</Pressable>
 				</div>
-				<p class="bn-dim mt-1 font-mono text-[11px]">{pod.portalClientId ? 'Linked: the client sees status, approvals and activity in their portal, synced every 2 minutes.' : 'Not linked yet.'}</p>
+				{#if !pod.portalClientId}
+					<div class="mt-2"><Pressable tone="primary" disabled={busy} onclick={setupPortal}>Set up client portal</Pressable></div>
+				{/if}
+				<p class="bn-dim mt-1 font-mono text-[11px]">{pod.portalClientId ? 'Linked: the client sees status, approvals and activity in their portal, synced every 2 minutes.' : 'Not linked yet. "Set up client portal" creates the client in the portal and links this pod; or paste an existing id.'}</p>
+				{#if access}
+					<p class="mt-1 font-mono text-[11px]" style={`color: ${access.known && access.people.length ? 'var(--bn-ok)' : 'var(--bn-warn)'}`}>
+						{#if !access.known}Couldn't check who can sign in: {access.error}{:else if access.people.length}Can sign in: {access.people.join(', ')}{:else}Nobody can sign in yet.{/if}
+						{#if access.crmUrl}<a class="underline" href={access.crmUrl} target="_blank" rel="noopener">Invite people in the staff CRM ↗</a>{/if}
+					</p>
+				{/if}
 				<p class="bn-dim mt-3 mb-1 font-mono text-[10px] uppercase tracking-[0.15em]">Client approvals</p>
 				{#each approvals as a (a.kind + a.ref)}
 					<div class="flex flex-wrap items-center justify-between gap-2 py-0.5">

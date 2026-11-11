@@ -65,3 +65,31 @@ func TestRESTTalksToPostgRESTWithTheServiceKeyAndWritesOnlyWhenAllowed(t *testin
 type envMap map[string]string
 
 func (m envMap) lookup(k string) string { return m[k] }
+
+func TestCreateClientAndAccess(t *testing.T) {
+	t.Setenv("FOUNDEROS_WRITES", "1")
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == http.MethodPost && strings.HasPrefix(r.URL.Path, "/rest/v1/clients"):
+			if r.Header.Get("Prefer") != "return=representation" {
+				w.WriteHeader(400)
+				return
+			}
+			w.Write([]byte(`[{"id":"c-new"}]`))
+		case r.Method == http.MethodGet && strings.HasPrefix(r.URL.Path, "/rest/v1/client_users"):
+			w.Write([]byte(`[{"name":"","email":"ann@acme.example"},{"name":"Bo","email":"bo@acme.example"}]`))
+		default:
+			w.WriteHeader(404)
+		}
+	}))
+	defer srv.Close()
+	r := &REST{URL: srv.URL, Key: "svc", HTTP: srv.Client()}
+	id, err := r.CreateClient(context.Background(), "Acme", "Core", 6)
+	if err != nil || id != "c-new" {
+		t.Fatal(id, err)
+	}
+	people, err := r.Access(context.Background(), id)
+	if err != nil || len(people) != 2 || people[0] != "ann@acme.example" || people[1] != "Bo" {
+		t.Fatal(people, err)
+	}
+}

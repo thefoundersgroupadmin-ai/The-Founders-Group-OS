@@ -191,3 +191,41 @@ func (r *REST) ClearPod(ctx context.Context, client, podSlug string) error {
 	}
 	return nil
 }
+
+// CreateClient makes the client's record in the portal (as the staff CRM would) and returns its id.
+func (r *REST) CreateClient(ctx context.Context, name, pkg string, reps int) (string, error) {
+	var out []struct {
+		ID string `json:"id"`
+	}
+	err := guard.Outbound("portal.sync", func() error {
+		return r.do(ctx, http.MethodPost, "clients", map[string]any{"name": name, "package": pkg, "reps": reps, "status": "Onboarding",
+			"start_date": time.Now().UTC().Format("2006-01-02")}, "return=representation", &out)
+	})
+	if err != nil {
+		return "", err
+	}
+	if len(out) == 0 || out[0].ID == "" {
+		return "", errors.New("the portal didn't return the new client's id")
+	}
+	return out[0].ID, nil
+}
+
+// Access lists who can sign in to a client's portal.
+func (r *REST) Access(ctx context.Context, client string) ([]string, error) {
+	var out []struct {
+		Name  string `json:"name"`
+		Email string `json:"email"`
+	}
+	if err := r.do(ctx, http.MethodGet, "client_users?select=name,email&client_id="+eq(client), nil, "", &out); err != nil {
+		return nil, err
+	}
+	names := make([]string, 0, len(out))
+	for _, u := range out {
+		n := strings.TrimSpace(u.Name)
+		if n == "" {
+			n = u.Email
+		}
+		names = append(names, n)
+	}
+	return names, nil
+}

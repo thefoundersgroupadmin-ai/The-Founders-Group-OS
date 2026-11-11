@@ -454,6 +454,69 @@ func registerPods(s *gin.RouterGroup, d *Deps) {
 		c.JSON(http.StatusOK, gin.H{"agent": gin.H{"projectId": bind.ProjectID, "agentId": bind.AgentID,
 			"researchRoutineId": bind.ResearchRoutineID, "outreachRoutineId": bind.OutreachRoutineID, "routinesActive": bind.RoutinesActive}})
 	})
+	// Sets the client up in the portal: creates their portal record (Starter/Core/The Full, reps)
+	// unless the pod is already linked, then links the pod. Inviting people is done in the staff CRM.
+	s.POST("/pods/:slug/portal/setup", func(c *gin.Context) {
+		st, p, ok := pod(c)
+		if !ok {
+			return
+		}
+		if who, _ := personOf(c); !who.Owner {
+			c.JSON(http.StatusForbidden, gin.H{"error": "only the TFG owner sets up a client portal"})
+			return
+		}
+		rest, ok := portalsync.NewREST(func(k string) string { return d.Resolver.Resolve(k) })
+		if !ok {
+			c.JSON(http.StatusServiceUnavailable, gin.H{"error": "The client portal isn't configured on this OS (PORTAL_SUPABASE_URL and key)."})
+			return
+		}
+		if p.PortalClientID != nil && *p.PortalClientID != "" {
+			reply(c, st, p.Slug)
+			return
+		}
+		ctx, cancel := context.WithTimeout(c.Request.Context(), 30*time.Second)
+		defer cancel()
+		pkg := map[string]string{"custom": "Starter", "starter": "Starter", "core": "Core", "full": "The Full"}[strings.ToLower(p.Package)]
+		if pkg == "" {
+			pkg = p.Package
+		}
+		id, err := rest.CreateClient(ctx, p.ClientName, pkg, p.Reps)
+		if err != nil {
+			c.JSON(http.StatusBadGateway, gin.H{"error": "The portal couldn't create the client: " + err.Error()})
+			return
+		}
+		if _, err := portalsync.Relink(ctx, st, rest, p.Slug, id); err != nil {
+			podError(c, err)
+			return
+		}
+		_ = st.Log(ctx, p.ID, "portal_setup", "Client created in the portal and linked; invite their people from the staff CRM", id)
+		reply(c, st, p.Slug)
+	})
+	// Who can sign in to this client's portal, so access is verified, not assumed.
+	s.GET("/pods/:slug/portal/access", func(c *gin.Context) {
+		_, p, ok := pod(c)
+		if !ok {
+			return
+		}
+		if p.PortalClientID == nil || *p.PortalClientID == "" {
+			c.JSON(http.StatusOK, gin.H{"linked": false, "people": []string{}})
+			return
+		}
+		rest, ok := portalsync.NewREST(func(k string) string { return d.Resolver.Resolve(k) })
+		if !ok {
+			c.JSON(http.StatusOK, gin.H{"linked": true, "known": false, "people": []string{}, "error": "portal not configured on this OS"})
+			return
+		}
+		ctx, cancel := context.WithTimeout(c.Request.Context(), 15*time.Second)
+		defer cancel()
+		people, err := rest.Access(ctx, *p.PortalClientID)
+		if err != nil {
+			c.JSON(http.StatusOK, gin.H{"linked": true, "known": false, "people": []string{}, "error": err.Error()})
+			return
+		}
+		c.JSON(http.StatusOK, gin.H{"linked": true, "known": true, "people": people,
+			"crmUrl": "https://thefoundersgroup.net/app/crm.html#client/" + *p.PortalClientID})
+	})
 	s.PUT("/pods/:slug/portal", func(c *gin.Context) {
 		st, p, ok := pod(c)
 		if !ok {

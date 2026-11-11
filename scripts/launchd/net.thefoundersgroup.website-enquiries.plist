@@ -1,0 +1,33 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>EnvironmentVariables</key>
+	<dict>
+		<key>LANG</key>
+		<string>en_US.UTF-8</string>
+		<key>LC_ALL</key>
+		<string>en_US.UTF-8</string>
+		<key>PATH</key>
+		<string>/opt/homebrew/opt/postgresql@17/bin:/opt/homebrew/opt/node/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin:/opt/homebrew/opt/node@22/bin</string>
+	</dict>
+	<key>Label</key>
+	<string>net.thefoundersgroup.website-enquiries</string>
+	<key>ProgramArguments</key>
+	<array>
+		<string>/usr/bin/python3</string>
+		<string>-I</string>
+		<string>/Users/yesno/TFG-OS/scripts/sync-website-enquiries.py</string>
+	</array>
+	<key>RunAtLoad</key>
+	<true/>
+	<key>StandardErrorPath</key>
+	<string>/Users/yesno/.founderos/logs/website-enquiries.err.log</string>
+	<key>StandardOutPath</key>
+	<string>/Users/yesno/.founderos/logs/website-enquiries.out.log</string>
+	<key>StartInterval</key>
+	<integer>300</integer>
+	<key>WorkingDirectory</key>
+	<string>/Users/yesno/TFG-OS</string>
+</dict>
+</plist>

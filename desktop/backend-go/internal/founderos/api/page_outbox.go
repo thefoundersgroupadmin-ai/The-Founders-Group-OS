@@ -117,10 +117,26 @@ func startAutoFollowUps(d *Deps) {
 					// dispatch keeps its own full budget (Codex round 3).
 					cctx, ccancel := context.WithTimeout(context.Background(), 90*time.Second)
 					_, hold, cerr := readPodCalendarsHold(cctx, d, st)
-					ccancel()
+					if hold == nil {
+						hold = map[string]bool{}
+					}
 					if cerr != nil {
 						slog.Warn("founderos pods: some client calendars unreadable; those pods held", "held", len(hold), "err", cerr)
 					}
+					// A pod whose reply inbox wasn't read recently is held too: a reply or opt-out could be missed.
+					if ih, ierr := st.InboxHold(cctx); ierr != nil {
+						slog.Warn("founderos pods: inbox health unreadable; holding every pod this pass", "err", ierr)
+						if all, lerr := st.List(cctx); lerr == nil {
+							for _, p := range all {
+								hold[p.Slug] = true
+							}
+						}
+					} else {
+						for slug := range ih {
+							hold[slug] = true
+						}
+					}
+					ccancel()
 					dctx, dcancel := context.WithTimeout(context.Background(), 3*time.Minute)
 					res, err := outbox.DispatchPodsExcept(dctx, d.Pool, ownDomain, outboxSender(d), hold)
 					dcancel()

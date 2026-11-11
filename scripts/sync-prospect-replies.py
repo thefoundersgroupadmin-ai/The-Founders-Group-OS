@@ -273,6 +273,16 @@ def paperclip(env, method, path, body=None):
         return json.loads(r.read().decode(), strict=False)
 
 
+def inbox_health(db, slug, ok, detail, dry=False):
+    """Records whether a pod's reply inbox was read; TFG OS holds a pod's sending when it wasn't (InboxHold)."""
+    if dry:
+        return
+    psql(db, "insert into founderos_pod_health (pod_id, check_name, ok, detail) "
+             f"select id, 'inbox', {'true' if ok else 'false'}, {sql(detail[:500])} from founderos_client_pods where slug = {sql(slug)} "
+             "on conflict (pod_id, check_name) do update set since = case when founderos_pod_health.ok = excluded.ok "
+             "then founderos_pod_health.since else now() end, ok = excluded.ok, detail = excluded.detail, checked_at = now()")
+
+
 def psql(db, query):
     r = subprocess.run(["psql", db, "-At", "-F", "\t", "-v", "ON_ERROR_STOP=1", "-c", query],
                        capture_output=True, text=True)
@@ -443,16 +453,20 @@ def pod_pass():
         box = pod_mailbox(env, slug)
         if not box:
             print(f"{slug}: no mailbox configured; replies not checked")
+            inbox_health(db, slug, False, "No reply mailbox is set up for this client, so replies can't be read.", dry)
             continue
         pod_contacts = psql(db, pod_contacts_query(ws))
         domains = watch_keys(pod_contacts, {box["user"].lower()})
         if not domains:
+            inbox_health(db, slug, True, "Nobody to watch for yet.", dry)
             continue
         try:
             found = search_replies(box, domains, since, seen_for(seen, slug), own={box["user"].lower()})
         except (imaplib.IMAP4.error, OSError) as e:
             print(f"{slug}: mailbox unreadable ({e}); will retry")
+            inbox_health(db, slug, False, f"The reply mailbox couldn't be read: {e}", dry)
             continue
+        inbox_health(db, slug, True, f"Read {len(found)} new repl{'y' if len(found) == 1 else 'ies'}.", dry)
         print(f"{slug}: {len(found)} new repl{'y' if len(found) == 1 else 'ies'}")
         for mid, contact, sender, subject, when, body, refs in found:
             # The email it answers, by its thread first (Codex: attribution by thread).

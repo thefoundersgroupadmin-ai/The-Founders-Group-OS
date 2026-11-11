@@ -36,6 +36,9 @@ func TestTheHandoffBundleHoldsEverythingTheClientOwnsAndNothingElse(t *testing.T
 	exec(`INSERT INTO founderos_pod_weekly (pod_id, week_start, metrics, review)
 		VALUES ($1, '2026-11-02', '{"week":"2026-11-02","meetingsBooked":2,"prospectsReached":40}', 'Good week')`, p.ID)
 	exec(`INSERT INTO founderos_email_suppression (workspace_id, address, reason) VALUES ($1, 'no@acme.example', 'asked')`, p.WorkspaceID)
+	// Installation-wide opt-outs: only one relates to this client's own contacts.
+	exec(`INSERT INTO founderos_email_suppression (workspace_id, address, reason) VALUES (NULL, 'ops@acme.example', 'GLOBAL-REASON-1')`)
+	exec(`INSERT INTO founderos_email_suppression (workspace_id, address, reason) VALUES (NULL, 'someone@unrelated-global.example', 'GLOBAL-REASON-2')`)
 	if err := s.SetBaseline(ctx, p.Slug, Baseline{MeetingsPerMonth: 3, ReplyRatePct: 1, Note: "founder outbound"}); err != nil {
 		t.Fatal(err)
 	}
@@ -63,7 +66,7 @@ func TestTheHandoffBundleHoldsEverythingTheClientOwnsAndNothingElse(t *testing.T
 	}
 	if !strings.Contains(all["documents/icp.md"], "approved") || !strings.Contains(all["emails-sent.csv"], "quick one about counts") ||
 		!strings.Contains(all["pipeline.csv"], "Ana Ops") || !strings.Contains(all["meetings.csv"], "Ask about budget") ||
-		!strings.Contains(all["opt-outs.csv"], "no@acme.example") || !strings.Contains(all["weekly-reviews/2026-11-02.md"], "Good week") ||
+		!strings.Contains(all["opt-outs.csv"], "no@acme.example") || !strings.Contains(all["opt-outs.csv"], "ops@acme.example") || !strings.Contains(all["weekly-reviews/2026-11-02.md"], "Good week") ||
 		!strings.Contains(all["README.md"], "3 meetings a month") || !strings.Contains(all["README.md"], "2 meetings booked") {
 		t.Fatal("bundle content incomplete")
 	}
@@ -74,7 +77,7 @@ func TestTheHandoffBundleHoldsEverythingTheClientOwnsAndNothingElse(t *testing.T
 		}
 		return v
 	}(), "\n")
-	for _, leak := range []string{"KESTREL", "kestrel-lead", "PASS", "password", "token"} {
+	for _, leak := range []string{"KESTREL", "kestrel-lead", "PASS", "password", "token", "unrelated-global", "GLOBAL-REASON"} {
 		if strings.Contains(joined, leak) {
 			t.Errorf("bundle leaks %q", leak)
 		}

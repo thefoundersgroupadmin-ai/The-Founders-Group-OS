@@ -62,8 +62,18 @@ func (s *Store) BundleFiles(ctx context.Context, slug string) (map[string][]byte
 		return nil, err
 	}
 	if err := s.csvFile(ctx, files, "opt-outs.csv", []string{"address", "domain", "reason", "at"},
-		`SELECT coalesce(address, ''), coalesce(domain, ''), coalesce(reason, ''), to_char(created_at, 'YYYY-MM-DD')
-		 FROM founderos_email_suppression WHERE workspace_id = $1 OR workspace_id IS NULL ORDER BY created_at`, p.WorkspaceID); err != nil {
+		// The client's own opt-outs in full; an installation-wide opt-out only when it covers one of
+		// this client's own contacts, and then without the reason, which belongs to another sender.
+		`SELECT address, domain, reason, at FROM (
+		   SELECT coalesce(address, '') AS address, coalesce(domain, '') AS domain, coalesce(reason, '') AS reason, to_char(created_at, 'YYYY-MM-DD') AS at, created_at
+		     FROM founderos_email_suppression WHERE workspace_id = $1
+		   UNION ALL
+		   SELECT coalesce(g.address, ''), coalesce(g.domain, ''), 'opted out of all outreach', to_char(g.created_at, 'YYYY-MM-DD'), g.created_at
+		     FROM founderos_email_suppression g
+		    WHERE g.workspace_id IS NULL AND EXISTS (
+		      SELECT 1 FROM founderos_funnel_contacts c WHERE c.workspace_id = $1 AND c.email IS NOT NULL
+		         AND (lower(c.email) = lower(g.address) OR split_part(lower(c.email), '@', 2) = lower(g.domain)))
+		 ) s ORDER BY created_at`, p.WorkspaceID); err != nil {
 		return nil, err
 	}
 	if err := s.csvFile(ctx, files, "meetings.csv", []string{"starts_at", "title", "attendee", "email", "status", "outcome", "brief", "coaching"},

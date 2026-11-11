@@ -38,6 +38,7 @@ func (s *Store) SetHealth(ctx context.Context, podID, check string, ok bool, det
 
 var healthTitles = map[string]string{
 	"calendar": "The calendar can't be read, so sending is held",
+	"inbox":    "The reply inbox can't be read, so sending is held",
 	"crm":      "The CRM sync is failing",
 }
 
@@ -247,4 +248,30 @@ func (s *Store) RefreshAlerts(ctx context.Context) ([]Alert, error) {
 	}
 	sort.Slice(fresh, func(i, j int) bool { return fresh[i].Slug+fresh[i].Key < fresh[j].Slug+fresh[j].Key })
 	return fresh, errors.Join(append(errs, rows.Err())...)
+}
+
+// InboxFreshness is how recent a successful read of a pod's reply inbox must be before it may send.
+const InboxFreshness = "20 minutes"
+
+// InboxHold lists the sending pods (live or test run) whose reply inbox failed on its last read,
+// was not read within InboxFreshness, or has never been read: sending for them is held so a reply
+// or an opt-out is never missed while emails keep going out.
+func (s *Store) InboxHold(ctx context.Context) (map[string]bool, error) {
+	rows, err := s.Pool.Query(ctx, `SELECT p.slug FROM founderos_client_pods p
+		LEFT JOIN founderos_pod_health h ON h.pod_id = p.id AND h.check_name = 'inbox'
+		WHERE p.status IN ('live', 'dry_run')
+		  AND (h.pod_id IS NULL OR NOT h.ok OR h.checked_at < now() - interval '`+InboxFreshness+`')`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := map[string]bool{}
+	for rows.Next() {
+		var slug string
+		if err := rows.Scan(&slug); err != nil {
+			return nil, err
+		}
+		out[slug] = true
+	}
+	return out, rows.Err()
 }

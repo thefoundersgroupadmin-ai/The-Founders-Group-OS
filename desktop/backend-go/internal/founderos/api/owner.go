@@ -23,7 +23,7 @@ func OwnerOnly(d *Deps) gin.HandlerFunc {
 			return
 		}
 		for _, e := range strings.Split(os.Getenv("FOUNDEROS_OWNER_EMAIL"), ",") {
-			if e = strings.TrimSpace(e); e != "" && strings.EqualFold(e, user.Email) {
+			if e = strings.TrimSpace(e); e != "" && strings.EqualFold(e, user.Email) && originalAccount(c, d, user.ID, e) {
 				c.Next()
 				return
 			}
@@ -45,4 +45,20 @@ func OwnerOnly(d *Deps) gin.HandlerFunc {
 			"error": "This OS isn't set up for this account yet. Run: make tfg OWNER=" + user.Email,
 		})
 	}
+}
+
+// originalAccount reports whether userID is the first account ever made for this allowlisted
+// address (in any letter case), so a later look-alike sign-up can never inherit owner access.
+// Without a database it can't tell, so it trusts the session's email as before.
+func originalAccount(c *gin.Context, d *Deps, userID, email string) bool {
+	if d == nil || d.Pool == nil {
+		return true
+	}
+	ctx, cancel := context.WithTimeout(c.Request.Context(), 3*time.Second)
+	defer cancel()
+	var first string
+	if err := d.Pool.QueryRow(ctx, `SELECT id FROM "user" WHERE lower(email) = lower($1) ORDER BY "createdAt", id LIMIT 1`, email).Scan(&first); err != nil {
+		return false
+	}
+	return first == userID
 }

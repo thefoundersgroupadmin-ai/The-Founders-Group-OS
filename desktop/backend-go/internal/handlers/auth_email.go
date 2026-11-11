@@ -175,7 +175,9 @@ func (h *EmailAuthHandler) SignUp(c *gin.Context) {
 
 	// Check if user already exists
 	var existingID string
-	err := h.pool.QueryRow(ctx, `SELECT id FROM "user" WHERE email = $1`, req.Email).Scan(&existingID)
+	// Case-insensitive: Name@x.com and name@x.com are the same person (and the same owner).
+	req.Email = strings.ToLower(strings.TrimSpace(req.Email))
+	err := h.pool.QueryRow(ctx, `SELECT id FROM "user" WHERE lower(email) = $1`, req.Email).Scan(&existingID)
 	if err == nil {
 		utils.RespondConflict(c, slog.Default(), "User with this email already exists")
 		return

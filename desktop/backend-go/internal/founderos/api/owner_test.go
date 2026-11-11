@@ -82,3 +82,23 @@ func TestOwnerOnlyTellsANewAccountHowToSetUp(t *testing.T) {
 		t.Fatalf("body = %s", w.Body.String())
 	}
 }
+
+// A look-alike account (same address, different letter case, made later) never inherits owner access.
+func TestOwnerAllowlistOnlyAdmitsTheOriginalAccount(t *testing.T) {
+	t.Setenv("FOUNDEROS_OWNER_EMAIL", "alex@example.com")
+	pool := throwawayPool(t)
+	ctx := context.Background()
+	if _, err := pool.Exec(ctx, `INSERT INTO "user" (id, name, email, "emailVerified", "createdAt", "updatedAt") VALUES
+		('orig', 'Alex', 'alex@example.com', false, now() - interval '1 day', now()),
+		('copy', 'Alex', 'ALEX@example.com', false, now(), now())`); err != nil {
+		t.Fatal(err)
+	}
+	d := &Deps{Pool: pool}
+	for id, want := range map[string]int{"orig": 200, "copy": http.StatusForbidden} {
+		w := httptest.NewRecorder()
+		ownerRouter(t, d, &middleware.BetterAuthUser{ID: id, Email: "alex@example.com"}).ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/x", nil))
+		if w.Code != want {
+			t.Errorf("%s: %d, want %d", id, w.Code, want)
+		}
+	}
+}

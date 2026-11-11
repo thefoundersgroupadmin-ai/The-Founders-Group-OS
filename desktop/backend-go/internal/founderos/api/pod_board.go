@@ -81,7 +81,7 @@ func startAgentRefresh(d *Deps) {
 			for range t.C {
 				ctx, cancel := context.WithTimeout(context.Background(), 90*time.Second)
 				st := &pods.Store{Pool: d.Pool}
-				if stale, err := st.StaleAgents(ctx); err == nil {
+				if stale, err := st.AgentsDueRefresh(ctx); err == nil {
 					for _, slug := range stale {
 						if warn := resyncPodAgent(ctx, d, st, slug); warn != "" {
 							if p, err := st.Get(ctx, slug); err == nil {

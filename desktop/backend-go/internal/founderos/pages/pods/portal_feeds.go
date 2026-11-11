@@ -131,13 +131,22 @@ func (s *Store) ProspectsForPortal(ctx context.Context, p Pod, limit int) ([]Pro
 // StaleAgents lists provisioned pods whose AI agent was last updated before a change to their
 // documents (edit or approval) or their sender and sending rules. Their agents need refreshing,
 // and sending holds until they are, so the agent never works from old targeting, pricing or voice.
-func (s *Store) StaleAgents(ctx context.Context) ([]string, error) {
+func (s *Store) StaleAgents(ctx context.Context) ([]string, error) { return s.agentsBehind(ctx, false) }
+
+// AgentsDueRefresh is StaleAgents plus running pods whose agent is over 20 hours old, so each day's
+// routine tasks carry a fresh pipeline snapshot. Only StaleAgents holds sending.
+func (s *Store) AgentsDueRefresh(ctx context.Context) ([]string, error) {
+	return s.agentsBehind(ctx, true)
+}
+
+func (s *Store) agentsBehind(ctx context.Context, daily bool) ([]string, error) {
 	rows, err := s.Pool.Query(ctx, `SELECT p.slug FROM founderos_client_pods p
 		JOIN founderos_pod_agents a ON a.pod_id = p.id AND a.agent_id <> ''
-		WHERE coalesce(a.synced_at, 'epoch') < greatest(
+		WHERE ($1 AND p.status IN ('live', 'dry_run') AND coalesce(a.synced_at, 'epoch') < now() - interval '20 hours')
+		   OR coalesce(a.synced_at, 'epoch') < greatest(
 		        coalesce(p.config_changed_at, 'epoch'),
 		        coalesce((SELECT max(greatest(d.updated_at, coalesce(d.approved_at, 'epoch'))) FROM founderos_client_pod_docs d WHERE d.pod_id = p.id), 'epoch'))
-		ORDER BY p.slug`)
+		ORDER BY p.slug`, daily)
 	if err != nil {
 		return nil, err
 	}

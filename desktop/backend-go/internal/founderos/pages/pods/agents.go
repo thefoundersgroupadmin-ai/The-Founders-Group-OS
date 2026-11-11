@@ -14,6 +14,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/jackc/pgx/v5"
 )
@@ -108,6 +109,40 @@ func Instructions(p Pod, docs map[string]string) string {
 		"- Using an approved sequence step (\"sequenceKey\"): copy the step word for word, filling only {first_name}, " +
 		"{company} and {sender_name}. Any other change makes it a new email that needs the client's approval.\n")
 	return b.String()
+}
+
+type briefSnapshot struct{ research, outreach string }
+
+// workSnapshot is the pod's pipeline as the agent needs it today: the companies already known
+// (research skips them) and every person with their stage and last touch (outreach acts on it).
+func (s *Store) workSnapshot(ctx context.Context, p Pod) (briefSnapshot, error) {
+	rows, err := s.ProspectsForPortal(ctx, p, 300)
+	if err != nil {
+		return briefSnapshot{}, err
+	}
+	stamp := time.Now().UTC().Format("2006-01-02 15:04 UTC")
+	if len(rows) == 0 {
+		none := "\n\n# Pipeline snapshot (" + stamp + ")\nNobody is in this client's pipeline yet.\n"
+		return briefSnapshot{none, none}, nil
+	}
+	var known, people strings.Builder
+	seen := map[string]bool{}
+	for _, r := range rows {
+		if c := strings.TrimSpace(r.Company); c != "" && !seen[strings.ToLower(c)] {
+			seen[strings.ToLower(c)] = true
+			known.WriteString("- " + c + "\n")
+		}
+		last := r.LastTouch
+		if last == "" {
+			last = "never"
+		}
+		people.WriteString(fmt.Sprintf("- %s · %s (%s) · stage %s · last touch %s · next: %s\n", r.Company, r.Person, r.Role, r.Stage, last, r.Next))
+	}
+	research := "\n\n# Already in the pipeline (" + stamp + "): don't research these again\n" + known.String()
+	outreach := "\n\n# Pipeline snapshot (" + stamp + ", newest first, up to 300)\n" +
+		"Stages: researched (not emailed), contacted, replied, meeting, handed_over, opted_out. Only researched people get " +
+		"first emails; only contacted people get follow-ups; never write to replied, meeting, handed_over or opted_out.\n" + people.String()
+	return briefSnapshot{research, outreach}, nil
 }
 
 func researchBrief(p Pod, docs map[string]string) string {
@@ -215,6 +250,12 @@ func (s *Store) Provision(ctx context.Context, b Board, slug string) (Binding, e
 	if active {
 		status = "active"
 	}
+	// Each routine carries a fresh snapshot of the pod's own pipeline and send history, so the agent
+	// never works from memory: who has been researched, emailed, has replied, booked or opted out.
+	snapshot, err := s.workSnapshot(ctx, p)
+	if err != nil {
+		return bind, err
+	}
 	routines := []struct {
 		id        *string
 		scheduled *bool
@@ -223,8 +264,8 @@ func (s *Store) Provision(ctx context.Context, b Board, slug string) (Binding, e
 		brief     string
 		cron      string
 	}{
-		{&bind.ResearchRoutineID, &bind.ResearchScheduled, &bind.ResearchTriggerID, p.ClientName + ": daily prospect research", researchBrief(p, docs), "0 7 * * " + cronDays(p)},
-		{&bind.OutreachRoutineID, &bind.OutreachScheduled, &bind.OutreachTriggerID, p.ClientName + ": daily outreach", outreachBrief(p, docs), "0 8 * * " + cronDays(p)},
+		{&bind.ResearchRoutineID, &bind.ResearchScheduled, &bind.ResearchTriggerID, p.ClientName + ": daily prospect research", researchBrief(p, docs) + snapshot.research, "0 7 * * " + cronDays(p)},
+		{&bind.OutreachRoutineID, &bind.OutreachScheduled, &bind.OutreachTriggerID, p.ClientName + ": daily outreach", outreachBrief(p, docs) + snapshot.outreach, "0 8 * * " + cronDays(p)},
 	}
 	signature := cronDays(p) + "@" + p.Timezone
 	for _, r := range routines {

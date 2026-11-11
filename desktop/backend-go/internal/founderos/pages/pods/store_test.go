@@ -232,7 +232,6 @@ func TestAChangeAfterTheTestRunNeedsANewTestRun(t *testing.T) {
 	}
 }
 
-
 // waiveService waives the service items a unit test doesn't set up, the way an owner would for a
 // client that genuinely doesn't need them.
 func waiveService(t *testing.T, s *Store, slug string) {

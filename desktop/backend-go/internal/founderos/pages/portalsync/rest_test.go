@@ -93,3 +93,28 @@ func TestCreateClientAndAccess(t *testing.T) {
 		t.Fatal(people, err)
 	}
 }
+
+func TestRetentionRemovesFilesBeforeRecords(t *testing.T) {
+	t.Setenv("FOUNDEROS_WRITES", "1")
+	var calls []string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calls = append(calls, r.Method+" "+r.URL.Path)
+		switch r.URL.Path {
+		case "/rest/v1/rpc/retention_files":
+			w.Write([]byte(`[{"path":"c1/uploads/a.pdf"},{"path":"c1/x.pdf"}]`))
+		case "/storage/v1/object/client-files":
+			w.Write([]byte(`[]`))
+		case "/rest/v1/rpc/apply_retention":
+			w.Write([]byte(`{"clients":1}`))
+		}
+	}))
+	defer srv.Close()
+	msg, err := (&REST{URL: srv.URL, Key: "svc", HTTP: srv.Client()}).Retention(context.Background())
+	if err != nil || !strings.Contains(msg, "2 files removed") {
+		t.Fatal(msg, err)
+	}
+	want := []string{"POST /rest/v1/rpc/retention_files", "DELETE /storage/v1/object/client-files", "POST /rest/v1/rpc/apply_retention"}
+	if strings.Join(calls, ",") != strings.Join(want, ",") {
+		t.Fatalf("calls %v", calls)
+	}
+}

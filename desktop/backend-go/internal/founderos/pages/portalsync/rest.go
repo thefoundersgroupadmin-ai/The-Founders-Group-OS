@@ -229,3 +229,58 @@ func (r *REST) Access(ctx context.Context, client string) ([]string, error) {
 	}
 	return names, nil
 }
+
+// Retention runs the portal's data retention (privacy policy: an ended client's portal data goes
+// 12 months after the service ends; invoices and contracts stay). Uploaded files are removed
+// through the storage API first, since deleting their records alone would leave the files behind;
+// the portal deletes a client's records only once its files are gone. It reports what was removed.
+func (r *REST) Retention(ctx context.Context) (string, error) {
+	var files []struct {
+		Path string `json:"path"`
+	}
+	if err := r.do(ctx, http.MethodPost, "rpc/retention_files", map[string]any{}, "", &files); err != nil {
+		return "", err
+	}
+	removed := 0
+	for i := 0; i < len(files); i += 500 {
+		j := i + 500
+		if j > len(files) {
+			j = len(files)
+		}
+		paths := make([]string, 0, j-i)
+		for _, f := range files[i:j] {
+			paths = append(paths, f.Path)
+		}
+		err := guard.Outbound("portal.retention", func() error {
+			raw, _ := json.Marshal(map[string]any{"prefixes": paths})
+			req, err := http.NewRequestWithContext(ctx, http.MethodDelete, r.URL+"/storage/v1/object/client-files", bytes.NewReader(raw))
+			if err != nil {
+				return err
+			}
+			req.Header.Set("apikey", r.Key)
+			req.Header.Set("Authorization", "Bearer "+r.Key)
+			req.Header.Set("Content-Type", "application/json")
+			res, err := r.HTTP.Do(req)
+			if err != nil {
+				return err
+			}
+			defer res.Body.Close()
+			if res.StatusCode >= 300 {
+				msg, _ := io.ReadAll(io.LimitReader(res.Body, 300))
+				return fmt.Errorf("storage delete: %d %s", res.StatusCode, strings.TrimSpace(string(msg)))
+			}
+			return nil
+		})
+		if err != nil {
+			return "", err
+		}
+		removed += len(paths)
+	}
+	var out json.RawMessage
+	if err := guard.Outbound("portal.retention", func() error {
+		return r.do(ctx, http.MethodPost, "rpc/apply_retention", map[string]any{}, "", &out)
+	}); err != nil {
+		return "", err
+	}
+	return fmt.Sprintf("%d files removed; %s", removed, string(out)), nil
+}

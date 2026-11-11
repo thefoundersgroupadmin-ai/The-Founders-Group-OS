@@ -14,6 +14,9 @@ import (
 
 var portalSyncOnce sync.Once
 
+// retentionDay is the last day the portal retention ran successfully.
+var retentionDay string
+
 // startPortalSync keeps client pods and the client portal in step every two
 // minutes once the portal URL and service key are set. Never under go test.
 func startPortalSync(d *Deps) {
@@ -30,6 +33,15 @@ func startPortalSync(d *Deps) {
 					continue
 				}
 				ctx, cancel := context.WithTimeout(context.Background(), 90*time.Second)
+				// Once a day: the portal's data retention (ended clients' files, then their records).
+				if day := time.Now().Format("2006-01-02"); day != retentionDay {
+					if msg, err := rest.Retention(ctx); err != nil {
+						slog.Warn("client portal retention", "error", err)
+					} else {
+						retentionDay = day
+						slog.Info("client portal retention", "result", msg)
+					}
+				}
 				res, err := portalsync.Sync(ctx, &pods.Store{Pool: d.Pool}, rest)
 				if err != nil {
 					slog.Warn("client portal sync", "error", err)

@@ -65,6 +65,7 @@ func podOut(p pods.Pod) podJSON {
 
 func registerPods(s *gin.RouterGroup, d *Deps) {
 	startPortalSync(d)
+	startAgentRefresh(d)
 	startPodLoops(d)
 	store := func(c *gin.Context) (*pods.Store, pods.Viewer, bool) {
 		p, ok := personOf(c)

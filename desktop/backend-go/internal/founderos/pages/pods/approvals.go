@@ -7,7 +7,9 @@ package pods
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"github.com/jackc/pgx/v5"
 	"regexp"
 	"sort"
 	"strings"
@@ -79,39 +81,73 @@ func (s *Store) ProposeTargetList(ctx context.Context, slug, title string, domai
 
 // ApplyClientDecision records the client's decision on a request, but only if
 // hash is still the request's current wording. It reports whether it applied.
+// Everything happens in one transaction under the pod's row lock: the request's
+// status and, for an approved document, the document's approval change together,
+// and only when the document's current wording is exactly what the client saw.
+// A retry after a crash finishes a half-applied decision (Codex 11 Nov #6).
 func (s *Store) ApplyClientDecision(ctx context.Context, podID, kind, ref, hash, decision, by, note string) (bool, error) {
 	if decision != "approved" && decision != "changes_requested" {
 		return false, fmt.Errorf("%w: decision must be approved or changes_requested", ErrInvalid)
 	}
-	tag, err := s.Pool.Exec(ctx, `UPDATE founderos_client_approvals SET status = $5, decided_by = $6,
-		client_note = $7, decided_at = now()
-		WHERE pod_id = $1 AND kind = $2 AND ref = $3 AND payload->>'hash' = $4 AND status = 'pending'`,
-		podID, kind, ref, hash, decision, "client:"+strings.TrimSpace(by), strings.TrimSpace(note))
+	who := "client:" + strings.TrimSpace(by)
+	tx, err := s.Pool.Begin(ctx)
 	if err != nil {
 		return false, err
 	}
-	if tag.RowsAffected() == 0 {
-		// Already applied (a retry after a lost acknowledgement) is success, not
-		// stale wording (Codex M2-M4 #4).
-		var already bool
-		err := s.Pool.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM founderos_client_approvals WHERE pod_id = $1 AND kind = $2
-			AND ref = $3 AND payload->>'hash' = $4 AND status = $5)`, podID, kind, ref, hash, decision).Scan(&already)
-		return already, err
+	defer tx.Rollback(ctx)
+	var slug string
+	if err := tx.QueryRow(ctx, `SELECT slug FROM founderos_client_pods WHERE id = $1 FOR UPDATE`, podID).Scan(&slug); err != nil {
+		return false, err
+	}
+	var status string
+	err = tx.QueryRow(ctx, `SELECT status FROM founderos_client_approvals
+		WHERE pod_id = $1 AND kind = $2 AND ref = $3 AND payload->>'hash' = $4 FOR UPDATE`, podID, kind, ref, hash).Scan(&status)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return false, nil // the wording changed after the client looked
+	}
+	if err != nil {
+		return false, err
+	}
+	switch status {
+	case "pending":
+	case decision: // already recorded: finish anything left undone below
+	default:
+		return false, nil
 	}
 	if kind == "doc" && decision == "approved" {
-		var slug, body string
-		if err := s.Pool.QueryRow(ctx, `SELECT p.slug, d.body FROM founderos_client_pods p
-			JOIN founderos_client_pod_docs d ON d.pod_id = p.id AND d.key = $2 WHERE p.id = $1`, podID, ref).Scan(&slug, &body); err != nil {
-			return true, err
+		var body string
+		var approved bool
+		err := tx.QueryRow(ctx, `SELECT body, approved_at IS NOT NULL FROM founderos_client_pod_docs
+			WHERE pod_id = $1 AND key = $2 FOR UPDATE`, podID, ref).Scan(&body, &approved)
+		if err != nil {
+			return false, err
 		}
-		if hashOf("doc", ref, body) == hash {
-			if err := s.ApproveDoc(ctx, slug, ref, "client:"+strings.TrimSpace(by)+" (portal)"); err != nil {
-				return true, err
+		if hashOf("doc", ref, body) != hash {
+			return false, nil // the document was edited since: the client must look again
+		}
+		if !approved {
+			if _, err := tx.Exec(ctx, `UPDATE founderos_client_pod_docs SET approved_at = now() WHERE pod_id = $1 AND key = $2`, podID, ref); err != nil {
+				return false, err
+			}
+			if _, err := tx.Exec(ctx, `INSERT INTO founderos_client_activity (pod_id, kind, summary, ref) VALUES ($1, 'doc_approved', $2, $3)`,
+				podID, fmt.Sprintf("%s approved by %s (portal)", ref, who), ref); err != nil {
+				return false, err
 			}
 		}
 	}
-	summary := fmt.Sprintf("%s %s: %s", strings.TrimSpace(by), strings.ReplaceAll(decision, "_", " "), ref)
-	return true, s.Log(ctx, podID, "client_decision", summary, kind+":"+ref)
+	if status == "pending" {
+		if _, err := tx.Exec(ctx, `UPDATE founderos_client_approvals SET status = $5, decided_by = $6, client_note = $7, decided_at = now()
+			WHERE pod_id = $1 AND kind = $2 AND ref = $3 AND payload->>'hash' = $4`,
+			podID, kind, ref, hash, decision, who, strings.TrimSpace(note)); err != nil {
+			return false, err
+		}
+		summary := fmt.Sprintf("%s %s: %s", strings.TrimSpace(by), strings.ReplaceAll(decision, "_", " "), ref)
+		if _, err := tx.Exec(ctx, `INSERT INTO founderos_client_activity (pod_id, kind, summary, ref) VALUES ($1, 'client_decision', $2, $3)`,
+			podID, summary, kind+":"+ref); err != nil {
+			return false, err
+		}
+	}
+	return true, tx.Commit(ctx)
 }
 
 var uuidRe = regexp.MustCompile(`^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$`)

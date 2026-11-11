@@ -127,3 +127,28 @@ func (s *Store) ProspectsForPortal(ctx context.Context, p Pod, limit int) ([]Pro
 	}
 	return out, rows.Err()
 }
+
+// StaleAgents lists provisioned pods whose AI agent was last updated before a change to their
+// documents (edit or approval) or their sender and sending rules. Their agents need refreshing,
+// and sending holds until they are, so the agent never works from old targeting, pricing or voice.
+func (s *Store) StaleAgents(ctx context.Context) ([]string, error) {
+	rows, err := s.Pool.Query(ctx, `SELECT p.slug FROM founderos_client_pods p
+		JOIN founderos_pod_agents a ON a.pod_id = p.id AND a.agent_id <> ''
+		WHERE coalesce(a.synced_at, 'epoch') < greatest(
+		        coalesce(p.config_changed_at, 'epoch'),
+		        coalesce((SELECT max(greatest(d.updated_at, coalesce(d.approved_at, 'epoch'))) FROM founderos_client_pod_docs d WHERE d.pod_id = p.id), 'epoch'))
+		ORDER BY p.slug`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []string
+	for rows.Next() {
+		var slug string
+		if err := rows.Scan(&slug); err != nil {
+			return nil, err
+		}
+		out = append(out, slug)
+	}
+	return out, rows.Err()
+}

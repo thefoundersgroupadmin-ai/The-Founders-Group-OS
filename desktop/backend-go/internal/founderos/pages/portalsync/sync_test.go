@@ -295,7 +295,6 @@ func TestCoachingWeeklyResultsAndBaselineReachThePortal(t *testing.T) {
 	}
 }
 
-
 // Several pods per client, client-wide pause, client messages, portal health, campaigns and pipeline.
 func TestTwoPodsOneClientPauseAllMessagesAndHealth(t *testing.T) {
 	s, p := setup(t)

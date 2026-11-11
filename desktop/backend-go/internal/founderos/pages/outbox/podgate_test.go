@@ -26,6 +26,19 @@ func podFixture(t *testing.T, pool *pgxpool.Pool, slug, status string) func(id, 
 		'operator@tfg.example', 'UTC', 0, 24, true, 20, 40, 'auto')`, ws, slug, status); err != nil {
 		t.Fatal(err)
 	}
+	// A live pod's foundation, as go-live requires it: approved ICP and voice, and a test send
+	// after the last settings change (liveReady checks both at the moment of sending).
+	if _, err := pool.Exec(ctx, `INSERT INTO founderos_client_pod_docs (pod_id, key, body, approved_at)
+		SELECT id, k, 'approved ' || k, now() FROM founderos_client_pods, unnest(ARRAY['icp', 'voice']) k WHERE slug = $1`, slug); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := pool.Exec(ctx, `UPDATE founderos_client_pods SET config_changed_at = now() - interval '1 hour' WHERE slug = $1`, slug); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := pool.Exec(ctx, `INSERT INTO founderos_outbox (id, workspace_id, source, to_address, subject, body, status, sent_at)
+		VALUES ($1, $2, 'paperclip', 'operator@tfg.example', 'test', 'test', 'simulated', now())`, slug+"-test-run", ws); err != nil {
+		t.Fatal(err)
+	}
 	return func(id, to string) {
 		t.Helper()
 		if _, err := pool.Exec(ctx, `INSERT INTO founderos_outbox (id, workspace_id, source, to_address, subject, body)

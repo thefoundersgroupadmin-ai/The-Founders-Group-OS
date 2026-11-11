@@ -131,6 +131,12 @@ func startAutoFollowUps(d *Deps) {
 					} else {
 						slog.Warn("founderos pods: portal health unreadable", "err", perr)
 					}
+					// A pod whose AI agent hasn't caught up with its latest documents or settings is held.
+					if stale, serr := st.StaleAgents(cctx); serr == nil {
+						for _, slug := range stale {
+							hold[slug] = true
+						}
+					}
 					// A pod whose reply inbox wasn't read recently is held too: a reply or opt-out could be missed.
 					if ih, ierr := st.InboxHold(cctx); ierr != nil {
 						slog.Warn("founderos pods: inbox health unreadable; holding every pod this pass", "err", ierr)

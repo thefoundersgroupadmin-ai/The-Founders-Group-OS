@@ -75,7 +75,7 @@ func TestAnApprovedConversationReplyGoesOutAfterTheProspectWroteBack(t *testing.
 		t.Fatal(err)
 	}
 	file("r-0", "priya@brightvale.example")
-	if _, err := pool.Exec(ctx, `UPDATE founderos_outbox SET status = 'sent', sent_at = now() - interval '1 hour', contact_id = 'ct-r'`); err != nil {
+	if _, err := pool.Exec(ctx, `UPDATE founderos_outbox SET status = 'sent', sent_at = now() - interval '1 hour', contact_id = 'ct-r' WHERE id = 'r-0'`); err != nil {
 		t.Fatal(err)
 	}
 	file("r-1", "priya@brightvale.example")

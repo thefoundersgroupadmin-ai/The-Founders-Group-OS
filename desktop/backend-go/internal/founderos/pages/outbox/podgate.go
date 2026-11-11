@@ -93,6 +93,30 @@ func (r *podRules) inWindow(now time.Time) bool {
 
 func held(why string) error { return fmt.Errorf("%w: %s", ErrHeld, why) }
 
+// liveReady re-checks, at the moment of sending, that a live pod's foundation is still approved:
+// its ICP and voice documents carry the client's approval (an edit clears it) and a test run has
+// succeeded since the sender or sending rules last changed. It returns why sending must wait, or "".
+func liveReady(ctx context.Context, q querier, podID, ws string) (string, error) {
+	var unapproved int
+	var tested bool
+	err := q.QueryRow(ctx, `SELECT
+		  (SELECT count(*) FROM unnest(ARRAY['icp', 'voice']) k(key)
+		    WHERE NOT EXISTS (SELECT 1 FROM founderos_client_pod_docs d WHERE d.pod_id = $1 AND d.key = k.key
+		                        AND d.approved_at IS NOT NULL AND btrim(d.body) <> '')),
+		  EXISTS (SELECT 1 FROM founderos_outbox o, founderos_client_pods p WHERE p.id = $1 AND o.workspace_id = $2
+		          AND o.status = 'simulated' AND o.sent_at > p.config_changed_at)`, podID, ws).Scan(&unapproved, &tested)
+	if err != nil {
+		return "", err
+	}
+	switch {
+	case unapproved > 0:
+		return "the ICP or voice document changed and needs the client's approval again", nil
+	case !tested:
+		return "the sender or sending rules changed; run a test send (Test run) before going live again", nil
+	}
+	return "", nil
+}
+
 func approvePod(ctx context.Context, pool *pgxpool.Pool, ws, id string, content Content, send SendFunc) (*Item, error) {
 	tx, err := pool.Begin(ctx)
 	if err != nil {
@@ -330,9 +354,17 @@ func dispatchPodSend(ctx context.Context, pool *pgxpool.Pool, ws string, r *podR
 	}
 	stop := ""
 	addr := strings.ToLower(strings.TrimSpace(it.To))
+	ready := ""
+	if now.Status == "live" && !dry {
+		if ready, err = liveReady(ctx, tx, now.ID, ws); err != nil {
+			return nil, err
+		}
+	}
 	switch {
 	case now.Status != r.Status:
 		stop = "pod is " + strings.ReplaceAll(now.Status, "_", " ")
+	case ready != "":
+		stop = ready
 	case now.AccountID != r.AccountID:
 		stop = "the pod's mailbox changed"
 	case isReply(it) && takenOverNow(ctx, tx, ws, addr):

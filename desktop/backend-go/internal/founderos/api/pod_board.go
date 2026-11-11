@@ -3,6 +3,9 @@ package api
 import (
 	"context"
 	"log/slog"
+	"sync"
+	"testing"
+	"time"
 
 	"github.com/rhl/businessos-backend/internal/founderos/connectors/paperclip"
 	"github.com/rhl/businessos-backend/internal/founderos/pages/pods"
@@ -60,6 +63,39 @@ func resyncPodAgent(ctx context.Context, d *Deps, st *pods.Store, slug string) s
 		return "the AI SDR could not be updated on the task board: " + err.Error()
 	}
 	return ""
+}
+
+var agentRefreshOnce sync.Once
+
+// startAgentRefresh brings every provisioned pod's AI agent up to date within two minutes of a
+// change to its documents or settings, however the change was made (OS page, client portal
+// approval, settings edit). Never under go test.
+func startAgentRefresh(d *Deps) {
+	if d.Pool == nil || testing.Testing() {
+		return
+	}
+	agentRefreshOnce.Do(func() {
+		go func() {
+			t := time.NewTicker(2 * time.Minute)
+			defer t.Stop()
+			for range t.C {
+				ctx, cancel := context.WithTimeout(context.Background(), 90*time.Second)
+				st := &pods.Store{Pool: d.Pool}
+				if stale, err := st.StaleAgents(ctx); err == nil {
+					for _, slug := range stale {
+						if warn := resyncPodAgent(ctx, d, st, slug); warn != "" {
+							if p, err := st.Get(ctx, slug); err == nil {
+								_ = st.SetHealth(ctx, p.ID, "agent", false, warn)
+							}
+						} else if p, err := st.Get(ctx, slug); err == nil {
+							_ = st.SetHealth(ctx, p.ID, "agent", true, "AI SDR instructions are up to date")
+						}
+					}
+				}
+				cancel()
+			}
+		}()
+	})
 }
 
 // podWatchFor is swapped in tests.

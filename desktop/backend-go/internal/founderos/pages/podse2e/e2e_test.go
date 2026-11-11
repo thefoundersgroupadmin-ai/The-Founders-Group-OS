@@ -67,7 +67,7 @@ type portal struct {
 }
 
 func (p *portal) UpsertPod(_ context.Context, x portalsync.Pod) error { p.pod = x; return nil }
-func (p *portal) Approvals(_ context.Context, _ string) ([]portalsync.Approval, error) {
+func (p *portal) Approvals(_ context.Context, _, _ string) ([]portalsync.Approval, error) {
 	var out []portalsync.Approval
 	for _, a := range p.approvals {
 		out = append(out, *a)
@@ -123,6 +123,14 @@ func (p *portal) UpsertMeetings(_ context.Context, rows []portalsync.Meeting) er
 	}
 	return nil
 }
+func (p *portal) UpsertCampaigns(context.Context, []portalsync.Campaign) error { return nil }
+func (p *portal) UpsertProspects(context.Context, []portalsync.Prospect) error { return nil }
+func (p *portal) NewSupportMessages(context.Context, string) ([]portalsync.SupportMessage, error) {
+	return nil, nil
+}
+func (p *portal) MarkSupportPulled(context.Context, string) error    { return nil }
+func (p *portal) ClientName(context.Context, string) (string, error) { return "Client", nil }
+func (p *portal) ClearPod(context.Context, string, string) error     { return nil }
 func (p *portal) UpsertWeekly(_ context.Context, rows []portalsync.Weekly) error {
 	for _, w := range rows {
 		p.weekly[w.WeekStart] = w
@@ -197,12 +205,14 @@ func TestAFictionalClientFromSignatureToHandoff(t *testing.T) {
 
 	// 5. The portal shows it; the client asks to pause, then resume.
 	pt := &portal{approvals: map[string]*portalsync.Approval{}, meetings: map[int64]portalsync.Meeting{}, weekly: map[string]portalsync.Weekly{}}
-	must(portalsync.Sync(ctx, s, pt))
+	_, err = portalsync.Sync(ctx, s, pt)
+	must(err)
 	if pt.pod.Status != pods.StatusDryRun || pt.pod.Baseline == nil {
 		t.Fatalf("portal pod: %+v", pt.pod)
 	}
 	pt.requests = append(pt.requests, &portalsync.Request{ID: "rq-1", ClientID: "7f1c2a9e-0d3b-4c6e-9a1f-2b8d4e6f0a11", Kind: "pause", Reason: "trade show week", RequestedByName: "Priya"})
-	must(portalsync.Sync(ctx, s, pt))
+	_, err = portalsync.Sync(ctx, s, pt)
+	must(err)
 	if p, _ = s.Get(ctx, p.Slug); p.Status != pods.StatusPaused {
 		t.Fatalf("pause from the portal: %s", p.Status)
 	}
@@ -287,7 +297,8 @@ func TestAFictionalClientFromSignatureToHandoff(t *testing.T) {
 	}
 
 	// 11. The portal shows the brief, coaching, results and review.
-	must(portalsync.Sync(ctx, s, pt))
+	_, err = portalsync.Sync(ctx, s, pt)
+	must(err)
 	var pm portalsync.Meeting
 	for _, x := range pt.meetings {
 		pm = x

@@ -37,10 +37,12 @@ func (s *Store) SetHealth(ctx context.Context, podID, check string, ok bool, det
 }
 
 var healthTitles = map[string]string{
-	"calendar": "The calendar can't be read, so sending is held",
-	"inbox":    "The reply inbox can't be read, so sending is held",
-	"portal":   "The client portal is out of step, so sending is held",
-	"crm":      "The CRM sync is failing",
+	"calendar":      "The calendar can't be read, so sending is held",
+	"inbox":         "The reply inbox can't be read, so sending is held",
+	"portal":        "The client portal is out of step, so sending is held",
+	"crm_blocklist": "The client CRM's opt-outs couldn't be read in full, so sending is held",
+	"agent":         "The AI SDR couldn't be updated on the task board",
+	"crm":           "The CRM sync is failing",
 }
 
 // problems computes a pod's open problems right now.

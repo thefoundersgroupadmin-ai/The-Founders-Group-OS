@@ -35,6 +35,10 @@ func podFixture(t *testing.T, pool *pgxpool.Pool, slug, status string) func(id, 
 	if _, err := pool.Exec(ctx, `UPDATE founderos_client_pods SET config_changed_at = now() - interval '1 hour' WHERE slug = $1`, slug); err != nil {
 		t.Fatal(err)
 	}
+	// Replies were read a moment ago (live pods hold without a fresh inbox reading).
+	if _, err := pool.Exec(ctx, `INSERT INTO founderos_pod_health (pod_id, check_name, ok, detail) SELECT id, 'inbox', true, 'read' FROM founderos_client_pods WHERE slug = $1`, slug); err != nil {
+		t.Fatal(err)
+	}
 	if _, err := pool.Exec(ctx, `INSERT INTO founderos_outbox (id, workspace_id, source, to_address, subject, body, status, sent_at)
 		VALUES ($1, $2, 'paperclip', 'operator@tfg.example', 'test', 'test', 'simulated', now())`, slug+"-test-run", ws); err != nil {
 		t.Fatal(err)

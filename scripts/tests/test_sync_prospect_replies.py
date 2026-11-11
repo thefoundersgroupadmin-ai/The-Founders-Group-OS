@@ -193,3 +193,18 @@ class ReportsAndIdentityTest(unittest.TestCase):
         self.assertTrue(sync.sender_verified(ok, "a@acme.example"))
         self.assertFalse(sync.sender_verified(bad, "a@acme.example"))
         self.assertIsNone(sync.sender_verified(none, "a@acme.example"))
+
+
+class VerificationHardeningTest(unittest.TestCase):
+    def msg(self, raw):
+        import email as _email
+        return _email.message_from_string(raw)
+
+    def test_lookalike_and_lower_headers_dont_verify(self):
+        lookalike = self.msg("From: a@acme.example\nAuthentication-Results: mx.google.com; dkim=pass header.i=@notacme.example; dmarc=pass header.from=notacme.example\n\nx")
+        self.assertFalse(sync.sender_verified(lookalike, "a@acme.example"))
+        forged_lower = self.msg("From: a@acme.example\nAuthentication-Results: mx.google.com; spf=fail smtp.mailfrom=evil.example; dmarc=fail header.from=acme.example\n"
+                                "Authentication-Results: fake; dmarc=pass header.from=acme.example\n\nx")
+        self.assertFalse(sync.sender_verified(forged_lower, "a@acme.example"))
+        sub = self.msg("From: a@acme.example\nAuthentication-Results: mx.google.com; dkim=pass header.i=@mail.acme.example\n\nx")
+        self.assertTrue(sync.sender_verified(sub, "a@acme.example"))

@@ -114,6 +114,32 @@ func liveReady(ctx context.Context, q querier, podID, ws string) (string, error)
 	case !tested:
 		return "the sender or sending rules changed; run a test send (Test run) before going live again", nil
 	}
+	// The pod's safety checks, read under the same lock as the send, failing closed: replies and
+	// opt-outs were read recently, the client portal's pause button was read recently (when linked),
+	// the AI agent has caught up with the latest documents and settings, and the client CRM's
+	// opt-outs and customers were read in full.
+	var inbox, portal, agent, blocklist bool
+	err = q.QueryRow(ctx, `SELECT
+		  EXISTS (SELECT 1 FROM founderos_pod_health h WHERE h.pod_id = $1 AND h.check_name = 'inbox' AND h.ok AND h.checked_at > now() - interval '20 minutes'),
+		  coalesce(p.portal_client_id::text, '') = '' OR EXISTS (SELECT 1 FROM founderos_pod_health h WHERE h.pod_id = $1 AND h.check_name = 'portal' AND h.ok AND h.checked_at > now() - interval '15 minutes'),
+		  NOT EXISTS (SELECT 1 FROM founderos_pod_agents a WHERE a.pod_id = $1 AND a.agent_id <> '' AND coalesce(a.synced_at, 'epoch') < greatest(
+		      coalesce(p.config_changed_at, 'epoch'),
+		      coalesce((SELECT max(greatest(d.updated_at, coalesce(d.approved_at, 'epoch'))) FROM founderos_client_pod_docs d WHERE d.pod_id = $1), 'epoch'))),
+		  NOT EXISTS (SELECT 1 FROM founderos_pod_health h WHERE h.pod_id = $1 AND h.check_name = 'crm_blocklist' AND NOT h.ok)
+		FROM founderos_client_pods p WHERE p.id = $1`, podID).Scan(&inbox, &portal, &agent, &blocklist)
+	if err != nil {
+		return "", err
+	}
+	switch {
+	case !inbox:
+		return "the reply inbox hasn't been read in the last 20 minutes, so a reply or opt-out could be missed", nil
+	case !portal:
+		return "the client portal hasn't been read in the last 15 minutes, so a pause request could be missed", nil
+	case !agent:
+		return "the AI SDR hasn't caught up with the latest documents or settings yet", nil
+	case !blocklist:
+		return "the client CRM's opt-outs and customers couldn't be read in full", nil
+	}
 	return "", nil
 }
 

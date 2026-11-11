@@ -69,10 +69,15 @@ func syncPodCRMs(ctx context.Context, d *Deps, st *pods.Store) (int, error) {
 			continue
 		}
 		// The client's CRM first says who must not be contacted (opt-outs, existing customers).
+		// A failed or partial read holds this pod's sending (liveReady checks crm_blocklist).
 		if added, rerr := crmsync.Reconcile(ctx, d.Pool, p.ID, crm); rerr != nil {
 			errs = append(errs, fmt.Errorf("%s (%s) inbound: %w", p.Slug, crm.Name(), rerr))
-		} else if added > 0 {
-			_ = st.Log(ctx, p.ID, "crm_blocklist", fmt.Sprintf("%d opt-outs or customers from %s added to the do-not-contact list", added, crm.Name()), "")
+			_ = st.SetHealth(ctx, p.ID, "crm_blocklist", false, rerr.Error())
+		} else {
+			_ = st.SetHealth(ctx, p.ID, "crm_blocklist", true, "opt-outs and customers read in full")
+			if added > 0 {
+				_ = st.Log(ctx, p.ID, "crm_blocklist", fmt.Sprintf("%d opt-outs or customers from %s added to the do-not-contact list", added, crm.Name()), "")
+			}
 		}
 		if fresh.Status == pods.StatusDryRun {
 			unlock()

@@ -355,6 +355,13 @@ def main():
         target = a.get("workspace", WORKSPACE_SLUG)
         ws = workspace_ids[target]
         cid = prospect_id(target, a["name"]) + ("--" + slug(a["buyer"]) if a.get("second") else "")
+        # A different person named for a company that already has someone gets a row of their own;
+        # an existing person's row (and history) is never handed to somebody else.
+        if a.get("buyer") and not a.get("second"):
+            have = subprocess.run(["psql", db, "-At", "-c", f"select coalesce(person, '') from founderos_funnel_contacts where id = {sql(cid)}"],
+                                  capture_output=True, text=True).stdout.strip()
+            if have and have.lower() != a["buyer"].lower():
+                cid = cid + "--" + slug(a["buyer"])
         email = None if a.get("second") else emails.get((target, a["name"]))
         stmts.append(
             "INSERT INTO founderos_funnel_contacts (id, workspace_id, name, venture, status, product, relationship, "

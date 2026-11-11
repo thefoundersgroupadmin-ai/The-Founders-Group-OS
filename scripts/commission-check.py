@@ -150,14 +150,18 @@ def pod_checks(slug):
         check(f"pod {slug}", lambda: (False, "no such pod"))
         return
     pid, status, ws = rows[0]
-    check(f"pod {slug} test send", lambda: (bool(int(psql(f"select count(*) from founderos_outbox where workspace_id = '{ws}' and status = 'simulated'")[0][0])),
-                                             "a simulated send exists" if int(psql(f"select count(*) from founderos_outbox where workspace_id = '{ws}' and status = 'simulated'")[0][0]) else "no test send yet"))
-    for name in ("inbox", "portal", "calendar", "crm", "agent"):
-        def one(n=name):
-            h = psql(f"select ok, detail, checked_at from founderos_pod_health where pod_id = '{pid}' and check_name = '{n}'")
+    tested = int(psql(f"select count(*) from founderos_outbox o, founderos_client_pods p where p.id = '{pid}' and o.workspace_id = '{ws}' "
+                      "and o.status = 'simulated' and o.sent_at > p.config_changed_at")[0][0])
+    check(f"pod {slug} test send", lambda: (tested > 0, "a test send after the last settings change" if tested else "no test send since the last settings change"))
+    fresh = {"inbox": 20, "portal": 15, "calendar": 30, "crm": 60, "agent": 1440, "crm_blocklist": 60}
+    for name, minutes in fresh.items():
+        def one(n=name, m=minutes):
+            h = psql(f"select ok, detail, checked_at, checked_at > now() - interval '{m} minutes' from founderos_pod_health "
+                     f"where pod_id = '{pid}' and check_name = '{n}'")
             if not h:
-                return (n in ("crm",), f"{n}: never checked")
-            return h[0][0] == "t", f"{n}: {h[0][1]} (checked {h[0][2][:16]})"
+                return (n in ("crm", "crm_blocklist"), f"{n}: never checked")
+            ok, detail, at, recent = h[0]
+            return ok == "t" and recent == "t", f"{n}: {detail} (checked {at[:16]}{'' if recent == 't' else ', too long ago'})"
         check(f"pod {slug} {name}", one)
     a = psql(f"select agent_id, synced_at from founderos_pod_agents where pod_id = '{pid}'")
     check(f"pod {slug} agent provisioned", lambda: (bool(a and a[0][0]), f"agent {a[0][0][:8]}… synced {a[0][1][:16]}" if a and a[0][0] else "not provisioned"))

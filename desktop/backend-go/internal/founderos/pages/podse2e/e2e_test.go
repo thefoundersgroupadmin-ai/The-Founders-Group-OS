@@ -226,6 +226,8 @@ func TestAFictionalClientFromSignatureToHandoff(t *testing.T) {
 	// 6. Live: real email from the client's own mailbox. This client books through the rep's own
 	// calendar, so the booking-calendar requirement is waived with that reason.
 	must(s.WaiveReadiness(ctx, p.Slug, "calendar", "the client's rep books meetings from their own calendar", "Nader", true))
+	// The reply checker has just read the client's inbox (sending holds without that).
+	must(s.SetHealth(ctx, p.ID, "inbox", true, "read"))
 	_, err = s.SetStatus(ctx, p.Slug, pods.StatusLive, "")
 	must(err)
 	draft("l-1", "ben@acme.example")
@@ -240,6 +242,7 @@ func TestAFictionalClientFromSignatureToHandoff(t *testing.T) {
 	exec(`INSERT INTO founderos_funnel_contacts (id, workspace_id, name, status, venture, created_at, email, company)
 		VALUES ('c-ben', $1, 'Ben', 'engaged', 'client', now(), 'ben@acme.example', 'Acme')`, p.WorkspaceID)
 	exec(`INSERT INTO founderos_pod_conversations (issue_id, workspace_id, contact_id) VALUES ('issue-reply', $1, 'c-ben')`, p.WorkspaceID)
+	exec(`INSERT INTO founderos_pod_reply_messages (pod_id, message_id, sender, contact_id, received_at, routed) VALUES ($1, 'msg-ben-1', 'ben@acme.example', 'c-ben', now(), 'ai')`, p.ID)
 	token, err := s.NewInboundToken(ctx, p.Slug)
 	must(err)
 	_, err = s.Intake(ctx, token, pods.Enquiry{Name: "Cara", Email: "cara@globex.example", Company: "Globex", Message: "Pricing for 3 sites?"}, "web")

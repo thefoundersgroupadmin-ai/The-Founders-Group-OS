@@ -7,6 +7,7 @@ package crmsync
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/url"
@@ -28,8 +29,12 @@ type Blocklister interface {
 const (
 	reasonOptOut   = "opted out of email in the client's CRM"
 	reasonCustomer = "already a customer in the client's CRM"
-	maxInbound     = 5000
+	maxInbound     = 20000
 )
+
+// ErrIncomplete: the CRM has more opt-outs or customers than one pass reads; outreach holds
+// rather than carry on with a partial list.
+var ErrIncomplete = errors.New("the CRM's opt-out or customer list is larger than one read allows; outreach is held until it can be read in full")
 
 // domainOf turns a website or address into a bare domain ("https://www.acme.com/x" → "acme.com").
 func domainOf(s string) string {
@@ -63,6 +68,15 @@ func Reconcile(ctx context.Context, pool *pgxpool.Pool, podID string, crm CRM) (
 	if err := pool.QueryRow(ctx, `SELECT workspace_id::text FROM founderos_client_pods WHERE id = $1`, podID).Scan(&ws); err != nil {
 		return 0, err
 	}
+	// Under the pod's send-gate lock, so a send in flight finishes first and none follows unchecked.
+	tx, err := pool.Begin(ctx)
+	if err != nil {
+		return 0, err
+	}
+	defer tx.Rollback(ctx)
+	if _, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtext('founderos-pod-send:' || $1))`, ws); err != nil {
+		return 0, err
+	}
 	added := 0
 	for _, b := range list {
 		addr, dom := strings.ToLower(strings.TrimSpace(b.Address)), domainOf(b.Domain)
@@ -74,31 +88,31 @@ func Reconcile(ctx context.Context, pool *pgxpool.Pool, podID string, crm CRM) (
 		}
 		var tag int64
 		if addr != "" {
-			t, err := pool.Exec(ctx, `INSERT INTO founderos_email_suppression (workspace_id, address, reason)
+			t, err := tx.Exec(ctx, `INSERT INTO founderos_email_suppression (workspace_id, address, reason)
 				SELECT $1, $2, $3 WHERE NOT EXISTS (SELECT 1 FROM founderos_email_suppression WHERE workspace_id = $1 AND address = $2)`, ws, addr, b.Reason)
 			if err != nil {
 				return added, err
 			}
 			tag = t.RowsAffected()
-			if _, err := pool.Exec(ctx, `UPDATE founderos_outbox SET status = 'rejected', decided_at = now(), error = $3
+			if _, err := tx.Exec(ctx, `UPDATE founderos_outbox SET status = 'rejected', decided_at = now(), error = $3
 				WHERE workspace_id = $1 AND lower(to_address) = $2 AND status = 'pending'`, ws, addr, b.Reason); err != nil {
 				return added, err
 			}
 		} else {
-			t, err := pool.Exec(ctx, `INSERT INTO founderos_email_suppression (workspace_id, domain, reason)
+			t, err := tx.Exec(ctx, `INSERT INTO founderos_email_suppression (workspace_id, domain, reason)
 				SELECT $1, $2, $3 WHERE NOT EXISTS (SELECT 1 FROM founderos_email_suppression WHERE workspace_id = $1 AND domain = $2)`, ws, dom, b.Reason)
 			if err != nil {
 				return added, err
 			}
 			tag = t.RowsAffected()
-			if _, err := pool.Exec(ctx, `UPDATE founderos_outbox SET status = 'rejected', decided_at = now(), error = $3
+			if _, err := tx.Exec(ctx, `UPDATE founderos_outbox SET status = 'rejected', decided_at = now(), error = $3
 				WHERE workspace_id = $1 AND split_part(lower(to_address), '@', 2) = $2 AND status = 'pending'`, ws, dom, b.Reason); err != nil {
 				return added, err
 			}
 		}
 		added += int(tag)
 	}
-	return added, nil
+	return added, tx.Commit(ctx)
 }
 
 // HubSpot: contacts with hs_email_optout, companies whose lifecycle stage is customer.
@@ -106,7 +120,10 @@ func (h HubSpot) Blocked(ctx context.Context) ([]Blocked, error) {
 	var out []Blocked
 	search := func(object, prop, value, field, reason string, asDomain bool) error {
 		after := ""
-		for len(out) < maxInbound {
+		for read := 0; ; read += 100 {
+			if read >= maxInbound {
+				return ErrIncomplete
+			}
 			body := map[string]any{"filterGroups": []any{map[string]any{"filters": []any{map[string]any{
 				"propertyName": prop, "operator": "EQ", "value": value}}}}, "properties": []string{field}, "limit": 100}
 			if after != "" {
@@ -140,7 +157,6 @@ func (h HubSpot) Blocked(ctx context.Context) ([]Blocked, error) {
 				return nil
 			}
 		}
-		return nil
 	}
 	if err := search("contacts", "hs_email_optout", "true", "email", reasonOptOut, false); err != nil {
 		return nil, err
@@ -157,7 +173,10 @@ func (p Pipedrive) Blocked(ctx context.Context) ([]Blocked, error) {
 	type email struct {
 		Value string `json:"value"`
 	}
-	for start := 0; start < maxInbound; start += 500 {
+	for start := 0; ; start += 500 {
+		if start >= maxInbound {
+			return nil, ErrIncomplete
+		}
 		var page struct {
 			Data []struct {
 				Email           []email `json:"email"`
@@ -185,7 +204,10 @@ func (p Pipedrive) Blocked(ctx context.Context) ([]Blocked, error) {
 			break
 		}
 	}
-	for start := 0; start < maxInbound; start += 500 {
+	for start := 0; ; start += 500 {
+		if start >= maxInbound {
+			return nil, ErrIncomplete
+		}
 		var page struct {
 			Data []struct {
 				PersonID *struct {
@@ -227,7 +249,10 @@ func (s *Salesforce) Blocked(ctx context.Context) ([]Blocked, error) {
 	hdr := map[string]string{"Authorization": "Bearer " + tok}
 	query := func(q string, each func(map[string]any)) error {
 		next := "/services/data/" + sfVersion + "/query?q=" + url.QueryEscape(q)
-		for n := 0; next != "" && n < maxInbound/200; n++ {
+		for n := 0; next != ""; n++ {
+			if n >= maxInbound/200 {
+				return ErrIncomplete
+			}
 			var page struct {
 				Records        []map[string]any `json:"records"`
 				NextRecordsURL string           `json:"nextRecordsUrl"`

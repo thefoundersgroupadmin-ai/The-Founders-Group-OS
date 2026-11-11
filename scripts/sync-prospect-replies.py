@@ -203,20 +203,33 @@ VERIFIED = {}      # message id -> True / False / None (no checks recorded)
 AUTO = {}          # message id -> why it is an automatic message (out of office, auto-reply)
 
 
+def _aligned(d, dom):
+    """d is the sender's domain or a parent of it (mail.acme.com for acme.com), never a look-alike."""
+    d, dom = d.lower().strip("."), dom.lower().strip(".")
+    return bool(d) and (d == dom or dom.endswith("." + d) or d.endswith("." + dom))
+
+
 def sender_verified(msg, sender):
-    results = " ".join(str(h) for h in (msg.get_all("Authentication-Results") or [])).lower()
-    if not results:
+    """True only when the receiving server's own check (the topmost Authentication-Results header,
+    which it adds last) shows DMARC passed for the sender's domain, or DKIM/SPF passed for it;
+    False when it shows a failure; None when there is no such header. Anything else in older,
+    lower headers may have been written by the sender and is ignored."""
+    headers = msg.get_all("Authentication-Results") or []
+    if not headers:
         return None
+    top = str(headers[0]).lower()
     dom = sender.rsplit("@", 1)[-1].lower()
-    if re.search(r"\bdmarc=pass\b", results):
-        return True
-    if re.search(r"\bdmarc=fail\b", results):
-        return False
-    for m in re.finditer(r"\bdkim=pass\b[^;]*?header\.(?:d|i)=@?([\w.-]+)", results):
-        if m.group(1).endswith(dom) or dom.endswith(m.group(1)):
+    m = re.search(r"\bdmarc=(\w+)[^;]*?header\.from=([\w.-]+)", top)
+    if m:
+        if m.group(1) == "pass" and _aligned(m.group(2), dom):
             return True
-    for m in re.finditer(r"\bspf=pass\b[^;]*?smtp\.mailfrom=(?:[^@;\s]*@)?([\w.-]+)", results):
-        if m.group(1).endswith(dom) or dom.endswith(m.group(1)):
+        if m.group(1) == "fail":
+            return False
+    for m in re.finditer(r"\bdkim=pass\b[^;]*?header\.(?:d|i)=@?([\w.-]+)", top):
+        if _aligned(m.group(1), dom):
+            return True
+    for m in re.finditer(r"\bspf=pass\b[^;]*?smtp\.mailfrom=(?:[^@;\s]*@)?([\w.-]+)", top):
+        if _aligned(m.group(1), dom):
             return True
     return False
 
@@ -301,7 +314,10 @@ def apply_reports(db, reports, workspace_id, dry=False):
     for mid, kind, rcpt in reports:
         reason = "hard bounce" if kind == "bounce" else "marked our email as spam"
         if not dry:
-            psql(db, "insert into founderos_email_suppression (workspace_id, address, reason) "
+            # The same lock as the sends it must stop: a client pod's send gate, or TFG's own.
+            lock = (f"select pg_advisory_xact_lock(hashtext('founderos-pod-send:' || {sql(workspace_id)})); " if workspace_id
+                    else "select pg_advisory_xact_lock(hashtext('founderos-hq-send')); ")
+            psql(db, lock + "insert into founderos_email_suppression (workspace_id, address, reason) "
                      f"values ({sql(workspace_id)}, {sql(rcpt)}, {sql(reason)}) on conflict do nothing")
             psql(db, f"update founderos_outbox set status='rejected', decided_at=now(), error={sql(reason)} "
                      f"where lower(to_address)={sql(rcpt)} and status in ('pending','failed')"
@@ -626,17 +642,20 @@ def pod_pass():
         if not domains:
             inbox_health(db, slug, True, "Nobody to watch for yet.", dry)
             continue
+        # Sending holds while this pod's replies are read and applied (InboxHold / liveReady).
+        inbox_health(db, slug, False, "Reading and applying replies now.", dry)
         try:
             found = search_replies(box, domains, since, seen_for(seen, slug), own={box["user"].lower()})
         except (imaplib.IMAP4.error, OSError) as e:
             print(f"{slug}: mailbox unreadable ({e}); will retry")
             inbox_health(db, slug, False, f"The reply mailbox couldn't be read: {e}", dry)
             continue
-        inbox_health(db, slug, True, f"Read {len(found)} new repl{'y' if len(found) == 1 else 'ies'}.", dry)
+        reports_ok = True
         try:
             for done in apply_reports(db, scan_reports(box, since, seen_for(seen, slug)), ws, dry):
                 seen.add(f"pod/{slug}/{done}")
         except (imaplib.IMAP4.error, OSError) as e:
+            reports_ok = False
             print(f"{slug}: bounce check failed ({e}); will retry")
         print(f"{slug}: {len(found)} new repl{'y' if len(found) == 1 else 'ies'}")
         for mid, contact, sender, subject, when, body, refs in found:
@@ -687,14 +706,20 @@ def pod_pass():
                 "person" if int(psql(db, taken_over_query(ws, company_ids))[0][0]) > 0 else "ai"
             if not resume and route != "opt_out" and AUTO.get(mid):
                 route = "auto"
-            elif route == "ai" and not resume and VERIFIED.get(mid) is False:
+            elif route == "ai" and not resume and VERIFIED.get(mid) is not True:
                 route = "person"  # the sender couldn't be verified: a person reads it, nothing is sent automatically
-                body = ("[Sender not verified by the receiving mail server; check it really is them before replying.]\n\n" + body)
+                body = ("[Sender not verified by the receiving mail server (" + ("checks failed" if VERIFIED.get(mid) is False else "no checks recorded") +
+                        "); check it really is them before replying.]\n\n" + body)
             if route == "auto":
+                # Out of office and the like: logged, but the person hasn't engaged, so follow-ups continue.
                 psql(db, message_done_query(slug, mid, "auto", None, cid))
                 psql(db, "insert into founderos_client_activity (pod_id, kind, summary, ref) "
                          f"select id, 'auto_reply', {sql(company + ': automatic reply (' + AUTO[mid] + '): ' + subject[:100])}, {sql(cid)} "
                          f"from founderos_client_pods where slug={sql(slug)}")
+                seen.add(f"pod/{slug}/{mid}")
+                POD_STATE.parent.mkdir(parents=True, exist_ok=True)
+                POD_STATE.write_text(json.dumps(sorted(seen)))
+                continue
             elif route == "opt_out":
                 # Under the pod send gate's lock, so a send in flight finishes first and none follows.
                 psql(db, f"select pg_advisory_xact_lock(hashtext('founderos-pod-send:' || {sql(ws)})); "
@@ -741,6 +766,12 @@ def pod_pass():
             seen.add(f"pod/{slug}/{mid}")
             POD_STATE.parent.mkdir(parents=True, exist_ok=True)
             POD_STATE.write_text(json.dumps(sorted(seen)))
+        # Only now, with every reply, opt-out, bounce and complaint of this pass applied, is the
+        # inbox recorded as read: sending relies on it.
+        if reports_ok:
+            inbox_health(db, slug, True, f"Read {len(found)} new repl{'y' if len(found) == 1 else 'ies'}; all applied.", dry)
+        else:
+            inbox_health(db, slug, False, "Replies were read but bounces and complaints couldn't be checked.", dry)
 
 
 def main():

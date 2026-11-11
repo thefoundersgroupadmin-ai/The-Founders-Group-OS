@@ -183,9 +183,23 @@ func Approve(ctx context.Context, pool *pgxpool.Pool, workspaceSlug, id string, 
 	} else if rules != nil {
 		return approvePod(ctx, pool, ws, id, content, send)
 	}
+	// TFG's own sends and every do-not-contact writer (opt-out replies, bounces) share one lock,
+	// held from the check through the hand-over to the mail server, so an opt-out can't slip in
+	// between the check and the send.
+	conn, err := pool.Acquire(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer conn.Release()
+	if _, err := conn.Exec(ctx, `SELECT pg_advisory_lock(hashtext('founderos-hq-send'))`); err != nil {
+		return nil, err
+	}
+	defer func() {
+		_, _ = conn.Exec(context.WithoutCancel(ctx), `SELECT pg_advisory_unlock(hashtext('founderos-hq-send'))`)
+	}()
 	// TFG's own emails honour the do-not-contact list: installation-wide entries and any that
 	// aren't a client pod's own, by address or by whole domain. The email is withdrawn, not sent.
-	tag, err := pool.Exec(ctx, `UPDATE founderos_outbox o SET status = 'rejected', decided_at = now(), error = 'on the do-not-contact list'
+	tag, err := conn.Exec(ctx, `UPDATE founderos_outbox o SET status = 'rejected', decided_at = now(), error = 'on the do-not-contact list'
 		WHERE o.workspace_id = $1 AND o.id = $2 AND o.status IN ('pending', 'failed', 'uncertain')
 		  AND EXISTS (SELECT 1 FROM founderos_email_suppression x
 		       WHERE (lower(x.address) = lower(o.to_address) OR lower(x.domain) = split_part(lower(o.to_address), '@', 2))

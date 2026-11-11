@@ -138,6 +138,7 @@ def notice(nid, title, body):
 def main():
     dry = "--dry-run" in sys.argv
     state = json.loads(STATE.read_text()) if STATE.exists() else {"after": "", "warned": []}
+    state.setdefault("forwarding", [])  # imported enquiries still waiting to reach the CRM
     tok = token()
     keys = [k for k in list_keys(tok) if k > state.get("after", "")]
     db = read_env(REPO / "desktop/backend-go/.env")["DATABASE_URL"]
@@ -166,10 +167,28 @@ def main():
         notice("web-" + key.rsplit(":", 1)[-1], title, body)
         state["after"] = key
         done += 1
+        if not (lead.get("forward") or {}).get("ok"):
+            state["forwarding"].append(key)
+    # Enquiries the website hasn't passed to the CRM yet are re-read until they get through or the
+    # Worker gives up after 10 tries, which is when the owner hears about it.
+    still = []
+    for key in state["forwarding"][-200:]:
+        try:
+            lead = json.loads(cf("values/" + urllib.parse.quote(key, safe=""), tok))
+        except Exception:
+            still.append(key)
+            continue
         fwd = lead.get("forward") or {}
-        if not fwd.get("ok") and fwd.get("tries", 0) >= 10 and key not in state["warned"]:
-            notice("web-crm-" + key.rsplit(":", 1)[-1], "Enquiry not in the CRM", "%s couldn't be passed to the client CRM after 10 tries (%s). It is in TFG OS." % (lead["email"], fwd.get("error", "")))
-            state["warned"] = (state["warned"] + [key])[-200:]
+        if fwd.get("ok"):
+            continue
+        if fwd.get("tries", 0) >= 10:
+            if key not in state["warned"] and not dry:
+                notice("web-crm-" + key.rsplit(":", 1)[-1], "Enquiry not in the CRM",
+                       "%s couldn't be passed to the CRM after 10 tries (%s). It is in TFG OS." % (lead.get("email", ""), fwd.get("error", "")))
+                state["warned"] = (state["warned"] + [key])[-200:]
+            continue
+        still.append(key)
+    state["forwarding"] = still
     if not dry:
         STATE.parent.mkdir(parents=True, exist_ok=True)
         STATE.write_text(json.dumps(state))

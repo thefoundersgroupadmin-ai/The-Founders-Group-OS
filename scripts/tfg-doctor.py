@@ -635,9 +635,18 @@ def os_sql(q):
 def probe_pods():
     """Every running client AI SDR pod: its inbox, portal sync, calendar, CRM and agent health.
     A failing check there means the pod is held or the client misses something."""
+    # Failing checks, plus the ones sending relies on that are missing or out of date for a live pod
+    # (the same freshness the send gate uses: inbox 20 minutes, portal 15 when linked).
     rows = os_sql("SELECT p.slug, h.check_name, h.detail FROM founderos_client_pods p "
                   "JOIN founderos_pod_health h ON h.pod_id = p.id "
-                  "WHERE p.status IN ('live', 'dry_run') AND NOT h.ok ORDER BY p.slug, h.check_name LIMIT 10")
+                  "WHERE p.status IN ('live', 'dry_run') AND NOT h.ok "
+                  "UNION ALL SELECT p.slug, 'inbox', 'not read in the last 20 minutes' FROM founderos_client_pods p "
+                  "WHERE p.status = 'live' AND NOT EXISTS (SELECT 1 FROM founderos_pod_health h WHERE h.pod_id = p.id "
+                  "AND h.check_name = 'inbox' AND h.checked_at > now() - interval '20 minutes') "
+                  "UNION ALL SELECT p.slug, 'portal', 'not synced in the last 15 minutes' FROM founderos_client_pods p "
+                  "WHERE p.status = 'live' AND coalesce(p.portal_client_id::text, '') <> '' AND NOT EXISTS (SELECT 1 FROM founderos_pod_health h "
+                  "WHERE h.pod_id = p.id AND h.check_name = 'portal' AND h.checked_at > now() - interval '15 minutes') "
+                  "ORDER BY 1, 2 LIMIT 10")
     if rows is None:
         return None, "client pod health unreadable"
     if not rows:

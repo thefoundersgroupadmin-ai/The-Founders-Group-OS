@@ -410,12 +410,14 @@ func pullRequests(ctx context.Context, s *pods.Store, portal Portal, list []pods
 	if err != nil {
 		return err
 	}
+	var failed []error
 	for _, r := range reqs {
 		who := strings.TrimSpace(r.RequestedByName)
 		if who == "" {
 			who = "the client"
 		}
 		var outcomes []string
+		var reqErr error
 		for _, p := range list {
 			if r.PodSlug != "" && r.PodSlug != p.Slug {
 				continue
@@ -423,43 +425,58 @@ func pullRequests(ctx context.Context, s *pods.Store, portal Portal, list []pods
 			if np, err := s.Get(ctx, p.Slug); err == nil {
 				p = np
 			}
-			outcome := applyRequest(ctx, s, p, r, who)
+			outcome, err := applyRequest(ctx, s, p, r, who)
+			if err != nil {
+				// A pause that didn't happen is never reported as done: the request stays open, the
+				// pass fails for this client (so its pods hold on portal health) and it's tried again.
+				reqErr = errors.Join(reqErr, fmt.Errorf("%s: %w", p.Slug, err))
+				_ = s.Log(ctx, p.ID, "client_request", who+" asked to "+r.Kind+"; it couldn't be applied yet: "+err.Error(), r.ID)
+				continue
+			}
 			_ = s.Log(ctx, p.ID, "client_request", who+" asked to "+r.Kind+": "+outcome, r.ID)
 			if len(list) > 1 {
 				outcome = p.Slug + " " + outcome
 			}
 			outcomes = append(outcomes, outcome)
 		}
-		if len(outcomes) == 0 {
+		if reqErr != nil && r.Kind == "pause" {
+			failed = append(failed, reqErr)
+			continue
+		}
+		if len(outcomes) == 0 && reqErr == nil {
 			outcomes = []string{"no such AI SDR pod"}
+		}
+		if reqErr != nil {
+			outcomes = append(outcomes, "not applied: "+reqErr.Error())
 		}
 		if err := portal.CloseRequest(ctx, r.ID, strings.Join(outcomes, "; ")); err != nil {
 			return err
 		}
 	}
-	return nil
+	return errors.Join(failed...)
 }
 
-func applyRequest(ctx context.Context, s *pods.Store, p pods.Pod, r Request, who string) string {
+func applyRequest(ctx context.Context, s *pods.Store, p pods.Pod, r Request, who string) (string, error) {
 	switch r.Kind {
 	case "pause":
 		if p.Status == pods.StatusPaused || p.Status == pods.StatusHandedOver || p.Status == pods.StatusSetup {
-			return "nothing to pause (status " + p.Status + ")"
+			return "nothing to pause (status " + p.Status + ")", nil
 		}
 		if _, err := s.SetStatus(ctx, p.Slug, pods.StatusPaused, "requested by "+who+": "+r.Reason); err != nil {
-			return "could not pause: " + err.Error()
+			return "", fmt.Errorf("could not pause: %w", err)
 		}
-		return "paused"
+		return "paused", nil
 	case "resume":
 		if p.Status != pods.StatusPaused {
-			return "nothing to resume (status " + p.Status + ")"
+			return "nothing to resume (status " + p.Status + ")", nil
 		}
 		if _, err := s.SetStatus(ctx, p.Slug, pods.StatusLive, ""); err != nil {
-			return "TFG will resume it once ready: " + err.Error()
+			// Resuming is the client's wish but TFG decides when it's ready: report it, don't retry.
+			return "TFG will resume it once ready: " + err.Error(), nil
 		}
-		return "resumed"
+		return "resumed", nil
 	}
-	return "unknown request"
+	return "unknown request", nil
 }
 
 // nowString is a timestamp the portal's REST API accepts; swapped in tests.

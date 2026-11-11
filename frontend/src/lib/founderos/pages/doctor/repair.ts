@@ -1,7 +1,7 @@
 /** The auto-repair doctor's state (scripts/tfg-doctor.py → ~/.founderos/doctor/state.json), as /pages/doctor returns it. */
 export type RepairCheck = {
 	label?: string;
-	status?: 'ok' | 'failing' | 'repairing' | 'queued' | 'needs_owner' | (string & {});
+	status?: 'ok' | 'failing' | 'repairing' | 'queued' | 'needs_owner' | 'unknown' | (string & {});
 	detail?: string;
 	since?: string;
 	checkedAt?: string;
@@ -18,7 +18,7 @@ export type RepairState = {
 
 export type RepairRow = { id: string; label: string; status: string; detail: string; action: string | null; tone: 'ok' | 'warn' | 'err' };
 
-const ORDER: Record<string, number> = { needs_owner: 0, failing: 1, repairing: 2, queued: 3, ok: 4 };
+const ORDER: Record<string, number> = { needs_owner: 0, failing: 1, unknown: 2, repairing: 3, queued: 4, ok: 5 };
 
 /** Rows worst first; what needs the owner on top. */
 export function repairRows(s: RepairState | null | undefined): RepairRow[] {
@@ -43,5 +43,5 @@ export function repairHeadline(s: RepairState | null | undefined): { text: strin
 	return { text: `all ${rows.length} checks healthy`, tone: 'ok' };
 }
 
-const LABEL: Record<string, string> = { needs_owner: 'needs you', failing: 'failing', repairing: 'AI repairing', queued: 'queued', ok: 'ok' };
+const LABEL: Record<string, string> = { needs_owner: 'needs you', failing: 'failing', repairing: 'AI repairing', queued: 'queued', unknown: "couldn't check", ok: 'ok' };
 export const statusLabel = (s: string) => LABEL[s] ?? s;

@@ -120,10 +120,68 @@ class RepairResultTest(unittest.TestCase):
             self.assertEqual(state["checks"]["site"]["aiMisses"], 1)
 
 
+class CooldownAndVerifyTest(unittest.TestCase):
+    def _collect(self, d, result_line, probe_ok):
+        logf = Path(d) / "r.log"
+        logf.write_text(result_line + "\n")
+        orig = (doc.LOCK, doc.LOG, doc.notify, dict(doc.PROBES))
+        doc.LOCK, doc.LOG = Path(d) / "repair.lock", Path(d) / "log.jsonl"
+        sent = []
+        doc.notify = lambda *a, **k: sent.append(a)
+        doc.PROBES["web"] = lambda: (probe_ok, "x")
+        doc.save_json(doc.LOCK, {"pid": 999999, "check": "web", "started": "2026-11-11T01:00:00Z", "log": str(logf)})
+        state = {"checks": {"web": {}}}
+        try:
+            doc.collect_repair(state)
+        finally:
+            doc.LOCK, doc.LOG, doc.notify = orig[:3]
+            doc.PROBES.clear(); doc.PROBES.update(orig[3])
+        return state["checks"]["web"], sent
+
+    def test_attempt_time_survives_collection(self):
+        with tempfile.TemporaryDirectory() as d:
+            c, _ = self._collect(d, 'DOCTOR_RESULT {"status": "failed", "summary": "no"}', False)
+            self.assertEqual(c["lastAttemptAt"], "2026-11-11T01:00:00Z")
+            self.assertEqual(c["ai"]["startedAt"], "2026-11-11T01:00:00Z")
+
+    def test_claimed_fix_is_rechecked(self):
+        with tempfile.TemporaryDirectory() as d:
+            c, sent = self._collect(d, 'DOCTOR_RESULT {"status": "fixed", "summary": "restarted"}', False)
+            self.assertEqual(c["ai"]["status"], "failed")
+            self.assertEqual(sent, [])
+            c, sent = self._collect(d, 'DOCTOR_RESULT {"status": "fixed", "summary": "restarted"}', True)
+            self.assertEqual(c["ai"]["status"], "fixed")
+            self.assertEqual(len(sent), 1)
+
+    def test_cooldown_blocks_a_second_attempt(self):
+        state = {"checks": {"web": {"lastAttemptAt": doc.iso(doc.now()), "ai": {"status": "failed"}}}}
+        note = doc.start_repair(state, "web", "OS web app", "down", [], [])
+        self.assertIn("next try after", note)
+
+
+class ProbeRulesTest(unittest.TestCase):
+    def test_portal_owner_action_only_for_billing_block(self):
+        self.assertIsNotNone(doc.portal_owner_action("client portal database (Supabase) is blocked: over the free plan's data limit"))
+        self.assertIsNone(doc.portal_owner_action("client portal database answered 0"))
+
+    def test_job_freshness(self):
+        with tempfile.TemporaryDirectory() as d:
+            orig = doc.JOB_RUNS
+            doc.JOB_RUNS = Path(d) / "runs.json"
+            try:
+                self.assertTrue(doc.job_fresh("j", 5, 300, t=1000))
+                self.assertTrue(doc.job_fresh("j", 5, 300, t=1500))
+                self.assertFalse(doc.job_fresh("j", 5, 300, t=2000))
+                self.assertTrue(doc.job_fresh("j", 6, 300, t=2001))
+            finally:
+                doc.JOB_RUNS = orig
+
+
 class AllowListTest(unittest.TestCase):
     def test_agent_never_gets_blanket_or_destructive_permissions(self):
         joined = " ".join(doc.ALLOWED)
-        for bad in ("sudo", "--force", "reset --hard", "rm ", "bypass", "Bash(*)", "Bash(python3:*)"):
+        for bad in ("sudo", "--force", "reset --hard", "rm ", "bypass", "Bash(*)", "Bash(python3:*)",
+                    "Bash(kill", "git -C", "Bash(curl -s:*)"):
             self.assertNotIn(bad, joined)
 
 

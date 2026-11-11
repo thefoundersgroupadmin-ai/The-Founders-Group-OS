@@ -268,6 +268,12 @@ def contact_id(it, workspace=PIPELINE_SLUG):
     return "fc-pc-" + (slug(workspace) + "-" if workspace != PIPELINE_SLUG else "") + slug(it.get("company") or it["to"].rsplit("@", 1)[1])
 
 
+def person_contact_id(company_cid, address):
+    """A second person at an already-known company: the company id plus a short hash of their address."""
+    import hashlib
+    return company_cid + "-" + hashlib.sha1(address.strip().lower().encode()).hexdigest()[:8]
+
+
 def is_own(addr, own):
     """Our own mailboxes: test sends to them are not prospects."""
     a = addr.strip().lower()
@@ -390,6 +396,14 @@ def main():
         except ValueError as e:
             print(f"  {ident}: skipped ({e})")
             continue
+        current = [outbox_id(ident, it, rt["pipeline_slug"] if rt["pod"] else None) for it in items]
+        if not dry:
+            # Emails the agent took out of (or rewrote away from) its outbox document are withdrawn,
+            # so an old draft can't be approved or auto-sent after the agent replaced it.
+            psql(db, "UPDATE founderos_outbox SET status = 'rejected', decided_at = now(), "
+                     "error = 'withdrawn: no longer in the agent''s outbox document' "
+                     f"WHERE source = 'paperclip' AND source_ref = {sql(ident)} AND status = 'pending'"
+                     + (f" AND id NOT IN ({', '.join(sql(o) for o in current)})" if current else ""))
         for it in items:
             oid = outbox_id(ident, it, rt["pipeline_slug"] if rt["pod"] else None)
             if not binding:
@@ -404,7 +418,13 @@ def main():
             if dry:
                 print(f"  {ident}: {it['to']} | {it['subject']}")
                 continue
-            to, cid = sql(it["to"]), sql(contact_id(it, pipeline_slug))
+            # One contact per person: a new address at a company whose row belongs to someone else
+            # gets a row of its own instead of being filed under the first buyer.
+            base = contact_id(it, pipeline_slug)
+            owner = psql_rows(db, f"SELECT coalesce(email, '') AS email FROM founderos_funnel_contacts WHERE id = {sql(base)}")
+            if owner and owner[0]["email"] and owner[0]["email"].lower() != it["to"].lower():
+                base = person_contact_id(base, it["to"])
+            to, cid = sql(it["to"]), sql(base)
             if not is_own(it["to"], own):
                 # A new recipient becomes a pipeline contact; a known company keeps its row.
                 psql(db, "INSERT INTO founderos_funnel_contacts (id, workspace_id, name, venture, status, product, relationship, "

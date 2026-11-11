@@ -138,3 +138,14 @@ class LushaLookupTest(unittest.TestCase):
 if __name__ == "__main__":
     unittest.main()
 
+
+
+class SecondBuyerTest(unittest.TestCase):
+    def test_second_buyer_is_its_own_entry_without_the_first_buyers_email(self):
+        rows, bad = sync.json_prospects('[{"company":"Acme","buyer":"Ann Lee","email":"ann@acme.com","buyer2":"Bo Diaz","buyer2Role":"Head of Sales"}]')
+        self.assertEqual(bad, 0)
+        self.assertEqual(len(rows), 2)
+        second = [r for r in rows if r.get("second")][0]
+        self.assertEqual((second["buyer"], second["buyerRole"], second["email"]), ("Bo Diaz", "Head of Sales", None))
+        first = [r for r in rows if not r.get("second")][0]
+        self.assertEqual(first["email"], "ann@acme.com")

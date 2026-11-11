@@ -643,6 +643,12 @@ func (s *Store) UpdateSettings(ctx context.Context, slug string, in Settings) er
 		var id string
 		if s.Pool.QueryRow(ctx, `SELECT id::text FROM founderos_client_pods WHERE slug = $1`, slug).Scan(&id) == nil {
 			_ = s.Log(ctx, id, "settings", "Sending rules updated", "")
+			// Briefs and reviews that had no rep to go to are sent now that there is one.
+			if handoff != "" {
+				if n, err := s.ReleaseUnaddressed(ctx, id); err == nil && n > 0 {
+					_ = s.Log(ctx, id, "notices_released", fmt.Sprintf("%d brief(s) and review(s) that had no rep address will now be sent", n), "")
+				}
+			}
 		}
 	}
 	return err

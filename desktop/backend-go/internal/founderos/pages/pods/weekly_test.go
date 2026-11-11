@@ -61,6 +61,9 @@ func TestLastWeeksResultsAreCountedAndReviewedOncePerWeek(t *testing.T) {
 	exec(`INSERT INTO founderos_funnel_contacts (id, workspace_id, name, status, venture, created_at, email)
 		VALUES ('c1', $1, 'Ana', 'engaged', 'client', now(), 'A@x.example')`, p.WorkspaceID)
 	exec(`INSERT INTO founderos_pod_conversations (issue_id, workspace_id, contact_id, created_at) VALUES ('i1', $1, 'c1', $2)`, p.WorkspaceID, mid)
+	// The reply itself, as the reply checker records it (an automatic reply doesn't count).
+	exec(`INSERT INTO founderos_pod_reply_messages (pod_id, message_id, sender, contact_id, received_at, routed) VALUES ($1, 'm1', 'a@acme.example', 'c1', $2, 'ai'),
+		($1, 'm2', 'ooo@acme.example', 'c1', $2, 'auto')`, p.ID, mid)
 	exec(`INSERT INTO founderos_pod_meetings (pod_id, booking_uid, attendee_email, starts_at, created_at, outcome)
 		VALUES ($1, 'm1', 'a@x.example', $2, $2, 'held')`, p.ID, mid)
 	exec(`INSERT INTO founderos_pod_meetings (pod_id, booking_uid, attendee_email, starts_at, created_at, status)

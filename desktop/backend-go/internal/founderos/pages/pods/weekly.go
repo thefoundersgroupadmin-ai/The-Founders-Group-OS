@@ -99,12 +99,18 @@ func (s *Store) WeeklyMetrics(ctx context.Context, p Pod, from, to time.Time) (M
 		cohort AS (SELECT a FROM first WHERE f >= $3::timestamptz - interval '28 days' AND f < $3),
 		replied AS (SELECT DISTINCT lower(fc.email) a FROM founderos_pod_conversations c
 			JOIN founderos_funnel_contacts fc ON fc.id = c.contact_id AND fc.workspace_id = c.workspace_id
-			WHERE c.workspace_id = $1 AND c.source = 'email' AND c.created_at < $3)
+			WHERE c.workspace_id = $1 AND c.source = 'email' AND c.created_at < $3
+			UNION
+			SELECT DISTINCT lower(r.sender) FROM founderos_pod_reply_messages r
+			WHERE r.pod_id = $4 AND r.routed <> 'auto' AND coalesce(r.received_at, r.created_at) < $3)
 		SELECT
 		(SELECT count(*) FROM first WHERE f >= $2 AND f < $3),
 		(SELECT count(*) FROM founderos_outbox WHERE workspace_id = $1 AND status = 'sent' AND coalesce(sequence_key, '') <> 'reply' AND sent_at >= $2 AND sent_at < $3),
 		(SELECT count(*) FROM founderos_outbox WHERE workspace_id = $1 AND status = 'simulated' AND coalesce(decided_at, created_at) >= $2 AND coalesce(decided_at, created_at) < $3),
-		(SELECT count(*) FROM founderos_pod_conversations WHERE workspace_id = $1 AND source = 'email' AND created_at >= $2 AND created_at < $3),
+		-- Replies are the messages people actually sent back (opt-outs and replies handled by a person
+		-- included, automatic out-of-office answers not), not the number of AI conversations started.
+		(SELECT count(*) FROM founderos_pod_reply_messages WHERE pod_id = $4 AND routed <> 'auto'
+		   AND coalesce(received_at, created_at) >= $2 AND coalesce(received_at, created_at) < $3),
 		(SELECT count(*) FROM cohort),
 		(SELECT count(*) FROM cohort JOIN replied USING (a)),
 		(SELECT count(*) FROM founderos_pod_inbound WHERE pod_id = $4 AND received_at >= $2 AND received_at < $3),

@@ -94,3 +94,18 @@ func (s *Store) HandedOver(ctx context.Context, podID string) bool {
 	_ = s.Pool.QueryRow(ctx, `SELECT status = 'handed_over' FROM founderos_client_pods WHERE id = $1`, podID).Scan(&done)
 	return done
 }
+
+// ReleaseUnaddressed queues again every notice that couldn't go out for want of a rep address,
+// once the pod has one. It returns how many were released.
+func (s *Store) ReleaseUnaddressed(ctx context.Context, podID string) (int64, error) {
+	var total int64
+	for _, n := range []notice{briefNotice, coachingNotice, reviewNotice} {
+		tag, err := s.Pool.Exec(ctx, fmt.Sprintf(`UPDATE %[1]s SET %[2]s_delivery = 'held', %[2]s_sent_at = NULL
+			WHERE pod_id = $1 AND %[2]s_delivery = 'no_recipient'`, n.table, n.prefix), podID)
+		if err != nil {
+			return total, err
+		}
+		total += tag.RowsAffected()
+	}
+	return total, nil
+}

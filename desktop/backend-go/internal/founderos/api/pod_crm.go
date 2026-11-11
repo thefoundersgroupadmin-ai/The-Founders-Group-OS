@@ -48,14 +48,15 @@ func syncPodCRMs(ctx context.Context, d *Deps, st *pods.Store) (int, error) {
 	for _, p := range list {
 		// Only real work reaches the client's CRM: never a test run's contacts or
 		// simulated emails, and nothing after hand-over (Codex final review #7).
-		if p.Status != pods.StatusLive && p.Status != pods.StatusPaused {
+		// The read-back (opt-outs, customers) also runs during a test run, before anything goes out.
+		if p.Status != pods.StatusLive && p.Status != pods.StatusPaused && p.Status != pods.StatusDryRun {
 			continue
 		}
 		// Under the pod's CRM lock, with the pod and its connection read afresh:
 		// a connection change is never mixed with the old one's records.
 		unlock := lockPodCRM(p.ID)
 		fresh, err := st.Get(ctx, p.Slug)
-		if err != nil || (fresh.Status != pods.StatusLive && fresh.Status != pods.StatusPaused) {
+		if err != nil || (fresh.Status != pods.StatusLive && fresh.Status != pods.StatusPaused && fresh.Status != pods.StatusDryRun) {
 			unlock()
 			continue
 		}
@@ -66,6 +67,16 @@ func syncPodCRMs(ctx context.Context, d *Deps, st *pods.Store) (int, error) {
 				_ = st.SetHealth(ctx, p.ID, "crm", false, "The "+fresh.CRMProvider+" connection has no key; reconnect it on the AI SDR page.")
 			}
 			continue
+		}
+		// The client's CRM first says who must not be contacted (opt-outs, existing customers).
+		if added, rerr := crmsync.Reconcile(ctx, d.Pool, p.ID, crm); rerr != nil {
+			errs = append(errs, fmt.Errorf("%s (%s) inbound: %w", p.Slug, crm.Name(), rerr))
+		} else if added > 0 {
+			_ = st.Log(ctx, p.ID, "crm_blocklist", fmt.Sprintf("%d opt-outs or customers from %s added to the do-not-contact list", added, crm.Name()), "")
+		}
+		if fresh.Status == pods.StatusDryRun {
+			unlock()
+			continue // nothing from a test run is written to the client's CRM
 		}
 		n, err := crmsync.SyncPod(ctx, d.Pool, p.ID, crm)
 		unlock()

@@ -1,5 +1,7 @@
 package api
 
+// Background scripts (the auto-repair doctor, the website enquiry import) drop notices in
+// ~/.founderos/doctor/notify; a notice may name its kind (e.g. "reply"), health otherwise.
 // The auto-repair doctor (scripts/tfg-doctor.py, launchd net.thefoundersgroup.tfg-doctor)
 // keeps its state in ~/.founderos/doctor. The backend shows that state on /os/doctor
 // and sends the doctor's notices (notify/*.json: "needs you", "fixed by itself") to the
@@ -29,6 +31,7 @@ func doctorRepairState() json.RawMessage {
 
 type doctorNotice struct {
 	ID    string `json:"id"`
+	Kind  string `json:"kind"`
 	Title string `json:"title"`
 	Body  string `json:"body"`
 	URL   string `json:"url"`
@@ -52,7 +55,13 @@ func publishDoctorNotices(ctx context.Context, publish func(context.Context, not
 			if url == "" {
 				url = "/os/doctor"
 			}
-			publish(ctx, notify.Event{ID: n.ID, Kind: notify.KindHealth, Title: n.Title, Body: notifyClip(n.Body, 300), URL: url})
+			kind := notify.KindHealth
+			for _, k := range notify.Kinds {
+				if n.Kind == k {
+					kind = k
+				}
+			}
+			publish(ctx, notify.Event{ID: n.ID, Kind: kind, Title: n.Title, Body: notifyClip(n.Body, 300), URL: url})
 			sent++
 		}
 		_ = os.Remove(p)

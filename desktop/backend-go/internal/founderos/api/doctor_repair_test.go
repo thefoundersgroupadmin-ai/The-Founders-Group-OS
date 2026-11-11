@@ -18,10 +18,11 @@ func TestDoctorNoticesArePublishedOnceAndRemoved(t *testing.T) {
 	}
 	os.WriteFile(filepath.Join(dir, "a.json"), []byte(`{"id":"doctor-a","title":"Needs you: Website","body":"down"}`), 0o600)
 	os.WriteFile(filepath.Join(dir, "b.json"), []byte(`not json`), 0o600)
+	os.WriteFile(filepath.Join(dir, "c.json"), []byte(`{"id":"web-1","kind":"reply","title":"Website enquiry: Ann"}`), 0o600)
 
 	var got []notify.Event
 	n := publishDoctorNotices(context.Background(), func(_ context.Context, e notify.Event) { got = append(got, e) })
-	if n != 1 || len(got) != 1 || got[0].Title != "Needs you: Website" || got[0].Kind != notify.KindHealth || got[0].URL != "/os/doctor" {
+	if n != 2 || len(got) != 2 || got[0].Title != "Needs you: Website" || got[0].Kind != notify.KindHealth || got[0].URL != "/os/doctor" || got[1].Kind != notify.KindReply {
 		t.Fatalf("published %d %+v", n, got)
 	}
 	left, _ := filepath.Glob(filepath.Join(dir, "*.json"))

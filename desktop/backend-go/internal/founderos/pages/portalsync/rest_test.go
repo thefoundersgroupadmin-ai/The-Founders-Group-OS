@@ -35,14 +35,14 @@ func TestRESTTalksToPostgRESTWithTheServiceKeyAndWritesOnlyWhenAllowed(t *testin
 	if err := r.UpsertPod(ctx, Pod{ClientID: "c1", PodSlug: "client-bv", Missing: []string{}}); err != nil {
 		t.Fatal(err)
 	}
-	got, err := r.Approvals(ctx, "c1")
+	got, err := r.Approvals(ctx, "c1", "client-bv")
 	if err != nil || len(got) != 1 || got[0].DecidedAt == "" || got[0].Pulled {
 		t.Fatalf("approvals %+v %v", got, err)
 	}
 	if err := r.InsertActivity(ctx, []Activity{{ClientID: "c1", OSID: 7, Kind: "email_sent", Summary: "x"}}); err != nil {
 		t.Fatal(err)
 	}
-	want := []string{"POST /rest/v1/sdr_pods?on_conflict=client_id resolution=merge-duplicates,return=minimal",
+	want := []string{"POST /rest/v1/sdr_pods?on_conflict=pod_slug resolution=merge-duplicates,return=minimal",
 		"GET /rest/v1/sdr_approvals?select=", "POST /rest/v1/sdr_activity?on_conflict=client_id,os_id resolution=ignore-duplicates"}
 	for i, w := range want {
 		if i >= len(seen) || !strings.HasPrefix(seen[i], w) {

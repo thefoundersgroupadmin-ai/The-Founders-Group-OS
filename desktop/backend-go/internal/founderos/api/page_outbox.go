@@ -123,6 +123,14 @@ func startAutoFollowUps(d *Deps) {
 					if cerr != nil {
 						slog.Warn("founderos pods: some client calendars unreadable; those pods held", "held", len(hold), "err", cerr)
 					}
+					// A pod linked to a portal is held when the portal's pause/resume controls weren't read recently.
+					if ph, perr := st.PortalHold(cctx); perr == nil {
+						for slug := range ph {
+							hold[slug] = true
+						}
+					} else {
+						slog.Warn("founderos pods: portal health unreadable", "err", perr)
+					}
 					// A pod whose reply inbox wasn't read recently is held too: a reply or opt-out could be missed.
 					if ih, ierr := st.InboxHold(cctx); ierr != nil {
 						slog.Warn("founderos pods: inbox health unreadable; holding every pod this pass", "err", ierr)

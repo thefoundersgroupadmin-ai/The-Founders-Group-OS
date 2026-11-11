@@ -10,7 +10,7 @@
 	let pods = $state<Pod[] | null>(null);
 	let alerts = $state<Record<string, number>>({});
 	let failure = $state<string | null>(null);
-	let form = $state({ clientName: '', package: 'custom', reps: 4 });
+	let form = $state({ clientName: '', label: '', package: 'custom', reps: 4 });
 	let note = $state('');
 	let busy = $state(false);
 
@@ -29,7 +29,7 @@
 		note = '';
 		try {
 			const r = await founderosFetch<{ pod: Pod }>('/pods', { method: 'POST', json: form });
-			form = { clientName: '', package: 'custom', reps: 4 };
+			form = { clientName: '', label: '', package: 'custom', reps: 4 };
 			location.href = `/os/pods/${r.pod.slug}`;
 		} catch (e: unknown) {
 			note = e instanceof Error ? e.message : 'could not create the pod';
@@ -50,8 +50,9 @@
 			<p class="bn-dim mb-2 font-mono text-[10px] uppercase tracking-[0.15em]">New client</p>
 			<div class="flex flex-wrap items-center gap-2">
 				<input bind:value={form.clientName} placeholder="Client name" aria-label="Client name" class="pc-input min-w-[220px] flex-1 rounded-[6px] px-2.5 py-1.5 text-[12px]" />
+				<input bind:value={form.label} placeholder="Pod label, e.g. UK (only for a second pod)" aria-label="Pod label" title="A client with several pods (Core has 2, The Full 4) needs a label for each extra pod" class="pc-input min-w-[200px] rounded-[6px] px-2.5 py-1.5 text-[12px]" />
 				<select bind:value={form.package} aria-label="Package" class="pc-input rounded-[6px] px-2 py-1.5 text-[12px]">
-					<option value="custom">Custom</option><option value="core">Core</option><option value="full">The Full</option>
+					<option value="custom">Starter</option><option value="core">Core</option><option value="full">The Full</option>
 				</select>
 				<input type="number" min="1" max="200" bind:value={form.reps} aria-label="Sales reps" class="pc-input w-[80px] rounded-[6px] px-2 py-1.5 text-[12px]" />
 				<Pressable tone="primary" disabled={busy || form.clientName.trim() === ''} onclick={create}>{busy ? 'Creating…' : 'Create pod'}</Pressable>

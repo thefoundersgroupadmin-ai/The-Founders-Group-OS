@@ -253,6 +253,7 @@ func (s *Store) BriefDelivered(ctx context.Context, b Brief, why string, retry b
 // MeetingRow is a meeting as the portal shows it.
 type MeetingRow struct {
 	ID                             int64
+	UID                            string
 	Title, Attendee, Brief, Status string
 	Outcome, Coaching              string
 	StartsAt                       *time.Time
@@ -260,8 +261,8 @@ type MeetingRow struct {
 
 // MeetingsForPortal lists the pod's meetings, newest first.
 func (s *Store) MeetingsForPortal(ctx context.Context, podID string) ([]MeetingRow, error) {
-	rows, err := s.Pool.Query(ctx, `SELECT id, title, coalesce(nullif(attendee_name, ''), attendee_email), brief, status, outcome, coaching, starts_at
-		FROM founderos_pod_meetings WHERE pod_id = $1 ORDER BY starts_at DESC NULLS LAST LIMIT 40`, podID)
+	rows, err := s.Pool.Query(ctx, `SELECT id, coalesce(booking_uid, ''), title, coalesce(nullif(attendee_name, ''), attendee_email), brief, status, outcome, coaching, starts_at
+		FROM founderos_pod_meetings WHERE pod_id = $1 ORDER BY starts_at DESC NULLS LAST LIMIT 200`, podID)
 	if err != nil {
 		return nil, err
 	}
@@ -269,7 +270,7 @@ func (s *Store) MeetingsForPortal(ctx context.Context, podID string) ([]MeetingR
 	var out []MeetingRow
 	for rows.Next() {
 		var m MeetingRow
-		if err := rows.Scan(&m.ID, &m.Title, &m.Attendee, &m.Brief, &m.Status, &m.Outcome, &m.Coaching, &m.StartsAt); err != nil {
+		if err := rows.Scan(&m.ID, &m.UID, &m.Title, &m.Attendee, &m.Brief, &m.Status, &m.Outcome, &m.Coaching, &m.StartsAt); err != nil {
 			return nil, err
 		}
 		out = append(out, m)

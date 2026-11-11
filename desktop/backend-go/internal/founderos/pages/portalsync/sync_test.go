@@ -16,6 +16,11 @@ type fakePortal struct {
 	approvals map[string]*Approval // id → row
 	activity  []Activity
 	requests  []*Request
+	campaigns []Campaign
+	prospects []Prospect
+	support   []*SupportMessage
+	pulled    map[string]bool
+	cleared   []string
 	n         int
 }
 
@@ -24,10 +29,44 @@ func newFake() *fakePortal {
 }
 
 func (f *fakePortal) UpsertPod(_ context.Context, p Pod) error { f.pods[p.ClientID] = p; return nil }
-func (f *fakePortal) Approvals(_ context.Context, client string) ([]Approval, error) {
+func (f *fakePortal) UpsertCampaigns(_ context.Context, rows []Campaign) error {
+	f.campaigns = append(f.campaigns, rows...)
+	return nil
+}
+func (f *fakePortal) UpsertProspects(_ context.Context, rows []Prospect) error {
+	f.prospects = append(f.prospects, rows...)
+	return nil
+}
+func (f *fakePortal) NewSupportMessages(_ context.Context, client string) ([]SupportMessage, error) {
+	var out []SupportMessage
+	for _, m := range f.support {
+		if m.ClientID == client && !f.pulled[m.ID] {
+			out = append(out, *m)
+		}
+	}
+	return out, nil
+}
+func (f *fakePortal) MarkSupportPulled(_ context.Context, id string) error {
+	if f.pulled == nil {
+		f.pulled = map[string]bool{}
+	}
+	f.pulled[id] = true
+	return nil
+}
+func (f *fakePortal) ClientName(_ context.Context, id string) (string, error) {
+	if id == portalClient || id == otherClient {
+		return "Brightvale Ltd", nil
+	}
+	return "", ErrNoSuchClient
+}
+func (f *fakePortal) ClearPod(_ context.Context, client, slug string) error {
+	f.cleared = append(f.cleared, client+"/"+slug)
+	return nil
+}
+func (f *fakePortal) Approvals(_ context.Context, client, slug string) ([]Approval, error) {
 	var out []Approval
 	for _, a := range f.approvals {
-		if a.ClientID == client {
+		if a.ClientID == client && a.PodSlug == slug {
 			out = append(out, *a)
 		}
 	}
@@ -80,6 +119,7 @@ func (f *fakePortal) CloseRequest(_ context.Context, id, outcome string) error {
 }
 
 const portalClient = "8f14e45f-ceea-467a-9a36-dedd4bea2543"
+const otherClient = "1c9a1d2e-0000-4000-8000-000000000001"
 
 func setup(t *testing.T) (*pods.Store, pods.Pod) {
 	t.Helper()
@@ -99,7 +139,7 @@ func TestSyncPushesStateApprovalsAndActivityAndAppliesCurrentDecisions(t *testin
 	s, p := setup(t)
 	ctx := context.Background()
 	f := newFake()
-	if err := Sync(ctx, s, f); err != nil {
+	if _, err := Sync(ctx, s, f); err != nil {
 		t.Fatal(err)
 	}
 	if got := f.pods[portalClient]; got.PodSlug != p.Slug || got.Status != "setup" || !strings.Contains(got.Sender, "sam@bv.example") {
@@ -117,13 +157,13 @@ func TestSyncPushesStateApprovalsAndActivityAndAppliesCurrentDecisions(t *testin
 	}
 	// Running again pushes nothing twice.
 	before := len(f.activity)
-	_ = Sync(ctx, s, f)
+	_, _ = Sync(ctx, s, f)
 	if len(f.approvals) != 1 || len(f.activity) != before {
 		t.Fatalf("duplicates: %d approvals, %d→%d activity", len(f.approvals), before, len(f.activity))
 	}
 	// The client approves in the portal; the OS applies it once.
 	a.Status, a.DecidedAt, a.DecidedByName = "approved", "2026-11-09T10:00:00Z", "Priya Shah"
-	if err := Sync(ctx, s, f); err != nil {
+	if _, err := Sync(ctx, s, f); err != nil {
 		t.Fatal(err)
 	}
 	if d, _ := s.Doc(ctx, p.Slug, "icp"); d.ApprovedAt == nil {
@@ -138,14 +178,14 @@ func TestADecisionOnOldWordingIsSentBackToPending(t *testing.T) {
 	s, p := setup(t)
 	ctx := context.Background()
 	f := newFake()
-	_ = Sync(ctx, s, f)
+	_, _ = Sync(ctx, s, f)
 	var a *Approval
 	for _, v := range f.approvals {
 		a = v
 	}
 	_ = s.SetDoc(ctx, p.Slug, "icp", "Warehouse operators, 50-500 staff") // edited after the client looked
 	a.Status, a.DecidedAt, a.DecidedByName = "approved", "2026-11-09T10:00:00Z", "Priya Shah"
-	if err := Sync(ctx, s, f); err != nil {
+	if _, err := Sync(ctx, s, f); err != nil {
 		t.Fatal(err)
 	}
 	if d, _ := s.Doc(ctx, p.Slug, "icp"); d.ApprovedAt != nil {
@@ -164,7 +204,7 @@ func TestClientPauseRequestsPauseThePod(t *testing.T) {
 	}
 	f := newFake()
 	f.requests = append(f.requests, &Request{ID: "rq-1", ClientID: portalClient, Kind: "pause", Reason: "holiday", RequestedByName: "Priya"})
-	if err := Sync(ctx, s, f); err != nil {
+	if _, err := Sync(ctx, s, f); err != nil {
 		t.Fatal(err)
 	}
 	got, _ := s.Get(ctx, p.Slug)
@@ -184,7 +224,7 @@ func TestMeetingsAndBriefsReachThePortal(t *testing.T) {
 		t.Fatal(err)
 	}
 	f := newFake()
-	if err := Sync(ctx, s, f); err != nil {
+	if _, err := Sync(ctx, s, f); err != nil {
 		t.Fatal(err)
 	}
 	if len(f.meetings) != 1 {
@@ -236,7 +276,7 @@ func TestCoachingWeeklyResultsAndBaselineReachThePortal(t *testing.T) {
 		t.Fatal(err)
 	}
 	f := newFake()
-	if err := Sync(ctx, s, f); err != nil {
+	if _, err := Sync(ctx, s, f); err != nil {
 		t.Fatal(err)
 	}
 	for _, m := range f.meetings {
@@ -252,5 +292,67 @@ func TestCoachingWeeklyResultsAndBaselineReachThePortal(t *testing.T) {
 		if b, ok := pp.Baseline.(pods.Baseline); !ok || b.MeetingsPerMonth != 4 {
 			t.Fatalf("baseline %+v", pp.Baseline)
 		}
+	}
+}
+
+
+// Several pods per client, client-wide pause, client messages, portal health, campaigns and pipeline.
+func TestTwoPodsOneClientPauseAllMessagesAndHealth(t *testing.T) {
+	s, p := setup(t)
+	ctx := context.Background()
+	q, err := s.Create(ctx, pods.NewPod{ClientName: "Brightvale", Label: "UK", OwnerID: "u1"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = s.LinkPortal(ctx, q.Slug, portalClient)
+	_ = s.SetDoc(ctx, q.Slug, "icp", "UK warehouse operators")
+	for _, x := range []pods.Pod{p, q} {
+		if _, err := s.SetStatus(ctx, x.Slug, pods.StatusDryRun, ""); err != nil {
+			t.Fatal(err)
+		}
+	}
+	f := newFake()
+	f.requests = append(f.requests, &Request{ID: "rq-all", ClientID: portalClient, Kind: "pause", Reason: "rebrand"})
+	f.support = append(f.support, &SupportMessage{ID: "m1", ClientID: portalClient, Topic: "change", Body: "Can we add a pod?"})
+	res, err := Sync(ctx, s, f)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, x := range []pods.Pod{p, q} {
+		got, _ := s.Get(ctx, x.Slug)
+		if got.Status != pods.StatusPaused {
+			t.Fatalf("%s not paused: %s", x.Slug, got.Status)
+		}
+	}
+	if len(res.Messages) != 1 || res.Clients[portalClient] == "" || !f.pulled["m1"] {
+		t.Fatalf("message not passed on: %+v", res)
+	}
+	hold, err := s.PortalHold(ctx)
+	if err != nil || len(hold) != 0 {
+		t.Fatalf("healthy pods held: %v %v", hold, err)
+	}
+	// Approvals are per pod: each pod's ICP is its own row.
+	if len(f.approvals) != 2 {
+		t.Fatalf("approvals %d", len(f.approvals))
+	}
+}
+
+func TestRelinkChecksTheClientAndClearsTheOldOne(t *testing.T) {
+	s, p := setup(t)
+	ctx := context.Background()
+	f := newFake()
+	if _, err := Relink(ctx, s, f, p.Slug, "00000000-0000-4000-8000-00000000dead"); err != ErrNoSuchClient {
+		t.Fatalf("unknown client accepted: %v", err)
+	}
+	name, err := Relink(ctx, s, f, p.Slug, otherClient)
+	if err != nil || name == "" {
+		t.Fatal(name, err)
+	}
+	if len(f.cleared) != 1 || f.cleared[0] != portalClient+"/"+p.Slug {
+		t.Fatalf("old client not cleared: %v", f.cleared)
+	}
+	got, _ := s.Get(ctx, p.Slug)
+	if got.PortalClientID == nil || *got.PortalClientID != otherClient {
+		t.Fatal("not relinked")
 	}
 }

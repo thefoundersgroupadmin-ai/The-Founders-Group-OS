@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/rhl/businessos-backend/internal/founderos/notify"
 	"github.com/rhl/businessos-backend/internal/founderos/pages/pods"
 	"github.com/rhl/businessos-backend/internal/founderos/pages/portalsync"
 )
@@ -29,8 +30,15 @@ func startPortalSync(d *Deps) {
 					continue
 				}
 				ctx, cancel := context.WithTimeout(context.Background(), 90*time.Second)
-				if err := portalsync.Sync(ctx, &pods.Store{Pool: d.Pool}, rest); err != nil {
+				res, err := portalsync.Sync(ctx, &pods.Store{Pool: d.Pool}, rest)
+				if err != nil {
 					slog.Warn("client portal sync", "error", err)
+				}
+				// A client's message in the portal reaches the owner's phone straight away.
+				for _, m := range res.Messages {
+					name := res.Clients[m.ClientID]
+					notify.Publish(ctx, notify.Event{ID: "portal-msg-" + m.ID, Kind: notify.KindReply,
+						Title: "Client message: " + name, Body: notifyClip(m.Body, 220), URL: "/os/pods"})
 				}
 				cancel()
 			}

@@ -39,6 +39,7 @@ func (s *Store) SetHealth(ctx context.Context, podID, check string, ok bool, det
 var healthTitles = map[string]string{
 	"calendar": "The calendar can't be read, so sending is held",
 	"inbox":    "The reply inbox can't be read, so sending is held",
+	"portal":   "The client portal is out of step, so sending is held",
 	"crm":      "The CRM sync is failing",
 }
 

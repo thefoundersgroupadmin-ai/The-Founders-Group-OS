@@ -27,7 +27,7 @@ const (
 )
 
 var (
-	ErrExists     = errors.New("a pod for that client already exists")
+	ErrExists     = errors.New("a pod with that name already exists; give the new pod a label (e.g. UK or Pod 2)")
 	ErrNotFound   = errors.New("no such pod")
 	ErrTransition = errors.New("that status change is not allowed")
 	ErrNotReady   = errors.New("pod is not ready to go live")
@@ -76,7 +76,10 @@ type Pod struct {
 
 type NewPod struct {
 	ClientName, OwnerID, Package string
-	Reps                         int
+	// Label tells a client's pods apart when it has more than one (Core has 2, The Full 4),
+	// e.g. "UK" or "Pod 2". It becomes part of the slug.
+	Label string
+	Reps  int
 }
 
 type Sender struct{ Name, Email, Domain, AccountID string }
@@ -145,6 +148,11 @@ func (s *Store) Create(ctx context.Context, n NewPod) (Pod, error) {
 		reps = 1
 	}
 	slug := SlugFor(name)
+	wsName := name
+	if label := strings.Join(strings.Fields(n.Label), " "); label != "" {
+		slug = SlugFor(name + " " + label)
+		wsName = name + " · " + label
+	}
 	tx, err := s.Pool.Begin(ctx)
 	if err != nil {
 		return Pod{}, err
@@ -152,7 +160,7 @@ func (s *Store) Create(ctx context.Context, n NewPod) (Pod, error) {
 	defer tx.Rollback(ctx)
 	var ws string
 	err = tx.QueryRow(ctx, `INSERT INTO workspaces (name, slug, owner_id, description)
-		VALUES ($1, $2, $3, 'Client AI SDR pod') RETURNING id::text`, name, slug, n.OwnerID).Scan(&ws)
+		VALUES ($1, $2, $3, 'Client AI SDR pod') RETURNING id::text`, wsName, slug, n.OwnerID).Scan(&ws)
 	if err != nil {
 		return Pod{}, uniqueOr(err)
 	}

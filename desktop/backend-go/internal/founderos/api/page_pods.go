@@ -5,6 +5,7 @@ package api
 // member of its workspace, and a pod they may not see answers 404.
 
 import (
+	"context"
 	"errors"
 	"log/slog"
 	"net/http"
@@ -19,6 +20,7 @@ import (
 	"github.com/rhl/businessos-backend/internal/founderos/pages/integrations"
 	"github.com/rhl/businessos-backend/internal/founderos/pages/outbox"
 	"github.com/rhl/businessos-backend/internal/founderos/pages/pods"
+	"github.com/rhl/businessos-backend/internal/founderos/pages/portalsync"
 )
 
 func init() { RegisterPage(registerPods) }
@@ -133,6 +135,7 @@ func registerPods(s *gin.RouterGroup, d *Deps) {
 		}
 		var in struct {
 			ClientName string `json:"clientName"`
+			Label      string `json:"label"`
 			Package    string `json:"package"`
 			Reps       int    `json:"reps"`
 		}
@@ -140,7 +143,7 @@ func registerPods(s *gin.RouterGroup, d *Deps) {
 			c.JSON(http.StatusBadRequest, gin.H{"error": "clientName, package and reps expected"})
 			return
 		}
-		p, err := st.Create(c.Request.Context(), pods.NewPod{ClientName: in.ClientName, OwnerID: v.UserID, Package: in.Package, Reps: in.Reps})
+		p, err := st.Create(c.Request.Context(), pods.NewPod{ClientName: in.ClientName, Label: in.Label, OwnerID: v.UserID, Package: in.Package, Reps: in.Reps})
 		if err != nil {
 			podError(c, err)
 			return
@@ -461,7 +464,20 @@ func registerPods(s *gin.RouterGroup, d *Deps) {
 			c.JSON(http.StatusBadRequest, gin.H{"error": "portalClientId expected"})
 			return
 		}
-		if err := st.LinkPortal(c.Request.Context(), p.Slug, in.PortalClientID); err != nil {
+		// With the portal reachable, the client must exist there and a move to another client takes the
+		// pod's rows with it; without portal settings the id is only checked for shape.
+		if rest, ok := portalsync.NewREST(func(k string) string { return d.Resolver.Resolve(k) }); ok {
+			ctx, cancel := context.WithTimeout(c.Request.Context(), 30*time.Second)
+			defer cancel()
+			if _, err := portalsync.Relink(ctx, st, rest, p.Slug, in.PortalClientID); err != nil {
+				if errors.Is(err, portalsync.ErrNoSuchClient) {
+					c.JSON(http.StatusBadRequest, gin.H{"error": "The client portal has no client with that id. Copy it from the client's page in the staff CRM."})
+					return
+				}
+				podError(c, err)
+				return
+			}
+		} else if err := st.LinkPortal(c.Request.Context(), p.Slug, in.PortalClientID); err != nil {
 			podError(c, err)
 			return
 		}

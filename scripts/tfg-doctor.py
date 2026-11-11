@@ -621,6 +621,31 @@ def probe_stuck_tasks():
                       "stuck: " + "; ".join(f"{r[0]} {r[1]} '{r[2][:50]}'" for r in rows))
 
 
+def os_sql(q):
+    """Rows from the TFG OS database (DATABASE_URL in the backend's .env), or None when unreadable."""
+    dsn = env_value(OS_DIR / "desktop/backend-go/.env", "DATABASE_URL")
+    if not dsn:
+        return None
+    code, out = run(["psql", dsn.strip('"'), "-At", "-F", "\t", "-v", "ON_ERROR_STOP=1", "-c", q], timeout=30)
+    if code != 0:
+        return None
+    return [ln.split("\t") for ln in out.splitlines() if ln.strip()]
+
+
+def probe_pods():
+    """Every running client AI SDR pod: its inbox, portal sync, calendar, CRM and agent health.
+    A failing check there means the pod is held or the client misses something."""
+    rows = os_sql("SELECT p.slug, h.check_name, h.detail FROM founderos_client_pods p "
+                  "JOIN founderos_pod_health h ON h.pod_id = p.id "
+                  "WHERE p.status IN ('live', 'dry_run') AND NOT h.ok ORDER BY p.slug, h.check_name LIMIT 10")
+    if rows is None:
+        return None, "client pod health unreadable"
+    if not rows:
+        n = os_sql("SELECT count(*) FROM founderos_client_pods WHERE status IN ('live', 'dry_run')")
+        return True, f"{n[0][0] if n else 0} running client pods, all healthy"
+    return False, "client pods with problems: " + "; ".join(f"{r[0]} {r[1]}: {r[2][:80]}" for r in rows)
+
+
 # ---------------------------------------------------------------- the checks
 
 # name, label, probe, known fixes (in order), owner_only action (or None), evidence files
@@ -641,6 +666,7 @@ CHECKS = [
     ("agent-runs", "Agent runs", probe_agent_runs, [], None, []),
     ("routines", "Agent schedules", probe_routines, [], None, []),
     ("stuck-tasks", "Stuck agent tasks", probe_stuck_tasks, [], None, []),
+    ("pods", "Client AI SDR pods", probe_pods, [], None, [OS_DIR / ".run/backend.log"]),
 ]
 
 PROBES = {c[0]: c[2] for c in CHECKS}

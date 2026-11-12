@@ -219,25 +219,34 @@ def org_domain(d):
     return ""
 
 
+_SLD_TOKENS = {"co", "com", "org", "net", "ac", "gov", "edu", "ltd", "plc", "me", "or", "ne", "go", "gob", "nic"}
+
+
 def _aligned(d, dom):
-    """Same organisation (relaxed DMARC alignment); a public suffix or a look-alike never aligns."""
-    a, b = org_domain(d), org_domain(dom)
-    return bool(a) and a == b
+    """The authenticated domain is the sender's domain itself, or a direct parent or child of it
+    (header.d=acme.com for mail.acme.com), and the shorter of the two is a real registrable name,
+    never a public suffix such as com or co.id. Siblings under a shared suffix never align."""
+    d, dom = d.lower().strip("."), dom.lower().strip(".")
+    if not d or not dom:
+        return False
+    if d == dom:
+        return "." in d
+    if not (dom.endswith("." + d) or d.endswith("." + dom)):
+        return False
+    shorter = d if len(d) < len(dom) else dom
+    labels = shorter.split(".")
+    return len(labels) >= 2 and labels[0] not in _SLD_TOKENS and shorter not in _TWO_PART_SUFFIXES and org_domain(shorter) == shorter
 
 
 def _trusted_results(msg):
-    """The authentication results a trusted receiver stamped: the topmost Authentication-Results
-    naming it, or its ARC-Authentication-Results (i=1). Anything else could be the sender's own text."""
+    """The authentication results a trusted receiver stamped: the topmost Authentication-Results,
+    when it names that receiver. Anything else could be the sender's own text."""
     top = (msg.get_all("Authentication-Results") or [])
     if top:
         first = str(top[0]).strip().lower()
         if first.split(";", 1)[0].strip().split()[0:1] and first.split(";", 1)[0].strip().split()[0] in TRUSTED_RECEIVERS:
             return first
-    for h in msg.get_all("ARC-Authentication-Results") or []:
-        h = str(h).strip().lower()
-        m = re.match(r"i=1;\s*([\w.-]+)", h)
-        if m and m.group(1) in TRUSTED_RECEIVERS:
-            return h
+    # ARC results are not trusted: nothing here validates the ARC chain, and the header could be the sender's.
     return None
 
 

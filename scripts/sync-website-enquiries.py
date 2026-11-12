@@ -190,7 +190,7 @@ def main():
                 state["warned"] = (state["warned"] + [key])[-200:]
             continue
         still.append(key)
-    state["forwarding"] = still + rest
+    state["forwarding"] = rest + still  # checked ones go to the back, so every entry gets its turn
     if not dry:
         STATE.parent.mkdir(parents=True, exist_ok=True)
         STATE.write_text(json.dumps(state))

@@ -472,7 +472,7 @@ def probe_portal():
     return s == 200, f"client portal database answered {s}"
 
 
-JOBS = ["founderos-collector", "paperclip-outbox", "paperclip-pipeline-sync", "prospect-replies", "tfg-backup"]
+JOBS = ["founderos-collector", "paperclip-outbox", "paperclip-pipeline-sync", "prospect-replies", "tfg-backup", "website-enquiries"]
 
 
 def job_status(label):

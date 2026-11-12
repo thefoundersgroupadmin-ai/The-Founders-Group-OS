@@ -208,3 +208,19 @@ class VerificationHardeningTest(unittest.TestCase):
         self.assertFalse(sync.sender_verified(forged_lower, "a@acme.example"))
         sub = self.msg("From: a@acme.example\nAuthentication-Results: mx.google.com; dkim=pass header.i=@mail.acme.example\n\nx")
         self.assertTrue(sync.sender_verified(sub, "a@acme.example"))
+
+
+class TrustedReceiverTest(unittest.TestCase):
+    def msg(self, raw):
+        import email as _email
+        return _email.message_from_string(raw)
+
+    def test_only_trusted_receivers_and_registrable_domains(self):
+        lone_forged = self.msg("From: a@acme.example.com\nAuthentication-Results: evil.example; dmarc=pass header.from=acme.example.com\n\nx")
+        self.assertIsNone(sync.sender_verified(lone_forged, "a@acme.example.com"))
+        suffix = self.msg("From: a@acme.example.com\nAuthentication-Results: mx.google.com; dkim=pass header.d=com\n\nx")
+        self.assertFalse(sync.sender_verified(suffix, "a@acme.example.com"))
+        ms = self.msg("From: a@acme.co.uk\nARC-Authentication-Results: i=1; mx.microsoft.com 1; spf=pass smtp.mailfrom=mail.acme.co.uk; dmarc=pass header.from=acme.co.uk\n\nx")
+        self.assertTrue(sync.sender_verified(ms, "a@acme.co.uk"))
+        self.assertEqual(sync.org_domain("x.y.acme.co.uk"), "acme.co.uk")
+        self.assertEqual(sync.org_domain("co.uk"), "")

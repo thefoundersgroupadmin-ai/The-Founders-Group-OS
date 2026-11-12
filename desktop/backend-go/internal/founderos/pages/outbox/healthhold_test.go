@@ -33,3 +33,24 @@ func TestStaleInboxOrPortalHoldsEvenAManualApproval(t *testing.T) {
 		t.Fatalf("unread portal sent: %v", err)
 	}
 }
+
+// A connected CRM must have had its opt-outs read recently, in full.
+func TestAConnectedCRMNeedsAFreshBlocklistRead(t *testing.T) {
+	pool := catalogdb.TestDB(t)
+	ctx := context.Background()
+	file := podFixture(t, pool, "client-bv", "live")
+	file("c-1", "priya@brightvale.example")
+	got, send := recorder()
+	if _, err := pool.Exec(ctx, `UPDATE founderos_client_pods SET crm_provider = 'hubspot'`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Approve(ctx, pool, "client-bv", "c-1", podReviewed, send); !errors.Is(err, ErrHeld) || !strings.Contains(err.Error(), "CRM") {
+		t.Fatalf("sent before the CRM was read: %v", err)
+	}
+	if _, err := pool.Exec(ctx, `INSERT INTO founderos_pod_health (pod_id, check_name, ok, detail) SELECT id, 'crm_blocklist', true, 'read' FROM founderos_client_pods`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Approve(ctx, pool, "client-bv", "c-1", podReviewed, send); err != nil || len(*got) != 1 {
+		t.Fatalf("fresh read still held: %v", err)
+	}
+}

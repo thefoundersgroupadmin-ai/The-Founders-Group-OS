@@ -10,6 +10,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"github.com/jackc/pgx/v5/pgconn"
 	"strings"
 	"time"
 
@@ -186,16 +187,16 @@ func Approve(ctx context.Context, pool *pgxpool.Pool, workspaceSlug, id string, 
 	// TFG's own sends and every do-not-contact writer (opt-out replies, bounces) share one lock,
 	// held from the check through the hand-over to the mail server, so an opt-out can't slip in
 	// between the check and the send.
-	conn, err := pool.Acquire(ctx)
+	// The lock is taken with try-and-wait so a waiting approval never sits on a pool connection, and
+	// once held, everything (check, claim, result, pipeline touch) runs on that one connection, so
+	// the holder never waits on the pool (Codex 12 Nov #1).
+	conn, err := lockHQSend(ctx, pool)
 	if err != nil {
-		return nil, err
-	}
-	defer conn.Release()
-	if _, err := conn.Exec(ctx, `SELECT pg_advisory_lock(hashtext('founderos-hq-send'))`); err != nil {
 		return nil, err
 	}
 	defer func() {
 		_, _ = conn.Exec(context.WithoutCancel(ctx), `SELECT pg_advisory_unlock(hashtext('founderos-hq-send'))`)
+		conn.Release()
 	}()
 	// TFG's own emails honour the do-not-contact list: installation-wide entries and any that
 	// aren't a client pod's own, by address or by whole domain. The email is withdrawn, not sent.
@@ -211,13 +212,13 @@ func Approve(ctx context.Context, pool *pgxpool.Pool, workspaceSlug, id string, 
 	if tag.RowsAffected() > 0 {
 		return nil, ErrSuppressed
 	}
-	it, err := scan(pool.QueryRow(ctx, `UPDATE founderos_outbox
+	it, err := scan(conn.QueryRow(ctx, `UPDATE founderos_outbox
 		SET status = 'sending', decided_at = now(), error = NULL, attempt = attempt + 1, subject = $3, body = $4
 		WHERE workspace_id = $1 AND id = $2
 		  AND (status IN ('pending', 'failed') OR (status = 'uncertain' AND $5))
 		RETURNING `+cols, ws, id, content.Subject, content.Body, content.Force))
 	if errors.Is(err, pgx.ErrNoRows) {
-		return nil, notPendingOrMissing(ctx, pool, ws, id)
+		return nil, notPendingOrMissing(ctx, conn, ws, id)
 	}
 	if err != nil {
 		return nil, err
@@ -232,24 +233,55 @@ func Approve(ctx context.Context, pool *pgxpool.Pool, workspaceSlug, id string, 
 			status = "uncertain"
 		}
 		msg := sendErr.Error()
-		if _, err := pool.Exec(ctx, `UPDATE founderos_outbox SET status = $3, error = $4
+		if _, err := conn.Exec(ctx, `UPDATE founderos_outbox SET status = $3, error = $4
 			WHERE workspace_id = $1 AND id = $2 AND attempt = $5`, ws, id, status, msg, it.Attempt); err != nil {
 			return nil, err
 		}
 		it.Status, it.Error = status, &msg
 		return &it, sendErr
 	}
-	if err := pool.QueryRow(ctx, `UPDATE founderos_outbox SET status = 'sent', sent_at = now()
+	if err := conn.QueryRow(ctx, `UPDATE founderos_outbox SET status = 'sent', sent_at = now()
 		WHERE workspace_id = $1 AND id = $2 AND attempt = $3 RETURNING sent_at`, ws, id, it.Attempt).Scan(&it.SentAt); err != nil {
 		return nil, err
 	}
 	it.Status = "sent"
 	if it.ContactID != nil {
-		if err := recordTouch(ctx, pool, *it.ContactID, it.Subject); err != nil {
+		if err := recordTouch(ctx, conn, *it.ContactID, it.Subject); err != nil {
 			return &it, fmt.Errorf("sent, but the pipeline touch was not recorded: %w", err)
 		}
 	}
 	return &it, nil
+}
+
+// dbExec is what both a pool and a single connection can do.
+type dbExec interface {
+	Exec(ctx context.Context, sql string, args ...any) (pgconn.CommandTag, error)
+	QueryRow(ctx context.Context, sql string, args ...any) pgx.Row
+}
+
+// lockHQSend takes the TFG send lock on its own connection, retrying with pg_try_advisory_lock and
+// giving the connection back between tries, so waiting approvals can't exhaust the pool.
+func lockHQSend(ctx context.Context, pool *pgxpool.Pool) (*pgxpool.Conn, error) {
+	for {
+		conn, err := pool.Acquire(ctx)
+		if err != nil {
+			return nil, err
+		}
+		var got bool
+		if err := conn.QueryRow(ctx, `SELECT pg_try_advisory_lock(hashtext('founderos-hq-send'))`).Scan(&got); err != nil {
+			conn.Release()
+			return nil, err
+		}
+		if got {
+			return conn, nil
+		}
+		conn.Release()
+		select {
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		case <-time.After(150 * time.Millisecond):
+		}
+	}
 }
 
 // Reject drops a row that is waiting, failed or uncertain, without sending.
@@ -272,7 +304,7 @@ func Reject(ctx context.Context, pool *pgxpool.Pool, workspaceSlug, id string) (
 	return &it, err
 }
 
-func notPendingOrMissing(ctx context.Context, pool *pgxpool.Pool, ws, id string) error {
+func notPendingOrMissing(ctx context.Context, pool dbExec, ws, id string) error {
 	var exists bool
 	if err := pool.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM founderos_outbox WHERE workspace_id = $1 AND id = $2)`,
 		ws, id).Scan(&exists); err != nil {
@@ -286,7 +318,7 @@ func notPendingOrMissing(ctx context.Context, pool *pgxpool.Pool, ws, id string)
 
 // recordTouch logs the sent email on the contact's pipeline history, in the
 // contact's own workspace. The stage stays where it is: a send is not a reply.
-func recordTouch(ctx context.Context, pool *pgxpool.Pool, contactID, subject string) error {
+func recordTouch(ctx context.Context, pool dbExec, contactID, subject string) error {
 	label := "Outreach sent: " + subject
 	if r := []rune(label); len(r) > 200 {
 		label = string(r[:200])

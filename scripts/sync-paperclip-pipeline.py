@@ -368,7 +368,9 @@ def main():
             "likelihood, email, person, company, website, location, buyer_role, research_evidence, next_action, research_source_ref, created_at) VALUES ("
             f"{sql(cid)}, {sql(ws)}, {sql(a['buyer'] or a['name'])}, {sql(venture_for(target, pod_products))}, 'first_touch', {sql(product_for(target, pod_products))}, 'cold', "
             f"{sql(a['score'])}, {sql(email)}, {sql(a['buyer'])}, {sql(a['name'])}, {sql(a.get('url'))}, {sql(a.get('location'))}, {sql(a.get('buyerRole'))}, {sql(a.get('evidence'))}, {sql(a.get('next'))}, {sql(a.get('sourceRef', 'THE-3'))}, now()) "
-            "ON CONFLICT (id) DO UPDATE SET likelihood = EXCLUDED.likelihood, person = EXCLUDED.person, "
+            "ON CONFLICT (id) DO UPDATE SET likelihood = EXCLUDED.likelihood, "
+            # an import that names nobody keeps the person (and their email) already on file
+            "person = COALESCE(EXCLUDED.person, founderos_funnel_contacts.person), "
             "company = EXCLUDED.company, email = CASE WHEN EXCLUDED.person IS DISTINCT FROM founderos_funnel_contacts.person "
             "AND founderos_funnel_contacts.person IS NOT NULL AND EXCLUDED.person IS NOT NULL THEN EXCLUDED.email "
             "ELSE COALESCE(EXCLUDED.email, founderos_funnel_contacts.email) END, "

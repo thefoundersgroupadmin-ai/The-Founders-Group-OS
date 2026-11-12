@@ -33,15 +33,7 @@ func startPortalSync(d *Deps) {
 					continue
 				}
 				ctx, cancel := context.WithTimeout(context.Background(), 90*time.Second)
-				// Once a day: the portal's data retention (ended clients' files, then their records).
-				if day := time.Now().Format("2006-01-02"); day != retentionDay {
-					if msg, err := rest.Retention(ctx); err != nil {
-						slog.Warn("client portal retention", "error", err)
-					} else {
-						retentionDay = day
-						slog.Info("client portal retention", "result", msg)
-					}
-				}
+
 				res, err := portalsync.Sync(ctx, &pods.Store{Pool: d.Pool}, rest)
 				if err != nil {
 					slog.Warn("client portal sync", "error", err)
@@ -53,6 +45,18 @@ func startPortalSync(d *Deps) {
 						Title: "Client message: " + name, Body: notifyClip(m.Body, 220), URL: "/os/pods"})
 				}
 				cancel()
+				// Once a day, after the clients' controls are read and with its own budget: the portal's
+				// data retention (ended clients' files, then their records).
+				if day := time.Now().Format("2006-01-02"); day != retentionDay {
+					rctx, rcancel := context.WithTimeout(context.Background(), 60*time.Second)
+					if msg, err := rest.Retention(rctx); err != nil {
+						slog.Warn("client portal retention", "error", err)
+					} else {
+						retentionDay = day
+						slog.Info("client portal retention", "result", msg)
+					}
+					rcancel()
+				}
 			}
 		}()
 	})

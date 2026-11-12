@@ -125,7 +125,8 @@ func liveReady(ctx context.Context, q querier, podID, ws string) (string, error)
 		  NOT EXISTS (SELECT 1 FROM founderos_pod_agents a WHERE a.pod_id = $1 AND a.agent_id <> '' AND coalesce(a.synced_at, 'epoch') < greatest(
 		      coalesce(p.config_changed_at, 'epoch'),
 		      coalesce((SELECT max(greatest(d.updated_at, coalesce(d.approved_at, 'epoch'))) FROM founderos_client_pod_docs d WHERE d.pod_id = $1), 'epoch'))),
-		  NOT EXISTS (SELECT 1 FROM founderos_pod_health h WHERE h.pod_id = $1 AND h.check_name = 'crm_blocklist' AND NOT h.ok)
+		  coalesce(p.crm_provider, '') IN ('', 'none') OR EXISTS (SELECT 1 FROM founderos_pod_health h WHERE h.pod_id = $1
+		      AND h.check_name = 'crm_blocklist' AND h.ok AND h.checked_at > now() - interval '2 hours')
 		FROM founderos_client_pods p WHERE p.id = $1`, podID).Scan(&inbox, &portal, &agent, &blocklist)
 	if err != nil {
 		return "", err
@@ -138,7 +139,7 @@ func liveReady(ctx context.Context, q querier, podID, ws string) (string, error)
 	case !agent:
 		return "the AI SDR hasn't caught up with the latest documents or settings yet", nil
 	case !blocklist:
-		return "the client CRM's opt-outs and customers couldn't be read in full", nil
+		return "the client CRM's opt-outs and customers haven't been read in full in the last 2 hours", nil
 	}
 	return "", nil
 }

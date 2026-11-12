@@ -178,6 +178,11 @@ func registerPodCRM(s *gin.RouterGroup, d *Deps, pod func(*gin.Context) (*pods.S
 			podError(c, err)
 			return
 		}
+		// Any new connection needs its own first full read of opt-outs and customers before sending.
+		if _, err := d.Pool.Exec(c.Request.Context(), `DELETE FROM founderos_pod_health WHERE pod_id = $1 AND check_name = 'crm_blocklist'`, p.ID); err != nil {
+			podError(c, err)
+			return
+		}
 		_ = st.Log(c.Request.Context(), p.ID, "settings", "CRM connected ("+in.Provider+")", "")
 		c.Header("Cache-Control", "no-store")
 		reply(c, st, p.Slug)

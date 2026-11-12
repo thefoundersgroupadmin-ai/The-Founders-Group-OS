@@ -171,8 +171,10 @@ def main():
             state["forwarding"].append(key)
     # Enquiries the website hasn't passed to the CRM yet are re-read until they get through or the
     # Worker gives up after 10 tries, which is when the owner hears about it.
+    # Oldest first, 200 a run; whatever isn't reached this run stays queued for the next.
+    batch, rest = state["forwarding"][:200], state["forwarding"][200:]
     still = []
-    for key in state["forwarding"][-200:]:
+    for key in batch:
         try:
             lead = json.loads(cf("values/" + urllib.parse.quote(key, safe=""), tok))
         except Exception:
@@ -188,7 +190,7 @@ def main():
                 state["warned"] = (state["warned"] + [key])[-200:]
             continue
         still.append(key)
-    state["forwarding"] = still
+    state["forwarding"] = still + rest
     if not dry:
         STATE.parent.mkdir(parents=True, exist_ok=True)
         STATE.write_text(json.dumps(state))

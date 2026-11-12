@@ -203,32 +203,62 @@ VERIFIED = {}      # message id -> True / False / None (no checks recorded)
 AUTO = {}          # message id -> why it is an automatic message (out of office, auto-reply)
 
 
+# Receivers whose own Authentication-Results we trust (the inboxes TFG and client pods use).
+TRUSTED_RECEIVERS = ("mx.google.com", "mx.microsoft.com")
+_TWO_PART_SUFFIXES = {"co.uk", "org.uk", "ac.uk", "gov.uk", "ltd.uk", "plc.uk", "me.uk", "com.au", "net.au", "org.au",
+                      "co.nz", "co.jp", "co.za", "com.br", "com.mx", "co.in", "co.il", "com.sg", "com.hk", "co.kr"}
+
+
+def org_domain(d):
+    """The registrable domain: mail.acme.co.uk → acme.co.uk, x.acme.com → acme.com; '' for a bare suffix."""
+    labels = [x for x in d.lower().strip(".").split(".") if x]
+    if len(labels) >= 3 and ".".join(labels[-2:]) in _TWO_PART_SUFFIXES:
+        return ".".join(labels[-3:])
+    if len(labels) >= 2 and ".".join(labels[-2:]) not in _TWO_PART_SUFFIXES:
+        return ".".join(labels[-2:])
+    return ""
+
+
 def _aligned(d, dom):
-    """d is the sender's domain or a parent of it (mail.acme.com for acme.com), never a look-alike."""
-    d, dom = d.lower().strip("."), dom.lower().strip(".")
-    return bool(d) and (d == dom or dom.endswith("." + d) or d.endswith("." + dom))
+    """Same organisation (relaxed DMARC alignment); a public suffix or a look-alike never aligns."""
+    a, b = org_domain(d), org_domain(dom)
+    return bool(a) and a == b
+
+
+def _trusted_results(msg):
+    """The authentication results a trusted receiver stamped: the topmost Authentication-Results
+    naming it, or its ARC-Authentication-Results (i=1). Anything else could be the sender's own text."""
+    top = (msg.get_all("Authentication-Results") or [])
+    if top:
+        first = str(top[0]).strip().lower()
+        if first.split(";", 1)[0].strip().split()[0:1] and first.split(";", 1)[0].strip().split()[0] in TRUSTED_RECEIVERS:
+            return first
+    for h in msg.get_all("ARC-Authentication-Results") or []:
+        h = str(h).strip().lower()
+        m = re.match(r"i=1;\s*([\w.-]+)", h)
+        if m and m.group(1) in TRUSTED_RECEIVERS:
+            return h
+    return None
 
 
 def sender_verified(msg, sender):
-    """True only when the receiving server's own check (the topmost Authentication-Results header,
-    which it adds last) shows DMARC passed for the sender's domain, or DKIM/SPF passed for it;
-    False when it shows a failure; None when there is no such header. Anything else in older,
-    lower headers may have been written by the sender and is ignored."""
-    headers = msg.get_all("Authentication-Results") or []
-    if not headers:
+    """True only when a trusted receiver's own check shows DMARC passed for the sender's organisation,
+    or DKIM/SPF passed for it; False when it shows a failure or doesn't align; None when no trusted
+    receiver recorded anything (so a person reads it)."""
+    res = _trusted_results(msg)
+    if res is None:
         return None
-    top = str(headers[0]).lower()
     dom = sender.rsplit("@", 1)[-1].lower()
-    m = re.search(r"\bdmarc=(\w+)[^;]*?header\.from=([\w.-]+)", top)
+    m = re.search(r"\bdmarc=(\w+)[^;]*?header\.from=([\w.-]+)", res)
     if m:
         if m.group(1) == "pass" and _aligned(m.group(2), dom):
             return True
         if m.group(1) == "fail":
             return False
-    for m in re.finditer(r"\bdkim=pass\b[^;]*?header\.(?:d|i)=@?([\w.-]+)", top):
+    for m in re.finditer(r"\bdkim=pass\b[^;]*?header\.(?:d|i)=@?([\w.-]+)", res):
         if _aligned(m.group(1), dom):
             return True
-    for m in re.finditer(r"\bspf=pass\b[^;]*?smtp\.mailfrom=(?:[^@;\s]*@)?([\w.-]+)", top):
+    for m in re.finditer(r"\bspf=pass\b[^;]*?smtp\.mailfrom=(?:[^@;\s]*@)?([\w.-]+)", res):
         if _aligned(m.group(1), dom):
             return True
     return False

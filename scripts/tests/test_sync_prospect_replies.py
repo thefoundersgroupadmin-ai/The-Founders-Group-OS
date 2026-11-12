@@ -226,5 +226,6 @@ class TrustedReceiverTest(unittest.TestCase):
         self.assertTrue(sync.sender_verified(uk, "a@acme.co.uk"))
         self.assertFalse(sync._aligned("attacker.co.id", "victim.co.id"))
         self.assertFalse(sync._aligned("co.id", "victim.co.id"))
+        self.assertTrue(sync._aligned("eu.acme.com", "mail.eu.acme.com"))
         self.assertEqual(sync.org_domain("x.y.acme.co.uk"), "acme.co.uk")
         self.assertEqual(sync.org_domain("co.uk"), "")

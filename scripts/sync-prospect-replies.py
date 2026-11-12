@@ -235,7 +235,7 @@ def _aligned(d, dom):
         return False
     shorter = d if len(d) < len(dom) else dom
     labels = shorter.split(".")
-    return len(labels) >= 2 and labels[0] not in _SLD_TOKENS and shorter not in _TWO_PART_SUFFIXES and org_domain(shorter) == shorter
+    return len(labels) >= 2 and labels[0] not in _SLD_TOKENS and shorter not in _TWO_PART_SUFFIXES and org_domain(shorter) != ""
 
 
 def _trusted_results(msg):

@@ -840,11 +840,17 @@ def start_repair(state, name, label, detail, tried, evidence_files):
     if DRY:
         print("WOULD START AI REPAIR for", name)
         return "dry run"
+    # A long-lived token from `claude setup-token`, kept by the owner in ~/.founderos/.env, keeps
+    # unattended repairs signed in after the interactive login expires.
+    env = dict(os.environ)
+    tok = env_value(FOS / ".env", "CLAUDE_CODE_OAUTH_TOKEN")
+    if tok:
+        env["CLAUDE_CODE_OAUTH_TOKEN"] = tok.strip().strip('"')
     with open(logpath, "w") as out:
         p = subprocess.Popen([claude, "-p", prompt, "--permission-mode", "default",
                               "--add-dir", str(DOC), str(SITE_DIR), "--allowedTools", *ALLOWED],
                              cwd=str(OS_DIR), stdout=out, stderr=subprocess.STDOUT, stdin=subprocess.DEVNULL,
-                             start_new_session=True)
+                             start_new_session=True, env=env)
     save_json(LOCK, {"pid": p.pid, "check": name, "started": iso(now()), "log": str(logpath)})
     budget["used"] += 1
     c["lastAttemptAt"] = iso(now())

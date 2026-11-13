@@ -35,6 +35,7 @@ import {
 	Network,
 	Phone,
 	Plug,
+	Radar,
 	Send,
 	Share2,
 	Sparkles,
@@ -70,7 +71,9 @@ export const NAV_OPERATE: NavItem[] = [
 	{ href: '/os/trading', label: 'Trading', icon: icon(CandlestickChart) },
 	// Last in Operate on purpose, outside the nine digit shortcuts.
 	{ href: '/os/adpilot', label: 'AdPilot', icon: icon(Crosshair) },
-	{ href: '/os/dialer', label: 'Dialer', icon: icon(Phone) }
+	{ href: '/os/dialer', label: 'Dialer', icon: icon(Phone) },
+	// Buying signals: who to contact today and why.
+	{ href: '/os/signals', label: 'Signals', icon: icon(Radar) }
 ];
 
 export const NAV_AGENTS: NavItem[] = [

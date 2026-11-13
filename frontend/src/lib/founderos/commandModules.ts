@@ -26,6 +26,7 @@ const DESC: Record<string, string> = {
 	'/os/clients': 'Every client across both businesses, their stage, payments and last touch.',
 	'/os/adpilot': 'Ad campaigns and creative testing, with spend and results.',
 	'/os/dialer': 'Ring prospects back to back, in their own hours, with a brief and one-tap outcomes.',
+	'/os/signals': 'Who to contact today and why: hiring, funding and website signals, with LinkedIn, email and call openers.',
 	'/os/agents': 'The live agent board and the Conductor, with Tasks, Needs You, Deliverables and Hermes tabs.',
 	'/os/skills': 'The skills agents can use, and where each one is wired.',
 	'/os/org': 'Org chart: operator, the Conductor, the five pillars and their workers.',

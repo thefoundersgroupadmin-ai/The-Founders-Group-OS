@@ -18,6 +18,7 @@ const EXPECTED: Array<[group: string, label: string, href: string]> = [
 	['Operate', 'Trading', '/os/trading'],
 	['Operate', 'AdPilot', '/os/adpilot'],
 	['Operate', 'Dialer', '/os/dialer'],
+	['Operate', 'Signals', '/os/signals'],
 	['Agents', 'Agents', '/os/agents'],
 	['Agents', 'Chats', '/os/chats'],
 	['Agents', 'Tasks', '/os/tasks'],

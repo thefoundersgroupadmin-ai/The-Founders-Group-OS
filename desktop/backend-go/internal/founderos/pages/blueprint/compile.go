@@ -44,7 +44,7 @@ type Surface struct{ Href, Label string }
 var Surfaces = []Surface{
 	{"/os", "Home"}, {"/os/comms", "Comms"}, {"/os/funnel", "Funnel"}, {"/os/workflows", "Workflows"},
 	{"/os/social", "Social"}, {"/os/content", "Content"}, {"/os/brand-deals", "Brand Deals"},
-	{"/os/finances", "Finances"}, {"/os/trading", "Trading"}, {"/os/adpilot", "AdPilot"}, {"/os/dialer", "Dialer"},
+	{"/os/finances", "Finances"}, {"/os/trading", "Trading"}, {"/os/adpilot", "AdPilot"}, {"/os/dialer", "Dialer"}, {"/os/signals", "Signals"},
 	{"/os/agents", "Agents"}, {"/os/chats", "Chats"}, {"/os/tasks", "Tasks"}, {"/os/approvals", "Approvals"}, {"/os/outbox", "Outbox"}, {"/os/pods", "Client AI SDRs"}, {"/os/skills", "Skills"},
 	{"/os/org", "Org Chart"}, {"/os/blueprint", "Blueprint"}, {"/os/brain", "Brain"}, {"/os/doctor", "Doctor"},
 	{"/os/integrations", "Connections"}, {"/os/usage", "Usage"}, {"/os/roadmap", "Roadmap"},

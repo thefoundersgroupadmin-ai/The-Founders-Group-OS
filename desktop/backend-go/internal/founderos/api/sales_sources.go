@@ -3,6 +3,7 @@ package api
 import (
 	"context"
 	"encoding/json"
+	"github.com/rhl/businessos-backend/internal/founderos/pages/signals"
 	"net/mail"
 	"sort"
 	"strings"
@@ -60,7 +61,38 @@ func connectedSalesSnapshot(ctx context.Context, d *Deps, c saleskit.AutomationC
 		mu.Unlock()
 	}
 	gap := func(s string) { mu.Lock(); snap.Gaps = append(snap.Gaps, s); mu.Unlock() }
-	wg.Add(3)
+	wg.Add(4)
+	go func() {
+		defer wg.Done()
+		rows, _, e := signals.Board(ctx, d.Pool, c.WorkspaceID, 40)
+		if e != nil {
+			gap("Buying signals unavailable")
+			return
+		}
+		type brief struct {
+			ContactID string   `json:"contactId"`
+			Company   string   `json:"company"`
+			Person    string   `json:"person,omitempty"`
+			Score     int      `json:"score"`
+			WhyNow    string   `json:"whyNow"`
+			Offer     string   `json:"offer,omitempty"`
+			Evidence  []string `json:"evidence"`
+		}
+		var out []brief
+		for _, r := range rows {
+			if r.Score <= 0 {
+				continue
+			}
+			b := brief{ContactID: r.ContactID, Company: r.Company, Person: r.Person, Score: r.Score, WhyNow: r.WhyNow, Offer: r.Plays.Offer}
+			for _, s := range r.Signals {
+				if s.Weight > 0 {
+					b.Evidence = append(b.Evidence, strings.TrimSpace(s.Title+" "+s.URL))
+				}
+			}
+			out = append(out, b)
+		}
+		add("os-buying-signals", "Buying signals from public sources (job boards, website tools, recorded funding); cite the evidence, never go beyond it", out, 12000)
+	}()
 	go func() {
 		defer wg.Done()
 		if src.Emails == nil {

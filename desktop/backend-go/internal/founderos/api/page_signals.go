@@ -37,7 +37,56 @@ var (
 	lushaFor       = func(d *Deps) *lusha.Client { return lusha.New(d.Resolver) }
 	signalsMu      sync.Mutex // one pass at a time, cron or button
 	signalsOnce    sync.Once
+	// signalsWriter writes the email draft; swapped in tests.
+	signalsWriter = runClaude
 )
+
+// draftSignalsEmail writes a first email from the prospect's signals and
+// files it in the Outbox, where it waits for a person to approve it. Only
+// source 'paperclip' rows can ever go out by themselves, so this never does.
+func draftSignalsEmail(ctx context.Context, d *Deps, wsID string, r signals.Row, signer string) (string, error) {
+	if r.Email == "" {
+		return "", errors.New("no email on file: find it first")
+	}
+	var facts []string
+	for _, s := range r.Signals {
+		if s.Weight > 0 {
+			facts = append(facts, "- "+strings.TrimSpace(s.Title+" "+s.Detail+" "+s.URL))
+		}
+	}
+	if len(facts) == 0 {
+		return "", errors.New("no signal to write from yet: check them first")
+	}
+	booking := strings.TrimSpace(d.Resolver.Resolve("CALCOM_BOOKING_URL"))
+	system := "You write a first cold email for The Founders Group, which builds and runs sales systems for seed to Series B founders " +
+		"(offers: Sales System Build, a three-month build of the whole sales system and team training; Fractional Sales + AI SDR, a fractional sales director plus AI SDRs). " +
+		"Plain text, 60 to 110 words, no placeholders, no flattery, no invented facts: use only the facts given. Open with the most specific fact. " +
+		"One clear ask: a 20-minute call. First line is 'Subject: ...' (under 8 words, lower case is fine), then a blank line, then the body, signed by " + signer + ", The Founders Group."
+	prompt := "To: " + firstNonEmpty(r.Person, "the founder") + ", " + firstNonEmpty(r.Role, "founder") + " at " + r.Company +
+		"\nFacts (public sources):\n" + strings.Join(facts, "\n") + "\nOffer that fits: " + firstNonEmpty(r.Plays.Offer, "Sales System Build") +
+		"\nOpener idea: " + r.Plays.Email + "\nBooking link (end with it if given): " + booking
+	subject, body := "quick idea for "+r.Company, ""
+	out, err := signalsWriter(ctx, system, prompt, "sonnet", 60*time.Second)
+	if err == nil && strings.TrimSpace(out) != "" {
+		body = strings.TrimSpace(out)
+		if first, rest, ok := strings.Cut(body, "\n"); ok && strings.HasPrefix(strings.ToLower(first), "subject:") {
+			subject, body = strings.TrimSpace(first[len("subject:"):]), strings.TrimSpace(rest)
+		}
+	} else {
+		// No writer available: the drafted opener plus a plain ask, still for review.
+		body = r.Plays.Email + "\n\nWorth a 20-minute call to see if it fits?"
+		if booking != "" {
+			body += " " + booking
+		}
+		body += "\n\n" + signer + "\nThe Founders Group"
+	}
+	id := "signals-" + r.ContactID
+	_, err = d.Pool.Exec(ctx, `INSERT INTO founderos_outbox (id, workspace_id, source, source_ref, contact_id, to_address, to_name, company, subject, body)
+		VALUES ($1, $2::uuid, 'signals', $3, $3, $4, $5, $6, $7, $8)
+		ON CONFLICT (id) DO UPDATE SET subject = $7, body = $8 WHERE founderos_outbox.status = 'pending'`,
+		id, wsID, r.ContactID, r.Email, r.Person, r.Company, subject, body)
+	return id, err
+}
 
 func lushaDailyCap() int { return envInt("FOUNDEROS_LUSHA_DAILY_CAP", 20) }
 
@@ -235,6 +284,44 @@ func registerSignals(s *gin.RouterGroup, d *Deps) {
 			return
 		}
 		c.JSON(http.StatusOK, gin.H{"email": f.Email, "phone": f.Phone, "found": f.Email != "" || f.Phone != ""})
+	})
+
+	// Draft the first email into the Outbox (waits for approval there).
+	s.POST("/pages/signals/draft", func(c *gin.Context) {
+		p, ok := personOf(c)
+		if !ok || !needPool(c, d) {
+			return
+		}
+		ws, ok := wsOf(c, d, outboxWorkspace)
+		if !ok {
+			return
+		}
+		var body struct {
+			ContactID string `json:"contactId"`
+		}
+		if c.ShouldBindJSON(&body) != nil || body.ContactID == "" {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "contactId required"})
+			return
+		}
+		ctx := c.Request.Context()
+		rows, _, err := signals.Board(ctx, d.Pool, ws, 0)
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			return
+		}
+		for _, r := range rows {
+			if r.ContactID != body.ContactID {
+				continue
+			}
+			id, err := draftSignalsEmail(ctx, d, ws, r, firstNonEmpty(p.Name, "Nader"))
+			if err != nil {
+				c.JSON(http.StatusConflict, gin.H{"error": err.Error()})
+				return
+			}
+			c.JSON(http.StatusOK, gin.H{"id": id})
+			return
+		}
+		c.JSON(http.StatusNotFound, gin.H{"error": "no such open prospect"})
 	})
 
 	// The rep sent the LinkedIn note: note it on the prospect and come back in three days.

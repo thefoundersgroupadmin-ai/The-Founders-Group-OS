@@ -7,6 +7,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/rhl/businessos-backend/internal/founderos/connectors/lusha"
 	"github.com/rhl/businessos-backend/internal/founderos/pages/catalogdb"
@@ -91,6 +92,29 @@ func TestSignalsBoardChecksRanksEnrichesAndRecordsTouches(t *testing.T) {
 	}
 	if w := do(t, r, http.MethodPost, "/api/founderos/pages/signals/enrich", `{"contactId":"b1"}`); w.Code != http.StatusTooManyRequests {
 		t.Fatalf("cap not held: %d %s", w.Code, w.Body)
+	}
+
+	// A first email from the signals, filed for approval (never sent by itself).
+	oldW := signalsWriter
+	var prompt string
+	signalsWriter = func(_ context.Context, _, p, _ string, _ time.Duration) (string, error) {
+		prompt = p
+		return "Subject: your founding AE\n\nHi Sam, saw the Founding Account Executive role.\n\nOwner", nil
+	}
+	defer func() { signalsWriter = oldW }()
+	if w := do(t, r, http.MethodPost, "/api/founderos/pages/signals/draft", `{"contactId":"b1"}`); w.Code != http.StatusConflict {
+		t.Fatalf("draft without email: %d %s", w.Code, w.Body)
+	}
+	if w := do(t, r, http.MethodPost, "/api/founderos/pages/signals/draft", `{"contactId":"a1"}`); w.Code != 200 || !strings.Contains(w.Body.String(), `"id":"signals-a1"`) {
+		t.Fatalf("draft: %d %s", w.Code, w.Body)
+	}
+	if !strings.Contains(prompt, "Hiring: Founding Account Executive") {
+		t.Fatalf("prompt lacks the signal: %s", prompt)
+	}
+	var src, status, subject, to string
+	_ = pool.QueryRow(ctx, `SELECT source, status, subject, to_address FROM founderos_outbox WHERE id = 'signals-a1'`).Scan(&src, &status, &subject, &to)
+	if src != "signals" || status != "pending" || subject != "your founding AE" || to != "sam@acme.example" {
+		t.Fatalf("outbox row %s %s %q %s", src, status, subject, to)
 	}
 
 	if w := do(t, r, http.MethodPost, "/api/founderos/pages/signals/touched", `{"contactId":"a1","channel":"linkedin"}`); w.Code != 200 {

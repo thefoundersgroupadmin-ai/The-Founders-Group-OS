@@ -67,6 +67,12 @@
 			await load();
 		});
 
+	const draft = (r: Row) =>
+		act(async () => {
+			await founderosFetch<{ id: string }>('/pages/signals/draft', { method: 'POST', json: { contactId: r.contactId } });
+			note = 'Drafted into the Outbox. It waits there for you to read, edit and approve.';
+		});
+
 	const touched = (r: Row, channel: 'linkedin' | 'email') =>
 		act(async () => {
 			await founderosFetch('/pages/signals/touched', { method: 'POST', json: { contactId: r.contactId, channel } });
@@ -179,6 +185,9 @@
 					<div class="flex flex-wrap gap-2" data-part="actions">
 						{#if sel.plays.next === 'reply'}<Pressable tone="primary" href="/os/comms">Reply and book</Pressable>{/if}
 						{#if sel.phone}<Pressable tone={sel.plays.next === 'call' ? 'primary' : 'secondary'} href="/os/dialer">Call in the Dialer</Pressable>{/if}
+						{#if sel.email}
+							<Pressable tone={sel.plays.next === 'email' ? 'primary' : 'secondary'} disabled={busy || sel.score === 0} onclick={() => draft(sel!)}>Draft email in Outbox</Pressable>
+						{/if}
 						{#if !sel.email || !sel.phone}
 							<Pressable tone={sel.plays.next === 'find_contact' ? 'primary' : 'secondary'} disabled={busy || !sel.person} onclick={() => enrich(sel!)}>Find email and phone (Lusha)</Pressable>
 						{/if}

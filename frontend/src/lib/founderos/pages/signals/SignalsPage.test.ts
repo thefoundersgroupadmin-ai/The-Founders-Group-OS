@@ -76,6 +76,16 @@ describe('SignalsPage', () => {
 		await screen.findByText(/add the API key in Connections/);
 	});
 
+	it('drafts the first email into the Outbox for approval', async () => {
+		fetchMock.mockResolvedValueOnce(board({ rows: [{ ...acme, email: 'sam@acme.example', plays: { ...acme.plays, next: 'email', nextLabel: 'Email' } }] }));
+		render(SignalsPage);
+		const button = await screen.findByText('Draft email in Outbox');
+		fetchMock.mockResolvedValueOnce({ id: 'signals-fc-acme' });
+		await fireEvent.click(button);
+		await screen.findByText(/waits there for you to read, edit and approve/);
+		expect(fetchMock).toHaveBeenCalledWith('/pages/signals/draft', { method: 'POST', json: { contactId: 'fc-acme' } });
+	});
+
 	it('says when the board cannot load', async () => {
 		fetchMock.mockRejectedValueOnce(new Error('offline'));
 		render(SignalsPage);

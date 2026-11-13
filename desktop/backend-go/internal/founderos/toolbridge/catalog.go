@@ -33,6 +33,7 @@ var Catalog = []Tool{
 	{Name: "recordings_read", Description: "Read stored call recordings", Department: "sales", Method: "GET", Path: "/pages/calls/archive", Global: true},
 	{Name: "recordings_import", Description: "Import a reviewed recording", Department: "sales", Method: "POST", Path: "/pages/plaud/ingest", Approval: true, Global: true},
 	{Name: "finance_read", Description: "Read payment processor and finance evidence", Department: "finance", Method: "GET", Path: "/pages/finances", Global: true},
+	{Name: "signals_read", Description: "Read the pipeline ranked by buying signals (hiring, funding, website gaps) with sources and openers", Department: "sales", Method: "GET", Path: "/pages/signals", Global: true},
 	{Name: "dialer_read", Description: "Read dialer readiness and contact queue", Department: "sales", Method: "GET", Path: "/pages/dialer", Global: true},
 	{Name: "apollo_enrich", Description: "Reveal phone data using Apollo credits after review", Department: "sales", Method: "POST", Path: "/pages/dialer/enrich", Keys: []string{"APOLLO_API_KEY"}, Approval: true, Global: true},
 	{Name: "dialer_dnc", Description: "Add a reviewed do-not-call entry", Department: "sales", Method: "POST", Path: "/pages/dialer/dnc", Approval: true, Global: true},
